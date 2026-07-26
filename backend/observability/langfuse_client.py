@@ -206,6 +206,7 @@ async def traced_chat_run(
             user_id=user_id,
             session_id=session_id,
             tags=[feature],
+            environment=settings.env,
             metadata={
                 "app": settings.app_name,
                 "version": settings.app_version,

@@ -71,6 +71,11 @@ class LLMClient:
             kwargs["api_key"] = self.settings.llm_api_key
         if self.settings.llm_api_base:
             kwargs["api_base"] = self.settings.llm_api_base
+        # Ollama Cloud (and any authenticated Ollama endpoint) expects the
+        # API key as a Bearer token. LiteLLM's ollama provider does not add
+        # this header automatically, so we inject it via extra_headers.
+        if self.provider == "ollama" and self.settings.llm_api_key:
+            kwargs["extra_headers"] = {"Authorization": f"Bearer {self.settings.llm_api_key}"}
         try:
             resp = await litellm.acompletion(**kwargs)
             return resp.choices[0].message.content or ""
