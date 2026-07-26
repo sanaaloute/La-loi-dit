@@ -68,9 +68,9 @@ flowchart LR
 ### 1. Local install
 
 ```bash
-py -m venv .venv
-.venv\Scripts\activate          # Windows
-# source .venv/bin/activate     # Linux/macOS
+python -m venv .venv
+source .venv/bin/activate   # Linux/macOS
+# .venv\Scripts\activate   # Windows
 
 pip install -r requirements.txt
 pip install -e .
@@ -78,31 +78,76 @@ pip install -e .
 
 ### 2. Run offline (no credentials needed)
 
-The default configuration uses the deterministic `mock` LLM provider,
-an in-memory vector store, in-process cache and SQLite — nothing external
-is required:
+The default configuration uses the deterministic `mock` LLM provider, an
+in-memory vector store, an in-process cache and SQLite — nothing external is
+required.
+
+Copy the development template and start the server:
 
 ```bash
+cp .env.dev.example .env.dev
 uvicorn backend.api.main:app --host 0.0.0.0 --port 8000
 ```
 
-### 3. Full stack with Docker (Linux/Ubuntu)
+`.env.dev` is loaded after `.env` and overrides production defaults while you
+are developing locally. It is gitignored and should never be committed.
 
-Use the Docker-specific template and set your cloud LLM endpoint:
+### 3. Full stack with Docker Compose on Ubuntu
+
+This project is configured for a split Ollama setup:
+
+- **LLM**: [Ollama Cloud](https://ollama.com/cloud) — uses an Ollama API key.
+- **Embeddings**: local Ollama running on the Ubuntu Docker host.
+
+Copy the production template and fill in your secrets:
 
 ```bash
-cp .env.docker.example .env
-# Edit .env:
-#   LEGAL_AI_LLM_API_BASE=https://your-ollama-cloud.example.com
-#   LEGAL_AI_LLM_MODEL=llama3.1:8b
-#   LEGAL_AI_SECRET_KEY=<random-secret>
-#   LANGFUSE_NEXTAUTH_SECRET=<random-secret>
-#   LANGFUSE_SALT=<random-secret>
+cp .env.example .env
+```
 
-# Start the core stack
+Edit `.env`:
+
+```ini
+# Ollama Cloud LLM
+LEGAL_AI_LLM_PROVIDER=ollama
+LEGAL_AI_LLM_MODEL=gpt-oss:120b
+LEGAL_AI_LLM_API_BASE=https://ollama.com
+LEGAL_AI_LLM_API_KEY=<your-ollama-cloud-api-key>
+
+# Local Ollama embeddings (Docker host)
+LEGAL_AI_EMBEDDING_MODEL=ollama/nomic-embed-text
+LEGAL_AI_EMBEDDING_DIMENSION=768
+
+# Secrets — change every placeholder
+LEGAL_AI_SECRET_KEY=<random-secret>
+POSTGRES_PASSWORD=<strong-password>
+MINIO_ROOT_PASSWORD=<strong-password>
+GRAFANA_ADMIN_PASSWORD=<strong-password>
+LANGFUSE_NEXTAUTH_SECRET=<random-secret>
+LANGFUSE_SALT=<random-secret>
+```
+
+On the Docker host, pull the embedding model and bind Ollama to all interfaces
+so the containers can reach it:
+
+```bash
+ollama pull nomic-embed-text
+OLLAMA_HOST=0.0.0.0:11434 ollama serve
+```
+
+> The `api` and `celery-worker` services reach the host via
+> `host.docker.internal:11434` with `extra_hosts: ["host.docker.internal:host-gateway"]`
+> for Linux.
+
+Start the core stack:
+
+```bash
 docker compose up -d --build
+```
 
-# Optional: start Langfuse on port 3002 (avoids conflict with frontend on 3000)
+Start Langfuse (optional, on port 3002 to avoid conflict with the frontend):
+
+```bash
 docker compose --profile observability up -d
 ```
 
@@ -110,18 +155,7 @@ This starts the API, Celery worker, Nginx, PostgreSQL, Redis, Milvus,
 Temporal (+ UI on :8080), Prometheus (:9090), Grafana (:3001) and
 Langfuse (:3002).
 
-**Embedding with local Ollama:**
-The `api` and `celery-worker` containers reach the host's Ollama via
-`host.docker.internal:11434` (`extra_hosts: ["host.docker.internal:host-gateway"]`).
-Pull the embedding model on the host first and bind Ollama to all interfaces so
-Docker can reach it:
-
-```bash
-ollama pull nomic-embed-text
-OLLAMA_HOST=0.0.0.0:11434 ollama serve
-```
-
-### Example request
+### 4. Example request
 
 Chat endpoints require a JWT. In `development` a dev user
 `admin` / `admin123` exists (see [docs/api.md](docs/api.md)):
@@ -130,13 +164,13 @@ Chat endpoints require a JWT. In `development` a dev user
 # 1. get a token
 TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/token \
   -H "Content-Type: application/json" \
-  -d "{\"username\": \"admin\", \"password\": \"admin123\"}" | py -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+  -d '{"username": "admin", "password": "admin123"}' | python -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
 
 # 2. ask a question
 curl -X POST http://localhost:8000/api/v1/chat \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{\"query\": \"Quels sont les droits d'un salarie licencie au Burkina Faso ?\"}"
+  -d '{"query": "Quels sont les droits d\u0027un salarie licencie au Burkina Faso ?"}'
 ```
 
 Response (abridged):
@@ -162,8 +196,8 @@ Response (abridged):
 A Next.js 15 (App Router, TypeScript, Tailwind CSS) web UI lives in
 [`frontend/`](frontend/). It provides the conversation interface with live
 SSE streaming of the agent pipeline, an agent execution timeline, a citation
-panel, an evidence viewer with full source metadata, and an optional
-JWT login (anonymous calls work in development).
+panel, an evidence viewer with full source metadata, and an optional JWT login
+(anonymous calls work in development).
 
 ```bash
 cd frontend
@@ -171,11 +205,11 @@ npm install
 npm run dev          # http://localhost:3000
 ```
 
-The API base URL is configurable via `NEXT_PUBLIC_API_URL` (default behavior
+The API base URL is configurable via `NEXT_PUBLIC_API_URL`. The default behavior
 proxies `/backend-api/*` server-side to `http://localhost:8000`, which avoids
-CORS issues since the API does not enable CORS; set
+CORS issues because the API does not enable CORS. Set
 `NEXT_PUBLIC_API_URL=http://localhost:8000` in `frontend/.env.local` to call
-the API directly when CORS is handled upstream, e.g. via Nginx).
+the API directly when CORS is handled upstream (e.g., via Nginx).
 
 An optional Docker service is also available:
 
@@ -185,6 +219,18 @@ docker compose --profile frontend up -d --build frontend
 
 > Note: the `frontend` service publishes host port **3000**, which Langfuse
 > also uses — adjust one of the port mappings if you run both.
+
+## Langfuse tracing
+
+The project integrates Langfuse via LiteLLM callbacks and a per-request
+`traced_chat_run()` helper. It captures every LLM generation (model, tokens,
+cost), the full LangGraph node tree, user/session IDs, feature tags, and the
+sanitised final answer. User feedback is recorded as a Langfuse score.
+
+The [Langfuse AI skill](https://github.com/langfuse/skills) is installed under
+`.kimi-code/skills/langfuse/` and is used to keep the instrumentation aligned
+with Langfuse best practices (descriptive trace names, environment attribute,
+nested spans, meaningful input/output, and feedback scores).
 
 ## Repository layout
 
@@ -237,7 +283,32 @@ docker compose --profile frontend up -d --build frontend
 
 ## Configuration
 
-Everything is configured via environment variables prefixed `LEGAL_AI_`
-(see `.env.example` and [deployment docs](docs/deployment.md)). Defaults are
-offline-safe: `LEGAL_AI_LLM_PROVIDER=mock`, SQLite database, in-memory cache
-and vector store.
+Everything is configured via environment variables prefixed `LEGAL_AI_` (see
+`.env.example` for production/Docker and `.env.dev.example` for local
+development, plus [deployment docs](docs/deployment.md)).
+
+| File | Purpose | Gitignored? |
+|---|---|---|
+| `.env` | Production values used by Docker Compose | yes |
+| `.env.dev` | Local development overrides (mock LLM, SQLite, localhost services) | yes |
+| `.env.example` | Production/Docker template | no |
+| `.env.dev.example` | Local development template | no |
+
+`backend/core/config.py` loads `.env` first, then `.env.dev`, so local
+settings override production defaults when both files are present. Keep
+`.env.dev` empty/absent on production machines.
+
+## Development
+
+Run the test suite:
+
+```bash
+pytest -q
+```
+
+Run the frontend type-check and build:
+
+```bash
+cd frontend
+npm run build
+```

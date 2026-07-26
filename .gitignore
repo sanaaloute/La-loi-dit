@@ -4,9 +4,9 @@ __pycache__/
 .venv/
 venv/
 .env
-.env.docker
+.env.dev
 !.env.example
-!.env.docker.example
+!.env.dev.example
 data/
 .pytest_cache/
 .mypy_cache/
