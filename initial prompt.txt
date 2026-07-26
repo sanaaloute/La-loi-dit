@@ -1,0 +1,912 @@
+# PROJECT
+
+Build a production-grade Agentic AI Legal Assistant specialized for Burkina Faso laws and regulations.
+
+The objective is to build one of the most reliable legal AI systems possible.
+
+The priority order is:
+
+1. Accuracy
+2. Reliability
+3. Explainability
+4. Traceability
+5. Low hallucination
+6. Latest information
+7. Fast response
+
+The system must NEVER answer like a generic chatbot.
+
+It must behave like an expert legal research assistant.
+
+---
+
+# PRIMARY GOALS
+
+The AI should answer questions regarding
+
+* Constitution
+* Criminal Law
+* Civil Law
+* Family Code
+* Labor Code
+* Tax Law
+* Commercial Law
+* OHADA Law
+* Administrative Law
+* Land Law
+* Procurement Law
+* Environmental Law
+* Immigration
+* Public Service
+* Elections
+* Health regulations
+* Education regulations
+* Government procedures
+
+The architecture must easily support adding additional domains later.
+
+---
+
+# HIGH LEVEL ARCHITECTURE
+
+Use a Multi-Agent architecture based on LangGraph.
+
+The workflow must contain:
+
+User
+
+↓
+
+Guardrail Agent
+
+↓
+
+Planner Agent
+
+↓
+
+Context Agent
+
+↓
+
+Memory Agent
+
+↓
+
+Parallel Retrieval Coordinator
+
+↓
+
+Parallel Retrieval Workers
+
+↓
+
+Conflict Resolver
+
+↓
+
+Evidence Ranking Agent
+
+↓
+
+Reasoning Agent
+
+↓
+
+Reflection Agent
+
+↓
+
+Citation Verification Agent
+
+↓
+
+Response Generator
+
+↓
+
+Output Guardrail
+
+↓
+
+Final Answer
+
+Every node should be modular.
+
+---
+
+# TECHNOLOGY STACK
+
+Python
+
+FastAPI
+
+LangGraph
+
+LangChain
+
+Milvus
+
+Redis
+
+PostgreSQL
+
+Temporal
+
+Docker
+
+Docker Compose
+
+OpenTelemetry
+
+Langfuse
+
+Prometheus
+
+Grafana
+
+Pydantic AI
+
+OpenAI Compatible API
+
+MemGPT style memory
+
+LiteLLM
+
+Sandbox execution
+
+Pyodide or E2B sandbox
+
+Celery
+
+Nginx
+
+---
+
+# AI ARCHITECTURE
+
+The project should support multiple LLM providers.
+
+Examples:
+
+OpenAI
+
+Claude
+
+Gemini
+
+DeepSeek
+
+Qwen
+
+Kimi
+
+Local Ollama
+
+Use LiteLLM so providers can be switched without modifying the agents.
+
+---
+
+# RAG ARCHITECTURE
+
+Implement Hybrid RAG.
+
+Must support
+
+Dense retrieval
+
+Sparse retrieval (BM25)
+
+Hybrid retrieval
+
+Cross Encoder reranking
+
+Metadata filtering
+
+Parent-child chunking
+
+Semantic chunking
+
+Contextual compression
+
+Late interaction retrieval
+
+Document expansion
+
+Document deduplication
+
+Citation tracking
+
+Source confidence score
+
+Every retrieved document must include:
+
+document name
+
+article
+
+section
+
+page
+
+publication date
+
+government body
+
+URL
+
+confidence
+
+retrieval score
+
+reranking score
+
+---
+
+# DOCUMENT INGESTION
+
+Create an ingestion pipeline.
+
+Supported formats:
+
+PDF
+
+DOCX
+
+HTML
+
+TXT
+
+Markdown
+
+Government websites
+
+RSS feeds
+
+Official gazettes
+
+Crawler
+
+OCR
+
+Scanned PDFs
+
+The ingestion pipeline should automatically:
+
+Extract text
+
+Clean text
+
+Chunk
+
+Generate embeddings
+
+Store metadata
+
+Version documents
+
+Update indexes
+
+---
+
+# DATA SOURCES
+
+The retrieval system should combine:
+
+Official Burkina Faso Government websites
+
+Official Ministries
+
+National Assembly
+
+Supreme Court
+
+Constitutional Council
+
+Official Gazette
+
+OHADA
+
+Official legal documents
+
+Uploaded documents
+
+Trusted legal websites
+
+Government press releases
+
+Official news
+
+Never prioritize blogs over official sources.
+
+---
+
+# SEARCH SYSTEM
+
+The search engine must be dynamic.
+
+The planner agent decides which searches are required.
+
+Possible searches include
+
+Vector search
+
+Keyword search
+
+Web search
+
+Website search
+
+Government search
+
+Case law search
+
+News search
+
+Regulation search
+
+Parallel search
+
+Every search should execute simultaneously.
+
+Use asyncio.
+
+Merge results afterward.
+
+---
+
+# PARALLEL RETRIEVAL
+
+The retrieval coordinator should launch simultaneously:
+
+Vector Retrieval Agent
+
+BM25 Agent
+
+Government Website Agent
+
+News Agent
+
+Legal Document Agent
+
+Regulation Agent
+
+Uploaded Documents Agent
+
+Each runs independently.
+
+---
+
+# CONFLICT RESOLUTION
+
+If two sources disagree:
+
+Compare publication dates
+
+Compare authority level
+
+Prefer official government source
+
+Prefer latest law
+
+Prefer amendment
+
+Detect contradictions
+
+Produce explanation
+
+If conflict cannot be resolved:
+
+State uncertainty
+
+Show both sources
+
+Never hallucinate.
+
+---
+
+# REASONING AGENT
+
+The reasoning agent should never answer immediately.
+
+It must
+
+Read evidence
+
+Rank evidence
+
+Ignore weak evidence
+
+Identify missing information
+
+Ask retrieval again if needed
+
+Reason only from verified evidence
+
+---
+
+# REFLECTION AGENT
+
+Implement self-reflection.
+
+The agent should ask:
+
+Did I answer every question?
+
+Did I miss evidence?
+
+Did I cite everything?
+
+Could this hallucinate?
+
+Is there contradiction?
+
+Should retrieval run again?
+
+Maximum reflection iteration:
+
+1
+
+---
+
+# HALLUCINATION PREVENTION
+
+Implement multiple protections.
+
+Answer only using verified evidence.
+
+No unsupported statements.
+
+No fabricated citations.
+
+Confidence scoring.
+
+Evidence verification.
+
+Output verification.
+
+Automatic rejection of hallucinated citations.
+
+---
+
+# MEMORY
+
+Implement long-term memory.
+
+Use MemGPT style memory.
+
+Short-term conversation buffer
+
+Long-term semantic memory
+
+User preferences
+
+Conversation summaries
+
+Memory retrieval
+
+Memory pruning
+
+Memory compression
+
+Memory indexing
+
+Redis cache
+
+PostgreSQL persistence
+
+---
+
+# CONTEXT MANAGEMENT
+
+Conversation context must survive
+
+Server restart
+
+Workflow interruption
+
+Temporary disconnection
+
+Human interruption
+
+Long conversations
+
+Use Temporal workflows.
+
+Conversation should resume exactly where it stopped.
+
+---
+
+# RETRY STRATEGY
+
+Avoid infinite loops.
+
+Maximum retry = 1
+
+Reflection = 1
+
+Retrieval retry = 1
+
+Planning retry = 1
+
+---
+
+# TOOL EXECUTION
+
+Agents may use tools.
+
+Static tools:
+
+Calculator
+
+Date
+
+Currency
+
+PDF parser
+
+OCR
+
+Legal search
+
+Dynamic tools:
+
+Python sandbox
+
+Safe code execution
+
+Table generation
+
+Data extraction
+
+CSV analysis
+
+Document comparison
+
+The sandbox must be isolated.
+
+No unrestricted system access.
+
+---
+
+# GUARDRAILS
+
+Implement comprehensive guardrails.
+
+Input Guardrails
+
+Prompt injection detection
+
+Jailbreak detection
+
+Sensitive information detection
+
+Role hijacking detection
+
+Tool abuse detection
+
+Output Guardrails
+
+Citation verification
+
+Hallucination detection
+
+Unsafe legal advice detection
+
+Confidence threshold
+
+Source verification
+
+Refusal policy
+
+---
+
+# OBSERVABILITY
+
+Implement complete tracing.
+
+OpenTelemetry
+
+Langfuse
+
+Prometheus
+
+Grafana
+
+Metrics:
+
+Latency
+
+Token usage
+
+Retrieval latency
+
+LLM latency
+
+Agent latency
+
+Errors
+
+Failures
+
+Tool calls
+
+Retries
+
+Memory hits
+
+Cache hits
+
+---
+
+# EVALUATION
+
+Create an evaluation framework.
+
+Golden dataset
+
+Legal benchmark
+
+Citation accuracy
+
+Groundedness
+
+Faithfulness
+
+Answer relevance
+
+Retrieval precision
+
+Recall
+
+Hallucination rate
+
+Latency
+
+Cost
+
+Tool correctness
+
+Agent correctness
+
+Automatically generate evaluation reports.
+
+---
+
+# CACHING
+
+Redis should cache
+
+Embeddings
+
+Search results
+
+Retrieval
+
+Prompt cache
+
+LLM responses
+
+Frequent legal questions
+
+---
+
+# DATABASE
+
+PostgreSQL stores
+
+Users
+
+Sessions
+
+Conversation
+
+Memory
+
+Documents
+
+Metadata
+
+Evaluations
+
+Audit logs
+
+Workflow state
+
+---
+
+# SECURITY
+
+JWT Authentication
+
+RBAC
+
+Encrypted secrets
+
+HTTPS
+
+Rate limiting
+
+Audit logging
+
+Input validation
+
+SQL injection protection
+
+Sandbox isolation
+
+---
+
+# API
+
+FastAPI
+
+REST
+
+Streaming
+
+WebSocket
+
+SSE
+
+Swagger
+
+Health checks
+
+Metrics endpoint
+
+---
+
+# FRONTEND (OPTIONAL)
+
+Next.js
+
+React
+
+Tailwind
+
+Conversation UI
+
+Citation panel
+
+Evidence viewer
+
+Timeline
+
+Memory visualization
+
+Search visualization
+
+Agent execution visualization
+
+Workflow graph
+
+---
+
+# TESTING
+
+Create
+
+Unit tests
+
+Integration tests
+
+Agent tests
+
+RAG tests
+
+Load tests
+
+Security tests
+
+Regression tests
+
+Evaluation tests
+
+---
+
+# DEPLOYMENT
+
+Docker Compose
+
+Production Dockerfiles
+
+Nginx
+
+CI/CD
+
+GitHub Actions
+
+Environment variables
+
+Monitoring
+
+Automatic backup
+
+Scalable architecture
+
+---
+
+# PROJECT STRUCTURE
+
+Generate a production-ready repository including
+
+```
+backend/
+
+agents/
+
+planner/
+
+retrieval/
+
+guardrails/
+
+memory/
+
+evaluation/
+
+sandbox/
+
+workflows/
+
+temporal/
+
+vectorstore/
+
+ingestion/
+
+search/
+
+tools/
+
+observability/
+
+api/
+
+tests/
+
+docker/
+
+docs/
+```
+
+---
+
+# DOCUMENTATION
+
+Generate comprehensive documentation:
+
+* System architecture
+* Agent interaction diagrams
+* LangGraph workflow diagrams
+* Sequence diagrams
+* Retrieval pipeline diagrams
+* Memory architecture
+* Temporal workflow diagrams
+* Database ERD
+* API documentation
+* Deployment guide
+* Operations guide
+* Monitoring guide
+* Security guide
+* Testing guide
+* Developer guide
+* Administrator guide
+
+Include Mermaid diagrams for workflows and architecture, along with clear explanations of each component and its responsibilities.
+
+---
+
+## Additional recommendations
+
+To make this truly state of the art, I'd add a few capabilities beyond your original list:
+
+* **Knowledge freshness pipeline:** Automatically monitor official Burkina Faso legal sources, detect document changes, version legal texts, and trigger incremental re-indexing.
+* **Authority-weighted evidence ranking:** Assign trust scores (e.g., Constitution > amended law > decree > ministerial circular > official press release > news article) and use these scores during conflict resolution.
+* **Grounded answer policy:** Every substantive legal statement should be traceable to one or more cited sources. If evidence is insufficient, the system should explicitly say so instead of guessing.
+* **Legal timeline reasoning:** When laws have amendments or effective dates, reason over the applicable version based on the user's scenario date.
+* **Human review mode:** For low-confidence or high-risk legal questions, allow escalation to a legal expert rather than returning a definitive answer.
+* **Multi-language support:** Since Burkina Faso uses French officially but users may ask in English or local languages, separate retrieval language from response language so evidence can be retrieved in French while answers are generated in the user's preferred language.
+
+With these additions, the project evolves from a legal chatbot into a **production-grade Legal AI Research Platform** suitable for government agencies, law firms, enterprises, and public legal information services.

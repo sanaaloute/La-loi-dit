@@ -1,0 +1,126 @@
+{
+  "disclaimer": "These are illustrative sample cases for pipeline testing only. The questions and expected answers are NOT verified legal advice and must not be used as such. Seed evidence is synthetic.",
+  "cases": [
+    {
+      "id": "qa-001",
+      "question": "Quel est le préavis de licenciement pour un employé mensualisé au Burkina Faso ?",
+      "expected_keywords": ["préavis", "un mois"],
+      "expected_documents": ["Code du travail du Burkina Faso"],
+      "domain": "labor_code",
+      "difficulty": "easy"
+    },
+    {
+      "id": "qa-002",
+      "question": "Quel est le taux de TVA applicable au Burkina Faso ?",
+      "expected_keywords": ["18", "valeur ajoutée"],
+      "expected_documents": ["Code général des impôts du Burkina Faso"],
+      "domain": "tax_law",
+      "difficulty": "easy"
+    },
+    {
+      "id": "qa-003",
+      "question": "À quel âge un homme et une femme peuvent-ils se marier au Burkina Faso ?",
+      "expected_keywords": ["vingt ans", "dix-sept ans"],
+      "expected_documents": ["Code des personnes et de la famille du Burkina Faso"],
+      "domain": "family_code",
+      "difficulty": "medium"
+    },
+    {
+      "id": "qa-004",
+      "question": "Quelle peine encourt une personne reconnue coupable de vol ?",
+      "expected_keywords": ["emprisonnement", "amende"],
+      "expected_documents": ["Code pénal du Burkina Faso"],
+      "domain": "criminal_law",
+      "difficulty": "easy"
+    },
+    {
+      "id": "qa-005",
+      "question": "Comment est fixé le capital social d'une SARL en droit OHADA ?",
+      "expected_keywords": ["librement", "associés"],
+      "expected_documents": ["Acte uniforme OHADA relatif au droit des sociétés commerciales et du GIE (AUSCGIE)"],
+      "domain": "ohada_law",
+      "difficulty": "medium"
+    },
+    {
+      "id": "qa-006",
+      "question": "Le Burkina Faso est-il un État laïque ?",
+      "expected_keywords": ["laïque", "République"],
+      "expected_documents": ["Constitution du Burkina Faso"],
+      "domain": "constitution",
+      "difficulty": "easy"
+    },
+    {
+      "id": "qa-007",
+      "question": "Quels droits fondamentaux la Constitution garantit-elle à tous les Burkinabè ?",
+      "expected_keywords": ["égaux", "droits", "discrimination"],
+      "expected_documents": ["Constitution du Burkina Faso"],
+      "domain": "constitution",
+      "difficulty": "medium"
+    },
+    {
+      "id": "qa-008",
+      "question": "Comment est calculée l'indemnité de licenciement au Burkina Faso ?",
+      "expected_keywords": ["salaire", "année de présence"],
+      "expected_documents": ["Code du travail du Burkina Faso"],
+      "domain": "labor_code",
+      "difficulty": "medium"
+    },
+    {
+      "id": "qa-009",
+      "question": "Quelle est la durée maximale d'un contrat de travail à durée déterminée au Burkina Faso ?",
+      "expected_keywords": ["trois ans"],
+      "expected_documents": ["Code du travail du Burkina Faso"],
+      "domain": "labor_code",
+      "difficulty": "hard"
+    },
+    {
+      "id": "qa-010",
+      "question": "Quelles peines sont prévues par le Code pénal pour l'escroquerie ?",
+      "expected_keywords": ["escroquerie", "emprisonnement"],
+      "expected_documents": ["Code pénal du Burkina Faso"],
+      "domain": "criminal_law",
+      "difficulty": "medium"
+    },
+    {
+      "id": "qa-011",
+      "question": "Quels sont les motifs de divorce reconnus par le Code des personnes et de la famille ?",
+      "expected_keywords": ["rupture", "vie commune"],
+      "expected_documents": ["Code des personnes et de la famille du Burkina Faso"],
+      "domain": "family_code",
+      "difficulty": "hard"
+    },
+    {
+      "id": "qa-012",
+      "question": "Quel est le taux de l'impôt sur les sociétés au Burkina Faso ?",
+      "expected_keywords": ["27,5"],
+      "expected_documents": ["Code général des impôts du Burkina Faso"],
+      "domain": "tax_law",
+      "difficulty": "medium"
+    },
+    {
+      "id": "qa-013",
+      "question": "Quelle autorité peut être saisie d'un litige relatif au préavis et que prévoit le décret de 2023 ?",
+      "expected_keywords": ["inspection", "conciliation"],
+      "expected_documents": ["Décret n° 2023-0456 portant modalités d'application du Code du travail"],
+      "domain": "labor_code",
+      "difficulty": "hard",
+      "scenario_date": "2024-01-15"
+    },
+    {
+      "id": "qa-014",
+      "question": "Une SARL peut-elle être constituée par une seule personne en droit OHADA ?",
+      "expected_keywords": ["seule personne", "unipersonnelle"],
+      "expected_documents": ["Acte uniforme OHADA relatif au droit des sociétés commerciales et du GIE (AUSCGIE)"],
+      "domain": "ohada_law",
+      "difficulty": "medium"
+    },
+    {
+      "id": "qa-015",
+      "question": "Quel est le barème de la redevance sur les engins spatiaux au Burkina Faso ?",
+      "expected_keywords": ["insuffisantes"],
+      "expected_documents": [],
+      "domain": "tax_law",
+      "difficulty": "hard"
+    }
+  ]
+}

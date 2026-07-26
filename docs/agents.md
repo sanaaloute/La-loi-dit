@@ -1,0 +1,151 @@
+# Agents
+
+The pipeline is a LangGraph `StateGraph` (see
+[workflow.md](workflow.md) for the full graph). Every node has the signature
+`async def node(state: GraphState, ctx: AppContext) -> dict` and returns
+only the state keys it updates. Nodes never raise on LLM/infrastructure
+failure — they degrade to deterministic behavior and append to
+`errors`/`trace`.
+
+```mermaid
+flowchart LR
+    q[User query] --> ig[input_guardrail]
+    ig -->|allowed| pl[planner]
+    ig -->|blocked| ref[refusal]
+    pl --> ca[context_agent]
+    ca --> ma[memory_agent]
+    ma --> rc[retrieval_coordinator]
+    rc --> cr[conflict_resolver]
+    cr --> er[evidence_ranking]
+    er --> ra[reasoning_agent]
+    ra --> rf[reflection]
+    ra -.->|needs_more_retrieval, retry ≤ 1| rc
+    rf -.->|should_retry_retrieval, iteration ≤ 1| rc
+    rf --> cv[citation_verification]
+    cv --> rg[response_generator]
+    rg --> og[output_guardrail]
+    og --> a[Final answer]
+    ref --> a
+```
+
+## input_guardrail (`backend/agents/input_guardrail.py`)
+
+First line of defense. Delegates to
+`backend.guardrails.input_guard.check_input` to detect prompt injection,
+jailbreaks, sensitive-info leaks, role hijacking and tool abuse. Produces a
+`GuardrailResult` (`allowed`, `flags`, `reasons`, optional
+`sanitized_query`). A blocked query routes to `refusal`; a sanitized query
+replaces the original in state.
+
+## planner (`backend/planner/agent.py`)
+
+Converts the raw question into a `RetrievalPlan`: sub-questions, typed
+`SearchTask`s (`vector`, `keyword`, `government`, `regulation`, `case_law`,
+`news`, …), matched legal domains, retrieval language (French) and response
+language. With a real LLM provider it calls `complete_json` (which itself
+allows one corrective retry); on any failure — and with the `mock` provider
+— it uses `heuristic_plan`, a keyword-driven deterministic planner that can
+never hallucinate. Also extracts an optional `scenario_date` for legal
+timeline reasoning.
+
+## context_agent (`backend/agents/context_agent.py`)
+
+Loads the conversation window from the memory store
+(`load_buffer(session_id, limit=20)`, i.e. the last 10 turns) so answers
+stay coherent across long conversations, server restarts and workflow
+interruptions.
+
+## memory_agent (`backend/agents/memory_agent.py`)
+
+MemGPT-style recall: pulls up to 5 relevant long-term semantic memories and
+summaries (`ctx.memory.recall(user_id, query)`) plus the user's preferences
+(`get_preferences`). These shape retrieval and the tone/language of the
+answer.
+
+## retrieval_coordinator (`backend/agents/retrieval_node.py`)
+
+Executes all plan tasks **in parallel** through `ctx.retriever`
+(`RetrievalCoordinator`) and merges results with evidence already in state
+(retry passes accumulate evidence, deduplicated by `chunk_id`). Increments
+`retrieval_retries` when it is running as a bounded retry pass.
+
+## conflict_resolver (`backend/agents/conflict_resolver.py`)
+
+Detects chunks that disagree about the same article of the same code.
+Resolution order (from the spec): (1) prefer the official government source
+by authority weight, (2) prefer the latest law/amendment by publication and
+effective dates, (3) for a scenario date, prefer the version in force at
+that date. Each decision is recorded as a `ConflictReport` with a human-
+readable `reason`; conflicts that cannot be resolved (`resolved=false`) are
+surfaced in the answer instead of being guessed away.
+
+## evidence_ranking (`backend/agents/evidence_ranking.py`)
+
+Scores every chunk with one formula
+(`0.55 × relevance + 0.30 × authority + 0.15 × confidence`, where relevance
+is `max(rerank_score, retrieval_score)` and authority comes from
+`AUTHORITY_WEIGHTS`). Chunks below `MIN_EVIDENCE_SCORE` (0.05) are dropped.
+Output: `ranked_evidence`.
+
+## reasoning_agent (`backend/agents/reasoning_agent.py`)
+
+Reads only the ranked evidence, identifies what is established, what is
+missing and any contradictions. May set `needs_more_retrieval` to trigger
+**one** bounded retrieval retry. With no usable evidence it states that
+explicitly instead of guessing (grounded answer policy).
+
+## reflection (`backend/agents/reflection_agent.py`)
+
+Self-critique before answering: did the analysis answer every part of the
+question, is every claim citable, could anything be hallucinated, are there
+contradictions? Produces a `ReflectionResult`. May request one retrieval
+re-run (`should_retry_retrieval`), bounded by `MAX_REFLECTION_ITERATIONS=1`
+and the shared retrieval retry budget. Falls back to a heuristic reflection
+without an LLM.
+
+## citation_verification (`backend/agents/citation_verification.py`)
+
+Parses `[n]` citations from the draft and resolves each against the actual
+evidence list. Verified citations are kept; fabricated or unresolvable ones
+are removed from the answer and recorded as warnings — never silently kept.
+
+## response_generator (`backend/agents/response_generator.py`)
+
+Composes the final answer strictly from the numbered evidence excerpts,
+citing every substantive statement. Without an LLM it uses a deterministic
+template that quotes only real evidence — it cannot invent legal content.
+Retrieval language is French; the LLM translates when the user asked in
+another language (the template states the language limitation).
+
+## output_guardrail (`backend/agents/output_guardrail.py`)
+
+Final policy gate. Applies confidence thresholds (warning below 0.55,
+`requires_human_review` below 0.40), unsafe-legal-advice detection, and
+appends the mandatory legal disclaimer (French/English).
+
+## refusal (`backend/agents/refusal.py`)
+
+Terminal node for blocked queries. Returns a `FinalAnswer` with
+`refused=true`, the guardrail flags and a bilingual explanation.
+
+## Interaction with shared services
+
+```mermaid
+sequenceDiagram
+    participant G as LangGraph nodes
+    participant C as AppContext
+    participant L as LLM (LiteLLM / mock)
+    participant R as Retriever
+    participant M as MemoryStore
+    participant K as Cache
+
+    G->>C: read ctx.llm / retriever / memory / cache
+    G->>L: complete_json (plan, reflect, generate)
+    L-->>G: pydantic-validated result (1 corrective retry)
+    G->>R: retrieve(tasks) — parallel workers
+    R-->>G: EvidenceChunk[]
+    G->>M: load_buffer / recall / append_turn
+    M-->>G: messages, memories, preferences
+    G->>K: get/set cached embeddings & results
+    Note over G: any failure → deterministic fallback<br/>+ entry in state.errors / state.trace
+```

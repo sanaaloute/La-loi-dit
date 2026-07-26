@@ -1,0 +1,309 @@
+name: legal-ai-burkina
+
+networks:
+  legal-net:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  etcd-data:
+  minio-data:
+  milvus-data:
+  temporal-data:
+  prometheus-data:
+  grafana-data:
+  app-data:
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    image: legal-ai-burkina:latest
+    env_file: .env
+    environment:
+      LEGAL_AI_ENV: production
+      LEGAL_AI_DATA_DIR: /app/data
+      LEGAL_AI_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-legal}:${POSTGRES_PASSWORD:-legal}@postgres:5432/${POSTGRES_DB:-legal_ai}
+      LEGAL_AI_REDIS_URL: redis://redis:6379/0
+      LEGAL_AI_REDIS_ENABLED: "true"
+      LEGAL_AI_MILVUS_HOST: milvus
+      LEGAL_AI_MILVUS_PORT: "19530"
+      LEGAL_AI_MILVUS_ENABLED: "true"
+      LEGAL_AI_TEMPORAL_ADDRESS: temporal:7233
+      LEGAL_AI_TEMPORAL_ENABLED: "true"
+      LEGAL_AI_CELERY_BROKER_URL: redis://redis:6379/1
+      LEGAL_AI_LANGFUSE_HOST: http://langfuse:3000
+      # Embedding model runs on the Docker host (Ollama local). On Linux this
+      # requires `extra_hosts: ["host.docker.internal:host-gateway"]` below.
+      LEGAL_AI_EMBEDDING_API_BASE: http://host.docker.internal:11434
+    ports:
+      - "8000:8000"
+    volumes:
+      - app-data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      milvus:
+        condition: service_started
+      temporal:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    networks: [legal-net]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  celery-worker:
+    image: legal-ai-burkina:latest
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    # NOTE: expects the Celery app at backend.workflows.celery_app:app
+    # (being added with the background-task subsystem). Remove/comment this
+    # service until that module lands — the API works without it.
+    command: celery -A backend.workflows.celery_app worker --loglevel=INFO --concurrency=4
+    env_file: .env
+    environment:
+      LEGAL_AI_ENV: production
+      LEGAL_AI_DATA_DIR: /app/data
+      LEGAL_AI_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-legal}:${POSTGRES_PASSWORD:-legal}@postgres:5432/${POSTGRES_DB:-legal_ai}
+      LEGAL_AI_REDIS_URL: redis://redis:6379/0
+      LEGAL_AI_REDIS_ENABLED: "true"
+      LEGAL_AI_MILVUS_HOST: milvus
+      LEGAL_AI_MILVUS_PORT: "19530"
+      LEGAL_AI_MILVUS_ENABLED: "true"
+      LEGAL_AI_CELERY_BROKER_URL: redis://redis:6379/1
+      LEGAL_AI_EMBEDDING_API_BASE: http://host.docker.internal:11434
+    volumes:
+      - app-data:/app/data
+    depends_on:
+      - api
+      - redis
+      - postgres
+    restart: unless-stopped
+    networks: [legal-net]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # - ./docker/nginx/certs:/etc/nginx/certs:ro   # uncomment for TLS
+    depends_on:
+      - api
+    restart: unless-stopped
+    networks: [legal-net]
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      # Credentials are sourced from .env; defaults are placeholders only.
+      POSTGRES_USER: ${POSTGRES_USER:-legal}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-legal}
+      POSTGRES_DB: ${POSTGRES_DB:-legal_ai}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U legal -d legal_ai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks: [legal-net]
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks: [legal-net]
+
+  # --- Milvus standalone stack (vector store) ---
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.14
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    volumes:
+      - etcd-data:/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks: [legal-net]
+
+  minio:
+    image: minio/minio:RELEASE.2024-05-28T17-19-04Z
+    environment:
+      # MinIO credentials are sourced from .env; defaults are placeholders only.
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: minio server /minio_data --console-address ":9001"
+    ports:
+      - "9001:9001"
+    volumes:
+      - minio-data:/minio_data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks: [legal-net]
+
+  milvus:
+    image: milvusdb/milvus:v2.4.15
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - milvus-data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      - etcd
+      - minio
+    restart: unless-stopped
+    networks: [legal-net]
+
+  # --- Temporal (durable conversation workflows) ---
+  temporal:
+    image: temporalio/auto-setup:1.24
+    environment:
+      DB: postgresql
+      DB_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-legal}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD:-legal}
+      POSTGRES_SEEDS: postgres
+    ports:
+      - "7233:7233"
+    volumes:
+      - temporal-data:/etc/temporal
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [legal-net]
+
+  temporal-ui:
+    image: temporalio/ui:2.31
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      - temporal
+    restart: unless-stopped
+    networks: [legal-net]
+
+  # --- Observability ---
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    restart: unless-stopped
+    networks: [legal-net]
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    environment:
+      # Grafana credentials are sourced from .env; defaults are placeholders only.
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks: [legal-net]
+
+  # --- Frontend (default) ---
+  # Publishes host port 3000. NEXT_PUBLIC_API_URL is baked into the client
+  # bundle at build time. Leaving it empty makes the browser use the
+  # same-origin /backend-api proxy, which the container rewrites to
+  # http://api:8000 over the internal network.
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ""
+        API_PROXY_TARGET: http://api:8000
+    environment:
+      NEXT_PUBLIC_API_URL: ""
+      API_PROXY_TARGET: http://api:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [legal-net]
+
+  langfuse:
+    profiles: [observability]
+    image: langfuse/langfuse:2
+    environment:
+      # Langfuse runs its own migrations on boot; `?schema=` keeps it
+      # isolated inside the shared postgres service.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-legal}:${POSTGRES_PASSWORD:-legal}@postgres:5432/${POSTGRES_DB:-legal_ai}?schema=langfuse
+      NEXTAUTH_URL: http://localhost:3002
+      # Secrets are sourced from .env; defaults are placeholders only.
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-change-me-in-production}
+      SALT: ${LANGFUSE_SALT:-change-me-in-production}
+      TELEMETRY_ENABLED: "false"
+    ports:
+      - "3002:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [legal-net]

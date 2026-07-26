@@ -1,0 +1,65 @@
+"use client";
+
+import { ExternalLink, CheckCircle2, AlertCircle } from "lucide-react";
+import type { Citation } from "@/lib/api";
+
+interface CitationPanelProps {
+  citations: Citation[];
+}
+
+export default function CitationPanel({ citations }: CitationPanelProps) {
+  return (
+    <div className="p-4">
+      <h3 className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+        <span className="h-1.5 w-1.5 rounded-full bg-law-cyan" />
+        Citations ({citations.length})
+      </h3>
+      {citations.length === 0 ? (
+        <div className="rounded-xl border border-slate-700/40 bg-slate-800/30 p-4 text-center">
+          <p className="text-xs text-slate-400">Aucune citation pour cette réponse.</p>
+        </div>
+      ) : (
+        <ul className="space-y-3">
+          {citations.map((citation, i) => (
+            <li
+              key={`${citation.label}-${i}`}
+              className="rounded-xl border border-slate-700/40 bg-surface-elevated p-3 transition-colors hover:border-law-cyan/30"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-100">{citation.label}</p>
+                  {citation.article && (
+                    <p className="mt-0.5 text-xs text-slate-400">Article {citation.article}</p>
+                  )}
+                </div>
+                {citation.verified ? (
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
+                    <CheckCircle2 className="h-3 w-3" />
+                    Vérifiée
+                  </span>
+                ) : (
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-[10px] font-medium text-amber-300">
+                    <AlertCircle className="h-3 w-3" />
+                    Non vérifiée
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 truncate text-[11px] text-slate-500">{citation.document_name}</p>
+              {citation.url && (
+                <a
+                  href={citation.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-2 inline-flex items-center gap-1 truncate text-xs text-law-cyan hover:text-law-cyan/80 hover:underline"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  {citation.url}
+                </a>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
