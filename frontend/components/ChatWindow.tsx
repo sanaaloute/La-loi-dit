@@ -1,26 +1,33 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import {
   Bot,
+  AlertTriangle,
+  History,
+  Loader2,
   Menu,
   MessageSquarePlus,
   PanelRight,
   Send,
-  Settings,
-  Sparkles,
   ThumbsDown,
   ThumbsUp,
   User,
 } from "lucide-react";
 import AgentTimeline, { type NodeStatus } from "@/components/AgentTimeline";
 import AnswerView from "@/components/AnswerView";
+import AppHeader from "@/components/AppHeader";
 import CitationPanel from "@/components/CitationPanel";
 import EvidenceViewer from "@/components/EvidenceViewer";
 import ExportMenu from "@/components/ExportMenu";
-import SettingsPopover from "@/components/SettingsPopover";
+import HistoryPanel from "@/components/HistoryPanel";
+import ModelPicker from "@/components/ModelPicker";
 import {
+  ApiError,
   chat,
+  getModel,
+  getSession,
   getSessionId,
   getToken,
   PIPELINE_NODES,
@@ -37,6 +44,7 @@ interface Message {
   text: string;
   response?: ChatResponse;
   error?: boolean;
+  quota?: boolean;
   feedback?: "thumbs-up" | "thumbs-down";
   feedbackPending?: boolean;
 }
@@ -65,12 +73,17 @@ export default function ChatWindow() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tab, setTab] = useState<PanelTab>("agents");
   const [panelOpen, setPanelOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [model, setModelState] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyCollapsed, setHistoryCollapsed] = useState(false);
+  const [historyRefresh, setHistoryRefresh] = useState(0);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setSessionIdState(getSessionId());
     setTokenState(getToken());
+    setModelState(getModel());
   }, []);
 
   useEffect(() => {
@@ -110,11 +123,54 @@ export default function ChatWindow() {
     };
     setMessages((prev) => [...prev, msg]);
     setSelectedId(msg.id);
+    // Refresh the history list so the new/updated conversation appears.
+    setHistoryRefresh((k) => k + 1);
   }, [markAllDone]);
 
   const failWith = useCallback((detail: string) => {
     setMessages((prev) => [...prev, { id: nextId(), role: "assistant", text: detail, error: true }]);
   }, []);
+
+  const quotaReached = useCallback((detail: string) => {
+    setMessages((prev) => [...prev, { id: nextId(), role: "assistant", text: detail, quota: true }]);
+  }, []);
+
+  const loadSession = useCallback(
+    async (id: string) => {
+      if (!token || busy) return;
+      setHistoryOpen(false);
+      setHistoryLoading(true);
+      setMessages([]);
+      setSelectedId(null);
+      setStatuses(emptyStatuses());
+      try {
+        const detail = await getSession(id, token);
+        const loaded: Message[] = detail.messages.map((m) => ({
+          id: nextId(),
+          role: m.role,
+          text: m.role === "assistant" && m.answer ? m.answer.answer : m.content,
+          response:
+            m.role === "assistant" && m.answer
+              ? {
+                  session_id: detail.session_id,
+                  answer: m.answer,
+                  trace: [],
+                  latency_ms: 0,
+                  trace_id: "",
+                }
+              : undefined,
+        }));
+        setMessages(loaded);
+        setSessionIdState(detail.session_id);
+        setSessionId(detail.session_id);
+      } catch (err) {
+        failWith(err instanceof Error ? `Erreur : ${err.message}` : "Une erreur est survenue.");
+      } finally {
+        setHistoryLoading(false);
+      }
+    },
+    [token, busy, failWith],
+  );
 
   const sendFeedback = useCallback(
     async (messageId: string, response: ChatResponse, score: "thumbs-up" | "thumbs-down") => {
@@ -147,7 +203,7 @@ export default function ChatWindow() {
     setTab("agents");
     setMessages((prev) => [...prev, { id: nextId(), role: "user", text: query }]);
 
-    const request = { query, session_id: sessionId ?? undefined, language: "fr" };
+    const request = { query, session_id: sessionId ?? undefined, language: "fr", model: model ?? undefined };
     let streamed = false;
 
     try {
@@ -167,14 +223,20 @@ export default function ChatWindow() {
         token,
       );
     } catch (err) {
-      if (!streamed) {
+      if (err instanceof ApiError && err.status === 429) {
+        quotaReached(err.message);
+      } else if (!streamed) {
         try {
           const response = await chat(request, token);
           acceptResponse(response);
         } catch (postErr) {
-          failWith(
-            postErr instanceof Error ? `Erreur : ${postErr.message}` : "Une erreur est survenue.",
-          );
+          if (postErr instanceof ApiError && postErr.status === 429) {
+            quotaReached(postErr.message);
+          } else {
+            failWith(
+              postErr instanceof Error ? `Erreur : ${postErr.message}` : "Une erreur est survenue.",
+            );
+          }
         }
       } else {
         failWith(err instanceof Error ? `Erreur : ${err.message}` : "Une erreur est survenue.");
@@ -182,7 +244,7 @@ export default function ChatWindow() {
     } finally {
       setBusy(false);
     }
-  }, [input, busy, sessionId, token, markNode, acceptResponse, failWith]);
+  }, [input, busy, sessionId, token, model, markNode, acceptResponse, failWith, quotaReached]);
 
   function newConversation() {
     setMessages([]);
@@ -206,71 +268,70 @@ export default function ChatWindow() {
   const suggestions = [
     "Quels sont les droits d'un salarié licencié au Burkina Faso ?",
     "Quelle est la procédure de divorce selon le Code des personnes et de la famille ?",
-    "Quelles sont les formalités de création d'une SARL au Burkina Faso ?",
+    "Quelles sont les règles OHADA applicables à la création d'une SARL ?",
   ];
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       {/* Header */}
-      <header className="glass z-20 flex items-center justify-between px-4 py-3 sm:px-6">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-law-cyan to-law-blue shadow-glow-sm">
-            <Sparkles className="h-5 w-5 text-white" />
-          </div>
-          <div>
-            <h1 className="text-base font-semibold text-white sm:text-lg">
-              Assistant Juridique <span className="gradient-text">Burkina Faso</span>
-            </h1>
-            <p className="text-xs text-slate-400">Recherche juridique fondée sur des sources vérifiées</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 sm:gap-3">
-          <button
-            type="button"
-            onClick={() => setPanelOpen((v) => !v)}
-            className="rounded-lg p-2 text-slate-300 transition-colors hover:bg-white/5 hover:text-white md:hidden"
-            title="Panneau latéral"
-          >
-            <PanelRight className="h-5 w-5" />
-          </button>
-          <button
-            type="button"
-            onClick={newConversation}
-            className="hidden items-center gap-1.5 rounded-lg border border-slate-600/60 bg-slate-800/60 px-3 py-2 text-xs font-medium text-slate-200 backdrop-blur-sm transition-colors hover:border-slate-500 hover:bg-slate-700/60 sm:flex"
-          >
-            <MessageSquarePlus className="h-4 w-4" />
-            Nouvelle conversation
-          </button>
-          <div className="relative">
+      <AppHeader
+        token={token}
+        onTokenChange={setTokenState}
+        leftSlot={
+          token ? (
             <button
               type="button"
-              onClick={() => setSettingsOpen((v) => !v)}
-              className={`rounded-lg border p-2 text-xs font-medium transition-colors ${
-                token
-                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
-                  : "border-slate-600/60 bg-slate-800/60 text-slate-300 hover:bg-slate-700/60"
-              }`}
-              title="Paramètres de connexion"
+              onClick={() => setHistoryOpen(true)}
+              className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-300 transition-colors hover:bg-white/5 hover:text-white md:hidden"
+              title="Historique des conversations"
             >
-              <Settings className="h-4 w-4" />
+              <History className="h-5 w-5" />
             </button>
-            {settingsOpen && (
-              <SettingsPopover
-                token={token}
-                onTokenChange={setTokenState}
-                onClose={() => setSettingsOpen(false)}
-              />
-            )}
-          </div>
-        </div>
-      </header>
+          ) : undefined
+        }
+      >
+        <button
+          type="button"
+          onClick={() => setPanelOpen((v) => !v)}
+          className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-300 transition-colors hover:bg-white/5 hover:text-white md:hidden"
+          title="Panneau latéral"
+        >
+          <PanelRight className="h-5 w-5" />
+        </button>
+        <ModelPicker token={token} value={model} onChange={setModelState} />
+        <button
+          type="button"
+          onClick={newConversation}
+          className="hidden items-center gap-1.5 rounded-lg border border-slate-600/60 bg-slate-800/60 px-3 py-2 text-xs font-medium text-slate-200 backdrop-blur-sm transition-colors hover:border-slate-500 hover:bg-slate-700/60 sm:flex"
+        >
+          <MessageSquarePlus className="h-4 w-4" />
+          Nouvelle conversation
+        </button>
+      </AppHeader>
 
       {/* Main area */}
       <div className="relative flex min-h-0 flex-1">
+        {/* History panel (desktop sidebar + mobile drawer) */}
+        <HistoryPanel
+          token={token}
+          activeSessionId={sessionId}
+          onSelect={(id) => void loadSession(id)}
+          refreshKey={historyRefresh}
+          open={historyOpen}
+          onClose={() => setHistoryOpen(false)}
+          collapsed={historyCollapsed}
+          onToggleCollapsed={() => setHistoryCollapsed((v) => !v)}
+        />
+
         {/* Chat column */}
         <main className="flex min-w-0 flex-1 flex-col">
           <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
-            {messages.length === 0 ? (
+            {historyLoading ? (
+              <div className="flex h-full items-center justify-center gap-2 text-sm text-slate-400">
+                <Loader2 className="h-4 w-4 animate-spin text-law-cyan" />
+                Chargement de la conversation…
+              </div>
+            ) : messages.length === 0 ? (
               <div className="mx-auto mt-8 flex max-w-2xl flex-col items-center text-center sm:mt-16">
                 <div className="mb-6 flex h-20 w-20 animate-float items-center justify-center rounded-3xl bg-gradient-to-br from-law-cyan via-law-blue to-law-purple shadow-glow">
                   <Bot className="h-10 w-10 text-white" />
@@ -279,8 +340,9 @@ export default function ChatWindow() {
                   Posez votre question de droit
                 </h2>
                 <p className="mb-8 max-w-lg text-sm leading-relaxed text-slate-400 sm:text-base">
-                  Assistant agentique de recherche juridique pour le Burkina Faso. Réponses
-                  fondées sur des sources officielles, citations vérifiées et traçabilité complète.
+                  Assistant agentique de recherche juridique pour l&apos;Afrique de l&apos;Ouest
+                  (OHADA et droits nationaux). Réponses fondées sur des sources officielles,
+                  citations vérifiées et traçabilité complète.
                 </p>
                 <div className="grid w-full gap-3 sm:grid-cols-3">
                   {suggestions.map((s) => (
@@ -320,26 +382,41 @@ export default function ChatWindow() {
                         className={`max-w-[90%] rounded-2xl rounded-bl-sm border px-4 py-3 text-left transition-all sm:max-w-[82%] ${
                           msg.error
                             ? "border-rose-500/30 bg-rose-500/10"
-                            : selectedId === msg.id
-                              ? "border-law-cyan/40 bg-surface-elevated shadow-glow-sm"
-                              : "border-slate-700/60 bg-surface/80 hover:border-slate-600 hover:bg-surface-elevated"
+                            : msg.quota
+                              ? "border-amber-500/30 bg-amber-500/10"
+                              : selectedId === msg.id
+                                ? "border-law-cyan/40 bg-surface-elevated shadow-glow-sm"
+                                : "border-slate-700/60 bg-surface/80 hover:border-slate-600 hover:bg-surface-elevated"
                         }`}
                         title="Sélectionner pour voir citations et preuves"
                       >
                         {msg.error ? (
                           <p className="text-sm text-rose-300">{msg.text}</p>
+                        ) : msg.quota ? (
+                          <div className="text-sm">
+                            <p className="mb-1 flex items-center gap-2 font-semibold text-amber-300">
+                              <AlertTriangle className="h-4 w-4" />
+                              Quota journalier atteint
+                            </p>
+                            <p className="text-amber-100">{msg.text}</p>
+                            <p className="mt-1 text-xs text-amber-300/80">
+                              Passez à l&apos;offre supérieure pour continuer.
+                            </p>
+                          </div>
                         ) : msg.response ? (
                           <AnswerView answer={msg.response.answer} />
                         ) : (
-                          <p className="text-sm text-slate-200">{msg.text}</p>
+                          <div className="markdown-body text-sm text-slate-200">
+                            <ReactMarkdown>{msg.text}</ReactMarkdown>
+                          </div>
                         )}
-                        {msg.response && (
-                          <>
-                            <p className="mt-2 text-[11px] text-slate-500">
-                              {msg.response.latency_ms.toFixed(0)} ms — cliquer pour voir les
-                              détails
-                            </p>
-                            <div className="mt-2 flex items-center gap-2">
+                        {msg.response && msg.response.latency_ms > 0 && (
+                          <p className="mt-2 text-[11px] text-slate-500">
+                            {msg.response.latency_ms.toFixed(0)} ms — cliquer pour voir les détails
+                          </p>
+                        )}
+                        {msg.response && msg.response.trace_id && (
+                          <div className="mt-2 flex items-center gap-2">
                               <button
                                 type="button"
                                 disabled={msg.feedbackPending}
@@ -374,8 +451,7 @@ export default function ChatWindow() {
                               >
                                 <ThumbsDown className={`h-3.5 w-3.5 ${msg.feedbackPending ? "opacity-50" : ""}`} />
                               </button>
-                            </div>
-                          </>
+                          </div>
                         )}
                       </button>
                     </div>
@@ -480,6 +556,14 @@ export default function ChatWindow() {
             onClick={() => setPanelOpen(false)}
             className="absolute inset-0 z-20 bg-black/60 backdrop-blur-sm md:hidden"
             aria-label="Fermer le panneau"
+          />
+        )}
+        {historyOpen && (
+          <button
+            type="button"
+            onClick={() => setHistoryOpen(false)}
+            className="absolute inset-0 z-20 bg-black/60 backdrop-blur-sm md:hidden"
+            aria-label="Fermer l'historique"
           />
         )}
       </div>

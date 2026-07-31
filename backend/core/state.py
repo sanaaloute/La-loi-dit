@@ -27,6 +27,7 @@ class GraphState(TypedDict, total=False):
     session_id: str
     language: str  # response language requested by the user
     scenario_date: Optional[str]  # ISO date for legal timeline reasoning
+    llm: Any  # per-request LLMClient override (tier-gated); nodes fall back to ctx.llm
 
     # --- pipeline artefacts ---
     guardrail: GuardrailResult

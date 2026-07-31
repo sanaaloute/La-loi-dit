@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from dataclasses import replace
 from typing import Any, AsyncIterator, Optional
 
 from langgraph.graph import END, START, StateGraph
@@ -53,7 +54,13 @@ def build_graph(ctx: AppContext):
 
     def bind(fn):
         async def node(state: GraphState) -> dict[str, Any]:
-            return await fn(state, ctx)
+            # Per-request LLM override (tier-gated, set by the API layer):
+            # hand nodes a shallow context copy carrying the override.
+            effective_ctx = ctx
+            llm_override = state.get("llm")
+            if llm_override is not None:
+                effective_ctx = replace(ctx, llm=llm_override)
+            return await fn(state, effective_ctx)
 
         return node
 
@@ -150,7 +157,9 @@ async def run_query(graph, ctx: AppContext, state: GraphState, *, config: Option
                 final_state.get("user_id", "anonymous"),
                 [
                     ChatMessage(role="user", content=final_state["query"]),
-                    ChatMessage(role="assistant", content=answer.answer[:2000]),
+                    # Full FinalAnswer JSON: the history API parses it back;
+                    # prompt consumers unwrap it via plain_message_content().
+                    ChatMessage(role="assistant", content=answer.model_dump_json()),
                 ],
             )
         except Exception:

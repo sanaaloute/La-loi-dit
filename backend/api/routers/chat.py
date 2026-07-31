@@ -4,9 +4,10 @@ Streaming strategy: true token-level streaming is not exposed by the graph,
 so we stream real per-node graph updates (`stream_query`, stream_mode
 "updates") as they happen and reconstruct the final `ChatResponse` from the
 accumulated node updates — the graph runs exactly once. The final SSE/WS
-event carries the full ChatResponse. (Memory persistence on streamed
-requests happens only via the REST endpoint's `run_query`; streamed runs
-skip it, matching `stream_query`'s contract.)
+event carries the full ChatResponse. Memory persistence happens via the REST
+endpoint's `run_query` and, for SSE, after the stream finishes successfully
+(`_stream_events` appends the same user/assistant turns); the WebSocket path
+stays unpersisted, matching `stream_query`'s original contract.)
 
 All chat entry points create a Langfuse trace per request with descriptive
 names, user/session ids, feature tags, and explicit input/output. The trace
@@ -21,13 +22,16 @@ import logging
 import time
 from typing import Any, AsyncIterator, Literal, Optional
 
-from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ValidationError
 
-from backend.api.deps import get_ctx, get_graph
+from backend.api.deps import get_ctx, get_graph, require_user
+from backend.core.answer_cache import AnswerCache, is_cacheable
 from backend.core.config import Settings
-from backend.core.models import ChatRequest, ChatResponse, FinalAnswer, Role
+from backend.core.model_router import check_budget, resolve_llm, resolve_model_entry
+from backend.core.llm import LLMClient
+from backend.core.models import ChatMessage, ChatRequest, ChatResponse, FinalAnswer, Role, parse_answer_json
 from backend.core.state import GraphState
 from backend.observability import metrics
 from backend.observability.langfuse_client import (
@@ -49,6 +53,19 @@ class FeedbackPayload(BaseModel):
     trace_id: str
     score: Literal["thumbs-up", "thumbs-down"] | int = "thumbs-up"
     comment: Optional[str] = None
+
+
+def _state_user_id(payload: ChatRequest, user: TokenPayload) -> str:
+    """Identity a turn is recorded under.
+
+    Authenticated callers: the JWT identity — DB `user_id` claim, falling
+    back to the username — so history is keyed by a stable id the client
+    cannot spoof (`payload.user_id` is ignored). Anonymous chats keep the
+    ephemeral client-supplied id; they are simply not listable.
+    """
+    if user.sub != "anonymous":
+        return user.user_id or user.sub
+    return payload.user_id or "anonymous"
 
 
 def _make_state(payload: ChatRequest, user_sub: str) -> GraphState:
@@ -108,6 +125,46 @@ def _trace_output_from_response(response: ChatResponse) -> dict[str, Any]:
     }
 
 
+def _cached_response(cached: dict[str, Any], state: GraphState) -> ChatResponse:
+    """Rebuild a ChatResponse from a cache entry with fresh request metadata."""
+    response = ChatResponse(**cached)
+    response.session_id = state.get("session_id", "")
+    response.latency_ms = 0.0
+    response.trace_id = ""
+    response.answer.metadata["cache_hit"] = True
+    return response
+
+
+async def _meter(
+    ctx: Any,
+    user: TokenPayload,
+    llm: Any,
+    before: dict[str, int],
+    *,
+    query: str = "",
+    answer: str = "",
+) -> None:
+    """Record this request's token usage for authenticated DB users.
+
+    Primary source: the delta of the per-request client's cumulative
+    usage_totals (it can be shared across requests in mock offline mode).
+    Fallback: the offline mock pipeline short-circuits the LLM entirely, so
+    when no call was metered we estimate from the query and the answer with
+    the same chars/4 heuristic — offline usage stays realistically metered.
+    """
+    if not getattr(user, "user_id", None) or ctx.user_store is None or llm is None:
+        return
+    tokens_in = llm.usage_totals["tokens_in"] - before.get("tokens_in", 0)
+    tokens_out = llm.usage_totals["tokens_out"] - before.get("tokens_out", 0)
+    if tokens_in <= 0 and tokens_out <= 0:
+        tokens_in = LLMClient._estimate_tokens(query)
+        tokens_out = LLMClient._estimate_tokens(answer)
+    try:
+        await ctx.user_store.record_usage(user.user_id, tokens_in, tokens_out)
+    except Exception:
+        pass  # metering must never break the answer path
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(
     payload: ChatRequest,
@@ -119,9 +176,25 @@ async def chat(
 
     ctx = get_ctx(request)
     graph = get_graph(request)
-    state = _make_state(payload, user.sub)
     settings: Settings = ctx.settings
+    state = _make_state(payload, _state_user_id(payload, user))
+    await check_budget(ctx.user_store, user, settings)
+    entry = resolve_model_entry(ctx, user, payload.model, query=payload.query)
+    model_id = entry.id if entry is not None else ""
+    llm = resolve_llm(ctx, user, payload.model, query=payload.query)
+    state["llm"] = llm
 
+    # Answer cache: an explicit session_id means mid-conversation context,
+    # which bypasses the cache (same query, different meaning).
+    answer_cache = AnswerCache(ctx.cache, ctx.embedder, settings)
+    use_cache = not payload.session_id
+    if use_cache:
+        cached = await answer_cache.get(payload.query, model_id)
+        if cached is not None:
+            metrics.chat_requests_total.inc()
+            return _cached_response(cached, state)
+
+    usage_before = dict(llm.usage_totals)
     metrics.chat_requests_total.inc()
     with metrics.time_histogram(metrics.chat_latency_seconds):
         async with traced_chat_run(
@@ -133,8 +206,11 @@ async def chat(
         ) as (trace_id, trace, handler):
             response = await run_query(graph, ctx, state, config=_graph_config(handler))
             response.trace_id = trace_id
+            if use_cache and is_cacheable(response.model_dump(mode="json"), settings):
+                await answer_cache.set(payload.query, model_id, response.model_dump(mode="json"))
             update_trace_output(trace, _trace_output_from_response(response), settings=settings)
-            return response
+    await _meter(ctx, user, llm, usage_before, query=payload.query, answer=response.answer.answer)
+    return response
 
 
 async def _stream_events(
@@ -143,11 +219,20 @@ async def _stream_events(
     payload: ChatRequest,
     user_sub: str,
     settings: Settings,
+    memory: Any = None,
+    user_store: Any = None,
+    meter_user_id: Optional[str] = None,
+    usage_before: Optional[dict[str, int]] = None,
+    answer_cache: Optional[AnswerCache] = None,
+    model_id: str = "",
 ) -> AsyncIterator[str]:
     """Yield SSE frames: one per node update, then the final ChatResponse.
 
     The Langfuse trace is managed inside the generator so it spans the full
-    streaming lifecycle.
+    streaming lifecycle. Once the stream finishes successfully (a final
+    answer was produced), the turn is persisted exactly like `run_query`
+    does for the REST endpoint, token usage is metered, and the answer is
+    cached when eligible; failed/aborted streams persist nothing.
     """
     from backend.workflows.graph import stream_query
 
@@ -171,11 +256,46 @@ async def _stream_events(
             response = _final_response(merged, state, started, trace_id=trace_id)
             metrics.chat_latency_seconds.observe(response.latency_ms / 1000.0)
             update_trace_output(trace, _trace_output_from_response(response), settings=settings)
+            if memory is not None and merged.get("final_answer") is not None:
+                try:
+                    await memory.append_turn(
+                        state.get("session_id", ""),
+                        state.get("user_id", "anonymous"),
+                        [
+                            ChatMessage(role="user", content=payload.query),
+                            # Full FinalAnswer JSON, same convention as run_query.
+                            ChatMessage(role="assistant", content=response.answer.model_dump_json()),
+                        ],
+                    )
+                except Exception:
+                    pass  # memory persistence must never break the stream
+                if user_store is not None and meter_user_id and usage_before is not None:
+                    llm = state.get("llm")
+                    if llm is not None:
+                        tokens_in = llm.usage_totals["tokens_in"] - usage_before.get("tokens_in", 0)
+                        tokens_out = llm.usage_totals["tokens_out"] - usage_before.get("tokens_out", 0)
+                        if tokens_in <= 0 and tokens_out <= 0:
+                            # Offline/mock: no LLM call happened; estimate instead.
+                            tokens_in = LLMClient._estimate_tokens(payload.query)
+                            tokens_out = LLMClient._estimate_tokens(response.answer.answer)
+                        try:
+                            await user_store.record_usage(meter_user_id, tokens_in, tokens_out)
+                        except Exception:
+                            pass
+                if answer_cache is not None and is_cacheable(response.model_dump(mode="json"), settings):
+                    await answer_cache.set(payload.query, model_id, response.model_dump(mode="json"))
             yield f"data: {json.dumps({'type': 'final', 'response': response.model_dump(mode='json')}, ensure_ascii=False)}\n\n"
         except Exception as exc:  # surface failures to the client instead of hanging
             logger.exception("chat stream failed")
             metrics.errors_total.labels(kind="chat_stream").inc()
             yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)}, ensure_ascii=False)}\n\n"
+
+
+async def _cached_stream_events(response: ChatResponse) -> AsyncIterator[str]:
+    """Synthetic SSE sequence for an answer-cache hit (update + final)."""
+    update = {"node": "answer_cache", "update": {"trace": ["answer_cache: hit"]}}
+    yield f"data: {json.dumps({'type': 'update', **update}, ensure_ascii=False)}\n\n"
+    yield f"data: {json.dumps({'type': 'final', 'response': response.model_dump(mode='json')}, ensure_ascii=False)}\n\n"
 
 
 @router.get("/chat/stream")
@@ -184,14 +304,48 @@ async def chat_stream(
     query: str = Query(..., min_length=1),
     session_id: Optional[str] = Query(None),
     language: Optional[str] = Query(None),
+    model: Optional[str] = Query(None),
     user: TokenPayload = Depends(require_role(Role.VIEWER)),
 ) -> StreamingResponse:
     """SSE: per-node updates followed by a final event with the ChatResponse."""
-    payload = ChatRequest(query=query, session_id=session_id, language=language)
-    state = _make_state(payload, user.sub)
-    settings = get_ctx(request).settings
+    payload = ChatRequest(query=query, session_id=session_id, language=language, model=model)
+    state = _make_state(payload, _state_user_id(payload, user))
+    ctx = get_ctx(request)
+    settings = ctx.settings
+    await check_budget(ctx.user_store, user, settings)
+    entry = resolve_model_entry(ctx, user, model, query=query)
+    model_id = entry.id if entry is not None else ""
+    llm = resolve_llm(ctx, user, model, query=query)
+    state["llm"] = llm
+
+    # Same cache rule as POST /chat: explicit session_id => mid-conversation,
+    # bypass. A hit is replayed as a synthetic update+final event sequence.
+    answer_cache = AnswerCache(ctx.cache, ctx.embedder, settings)
+    use_cache = not session_id
+    if use_cache:
+        cached = await answer_cache.get(query, model_id)
+        if cached is not None:
+            return StreamingResponse(
+                _cached_stream_events(_cached_response(cached, state)),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+
+    usage_before = dict(llm.usage_totals)
     return StreamingResponse(
-        _stream_events(get_graph(request), state, payload, user.sub, settings),
+        _stream_events(
+            get_graph(request),
+            state,
+            payload,
+            user.sub,
+            settings,
+            memory=ctx.memory,
+            user_store=ctx.user_store,
+            meter_user_id=user.user_id,
+            usage_before=usage_before,
+            answer_cache=answer_cache if use_cache else None,
+            model_id=model_id,
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -298,3 +452,59 @@ async def chat_feedback(
         settings=settings,
     )
     return {"status": "recorded"}
+
+
+# ---------------------------------------------------------------------------
+# Chat history (per-user, Bearer required)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/chat/sessions")
+async def list_chat_sessions(
+    request: Request,
+    user: TokenPayload = Depends(require_user),
+) -> dict[str, Any]:
+    """List the caller's chat sessions, most recently updated first.
+
+    Scoping is by user_id — with today's 1:1 personal workspaces that *is*
+    workspace isolation. Anonymous callers get a 401.
+    """
+    ctx = get_ctx(request)
+    if ctx.memory is None:
+        return {"sessions": []}
+    sessions = await ctx.memory.list_sessions(user.user_id or user.sub)
+    return {"sessions": sessions}
+
+
+@router.get("/chat/sessions/{session_id}")
+async def get_chat_session(
+    session_id: str,
+    request: Request,
+    user: TokenPayload = Depends(require_user),
+) -> dict[str, Any]:
+    """Return one session's messages, oldest first.
+
+    Assistant turns carry `answer`: the parsed FinalAnswer dict when the
+    stored content is its JSON serialization, else null. Unknown sessions
+    and sessions owned by another user both return 404 (no existence leak).
+    """
+    ctx = get_ctx(request)
+    messages = (
+        []
+        if ctx.memory is None
+        else await ctx.memory.get_session_messages(user.user_id or user.sub, session_id)
+    )
+    if not messages:
+        raise HTTPException(status_code=404, detail="Session introuvable.")
+    return {
+        "session_id": session_id,
+        "messages": [
+            {
+                "role": m.role,
+                "content": m.content,
+                "answer": parse_answer_json(m.content) if m.role == "assistant" else None,
+                "created_at": m.created_at.isoformat(),
+            }
+            for m in messages
+        ],
+    }

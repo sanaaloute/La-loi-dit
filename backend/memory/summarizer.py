@@ -13,7 +13,7 @@ import re
 from typing import Optional
 
 from backend.core.config import get_settings
-from backend.core.models import MemoryRecord
+from backend.core.models import MemoryRecord, plain_message_content
 
 _SUMMARY_SYSTEM = (
     "You compress conversation history into a concise factual summary. "
@@ -38,7 +38,11 @@ def _first_sentence(text: str, max_len: Optional[int] = None) -> str:
 
 
 def _extractive_summary(turns) -> str:
-    lines = [f"- [{t.role}] {_first_sentence(t.content)}" for t in turns if t.content.strip()]
+    lines = [
+        f"- [{t.role}] {_first_sentence(plain_message_content(t.content))}"
+        for t in turns
+        if t.content.strip()
+    ]
     return "Résumé des échanges précédents / Summary of earlier turns:\n" + "\n".join(lines)
 
 
@@ -63,7 +67,7 @@ async def maybe_summarize(
         return None
 
     old_turns = buffer[:-max_turns]
-    transcript = "\n".join(f"[{t.role}] {t.content}" for t in old_turns)
+    transcript = "\n".join(f"[{t.role}] {plain_message_content(t.content)}" for t in old_turns)
 
     summary_text = ""
     if llm is not None and getattr(llm, "provider", "mock") != "mock":

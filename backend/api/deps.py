@@ -38,7 +38,28 @@ def _anonymous_payload() -> TokenPayload:
         sub="anonymous",
         role=Role.USER,
         exp=int((datetime.now(timezone.utc) + timedelta(days=1)).timestamp()),
+        tier="gratuit",
     )
+
+
+async def _refresh_tier(request: Request, payload: TokenPayload) -> TokenPayload:
+    """Load the fresh tier from the DB for DB-backed users.
+
+    Falls back to the token claims when the user store is unreachable or the
+    account is gone, so a DB outage never breaks authentication.
+    """
+    if not payload.user_id:
+        return payload
+    user_store = getattr(get_ctx(request), "user_store", None)
+    if user_store is None:
+        return payload
+    try:
+        record = await user_store.get_by_id(payload.user_id)
+    except Exception:
+        record = None
+    if record is not None:
+        payload.tier = record.tier
+    return payload
 
 
 async def get_current_user(request: Request) -> TokenPayload:
@@ -53,7 +74,8 @@ async def get_current_user(request: Request) -> TokenPayload:
 
     if scheme.lower() == "bearer" and token:
         try:
-            return decode_access_token(token.strip(), settings)
+            payload = decode_access_token(token.strip(), settings)
+            return await _refresh_tier(request, payload)
         except AuthenticationError:
             if settings.env != "development":
                 raise
@@ -61,3 +83,14 @@ async def get_current_user(request: Request) -> TokenPayload:
         raise AuthenticationError("missing bearer token")
 
     return _anonymous_payload()
+
+
+async def require_user(request: Request) -> TokenPayload:
+    """Like `get_current_user` but rejects anonymous callers with a 401.
+
+    Used by endpoints that are meaningless without an account (chat history).
+    """
+    user = await get_current_user(request)
+    if user.sub == "anonymous":
+        raise AuthenticationError("authentication required")
+    return user

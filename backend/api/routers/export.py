@@ -1,4 +1,4 @@
-"""Export router: generate styled PDF, Word and CSV exports of an answer.
+"""Export router: generate styled PDF, Word, CSV and Markdown exports of an answer.
 
 The caller posts the same JSON shape returned by ``POST /api/v1/chat``
 (the ``ChatResponse``), so exports work for both the REST and streaming
@@ -368,6 +368,54 @@ def _build_csv(data: ExportRequest) -> bytes:
 
 
 # ---------------------------------------------------------------------------
+# Markdown export
+# ---------------------------------------------------------------------------
+
+
+def _build_markdown(data: ExportRequest) -> bytes:
+    """Clean French markdown document; the answer body keeps its markdown."""
+    lines: list[str] = [
+        "# Réponse juridique",
+        "",
+        f"*Généré le {datetime.now().strftime('%d/%m/%Y à %H:%M')} — Assistant Juridique Burkina Faso*",
+        "",
+    ]
+    if data.query:
+        lines += [f"**Question :** {data.query}", ""]
+    if data.answer.requires_human_review:
+        lines += ["> **Révision humaine requise** — cette réponse doit être validée par un juriste.", ""]
+    lines += ["## Réponse", "", data.answer.answer.strip(), ""]
+
+    verified = [c for c in data.answer.citations if c.verified]
+    if verified:
+        lines += ["## Références", ""]
+        for citation in verified:
+            entry = f"- **{_strip_markdown(citation.label)}**"
+            if citation.article:
+                entry += f", art. {citation.article}"
+            if citation.document_name:
+                entry += f" — {citation.document_name}"
+            if citation.url:
+                entry += f" — {citation.url}"
+            lines.append(entry)
+        lines.append("")
+
+    if data.answer.warnings:
+        lines += ["## Avertissements", ""]
+        lines += [f"- {_strip_markdown(w)}" for w in data.answer.warnings]
+        lines.append("")
+
+    lines += [
+        "---",
+        "",
+        "_Avertissement : cette réponse est une aide à la recherche juridique. "
+        "Elle ne constitue pas un conseil juridique. Consultez un professionnel du droit._",
+        "",
+    ]
+    return "\n".join(lines).encode("utf-8")
+
+
+# ---------------------------------------------------------------------------
 # Router
 # ---------------------------------------------------------------------------
 
@@ -380,6 +428,7 @@ _FORMATS: dict[str, tuple[str, str, Callable[[ExportRequest], bytes]]] = {
         _build_docx,
     ),
     "csv": ("text/csv; charset=utf-8", ".csv", _build_csv),
+    "md": ("text/markdown; charset=utf-8", ".md", _build_markdown),
 }
 
 

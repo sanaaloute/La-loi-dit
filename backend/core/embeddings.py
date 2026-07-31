@@ -40,6 +40,11 @@ class LiteLLMEmbeddings:
             kwargs["api_base"] = self.settings.embedding_api_base
         elif self.settings.llm_api_base:
             kwargs["api_base"] = self.settings.llm_api_base
+        # Ollama Cloud requires the API key as a Bearer token; LiteLLM's
+        # ollama provider does not add it automatically (same special case
+        # as the chat client in core/llm.py).
+        if self.settings.embedding_model.startswith("ollama/") and kwargs.get("api_key"):
+            kwargs["extra_headers"] = {"Authorization": f"Bearer {kwargs['api_key']}"}
         resp = await litellm.aembedding(**kwargs)
         return [list(item["embedding"]) for item in resp.data]
 

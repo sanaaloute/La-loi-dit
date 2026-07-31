@@ -210,6 +210,32 @@ class ChatMessage(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+def parse_answer_json(content: str) -> Optional[dict[str, Any]]:
+    """Return the FinalAnswer dict when `content` is its JSON serialization.
+
+    Assistant buffer turns are stored as ``FinalAnswer.model_dump_json()``
+    (full structure for the history API); anything else returns None.
+    """
+    text = content.strip()
+    if not text.startswith("{"):
+        return None
+    import json
+
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return None
+    if isinstance(parsed, dict) and isinstance(parsed.get("answer"), str):
+        return parsed
+    return None
+
+
+def plain_message_content(content: str) -> str:
+    """Display text of a stored message: unwraps FinalAnswer JSON to its answer."""
+    parsed = parse_answer_json(content)
+    return parsed["answer"] if parsed is not None else content
+
+
 class MemoryRecord(BaseModel):
     id: str = Field(default_factory=_new_id)
     user_id: str
@@ -234,6 +260,7 @@ class ChatRequest(BaseModel):
     user_id: Optional[str] = None
     language: Optional[str] = None
     scenario_date: Optional[date] = None
+    model: Optional[str] = None  # catalog model id, tier-gated (None = tier default)
 
 
 class ChatResponse(BaseModel):

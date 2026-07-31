@@ -1,33 +1,38 @@
 "use client";
 
 import { useState } from "react";
-import { Download, FileSpreadsheet, FileText, Loader2 } from "lucide-react";
-import { exportAnswer, downloadBlob, type ChatResponse, type ExportFormat } from "@/lib/api";
+import { Download, FileCode, FileSpreadsheet, FileText, Loader2 } from "lucide-react";
+import { downloadBlob, exportAnswer, exportMarkdown, type ChatResponse, type ExportFormat } from "@/lib/api";
 
 interface ExportMenuProps {
   response: ChatResponse;
   query: string;
 }
 
-const FORMATS: { id: ExportFormat; label: string; icon: React.ElementType; ext: string }[] = [
+type MenuFormat = ExportFormat | "md";
+
+const FORMATS: { id: MenuFormat; label: string; icon: React.ElementType; ext: string }[] = [
   { id: "pdf", label: "PDF", icon: FileText, ext: "pdf" },
   { id: "word", label: "Word", icon: FileText, ext: "docx" },
   { id: "csv", label: "CSV", icon: FileSpreadsheet, ext: "csv" },
+  { id: "md", label: "Markdown (.md)", icon: FileCode, ext: "md" },
 ];
 
 export default function ExportMenu({ response, query }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState<ExportFormat | null>(null);
+  const [loading, setLoading] = useState<MenuFormat | null>(null);
 
-  async function handleExport(format: ExportFormat) {
+  async function handleExport(format: MenuFormat) {
     setLoading(format);
     try {
-      const blob = await exportAnswer(format, {
+      const payload = {
         query,
         answer: response.answer,
         session_id: response.session_id,
         latency_ms: response.latency_ms,
-      });
+      };
+      const blob =
+        format === "md" ? await exportMarkdown(payload) : await exportAnswer(format, payload);
       const filename = `reponse-juridique-${response.session_id.slice(0, 8)}.${FORMATS.find((f) => f.id === format)?.ext}`;
       downloadBlob(blob, filename);
     } catch (err) {

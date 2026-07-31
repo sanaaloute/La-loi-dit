@@ -2,9 +2,9 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Assistant Juridique — Burkina Faso",
+  title: "Yawoto — Assistant Juridique, Afrique de l'Ouest",
   description:
-    "Assistant de recherche juridique agentique pour le droit burkinabè : réponses fondées sur des sources vérifiées et traçables.",
+    "Assistant juridique agentique pour l'Afrique de l'Ouest : recherche fondée sur des sources vérifiées (OHADA et droits nationaux), rédaction de documents et suivi d'usage.",
 };
 
 export const viewport: Viewport = {

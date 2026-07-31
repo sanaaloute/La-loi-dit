@@ -114,7 +114,7 @@ LEGAL_AI_LLM_MODEL=gpt-oss:120b
 LEGAL_AI_LLM_API_BASE=https://ollama.com
 LEGAL_AI_LLM_API_KEY=<your-ollama-cloud-api-key>
 
-# Local Ollama embeddings (Docker host)
+# Embeddings — Ollama Cloud (same key as the chat models)
 LEGAL_AI_EMBEDDING_MODEL=ollama/nomic-embed-text
 LEGAL_AI_EMBEDDING_DIMENSION=768
 
@@ -127,17 +127,11 @@ LANGFUSE_NEXTAUTH_SECRET=<random-secret>
 LANGFUSE_SALT=<random-secret>
 ```
 
-On the Docker host, pull the embedding model and bind Ollama to all interfaces
-so the containers can reach it:
-
-```bash
-ollama pull nomic-embed-text
-OLLAMA_HOST=0.0.0.0:11434 ollama serve
-```
-
-> The `api` and `celery-worker` services reach the host via
-> `host.docker.internal:11434` with `extra_hosts: ["host.docker.internal:host-gateway"]`
-> for Linux.
+No local models are required: chat models and embeddings both run on
+**Ollama Cloud** (`https://ollama.com`) with the same API key — the compose
+file already points `LEGAL_AI_EMBEDDING_API_BASE` at it. Make sure the
+embedding model (`nomic-embed-text`) is available on your Ollama Cloud
+account.
 
 Start the core stack:
 

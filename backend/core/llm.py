@@ -32,18 +32,87 @@ PROVIDER_PREFIXES = {
     "qwen": "openai/",  # OpenAI-compatible endpoint
     "kimi": "openai/",  # OpenAI-compatible endpoint
     "ollama": "ollama/",
+    "openrouter": "openrouter/",
+    "tokenfree": "openai/",  # OpenAI-compatible endpoint
     "mock": "mock/",
 }
 
+OPENROUTER_DEFAULT_API_BASE = "https://openrouter.ai/api/v1"
+# TokenFree is an OpenAI-compatible API (api key + base_url, see
+# https://www.tokenfree.ai). Their docs show http://api.tokenfree.ai/v1 —
+# we default to https; override with LEGAL_AI_LLM_API_BASE if needed.
+TOKENFREE_DEFAULT_API_BASE = "https://api.tokenfree.ai/v1"
+
 
 class LLMClient:
-    """Thin async wrapper with JSON-mode parsing and one corrective retry."""
+    """Thin async wrapper with JSON-mode parsing and one corrective retry.
 
-    def __init__(self, settings: Settings):
+    Defaults are fully settings-driven (unchanged behavior). The optional
+    `provider`/`model`/`api_key`/`api_base` overrides let the model router
+    build a per-request client for one catalog model; `model` may then be a
+    namespaced catalog id (``"openrouter/deepseek/deepseek-chat"``) — the
+    leading provider namespace is stripped before the LiteLLM prefix is
+    applied.
+    """
+
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        api_base: Optional[str] = None,
+    ):
         self.settings = settings
-        self.provider = settings.llm_provider.lower()
+        self.provider = (provider or settings.llm_provider).lower()
+        raw_model = model if model is not None else settings.llm_model
+        namespace = f"{self.provider}/"
+        if raw_model.startswith(namespace):
+            raw_model = raw_model[len(namespace):]
         prefix = PROVIDER_PREFIXES.get(self.provider, "")
-        self.model = f"{prefix}{settings.llm_model}"
+        self.model = f"{prefix}{raw_model}"
+        self.api_key = settings.llm_api_key if api_key is None else api_key
+        if api_base is not None:
+            self.api_base = api_base
+        elif self.provider == settings.llm_provider.lower():
+            self.api_base = settings.llm_api_base
+        else:
+            # The global base belongs to the default provider; it must not
+            # leak into per-request clients for other providers.
+            self.api_base = ""
+        if self.provider == "openrouter" and not self.api_base:
+            self.api_base = OPENROUTER_DEFAULT_API_BASE
+        if self.provider == "tokenfree" and not self.api_base:
+            self.api_base = TOKENFREE_DEFAULT_API_BASE
+        # Cumulative token metering across calls on this instance. Read as a
+        # delta around one request when the client is shared (mock mode).
+        self.usage_totals: dict[str, int] = {"tokens_in": 0, "tokens_out": 0}
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _estimate_tokens(text: str) -> int:
+        """Offline heuristic (~4 chars/token) used for mock/usage-less calls."""
+        return max(1, len(text) // 4) if text else 0
+
+    def _record_usage(self, system: str, user: str, completion: str, usage: Any) -> None:
+        """Accumulate one call's tokens (provider usage when available)."""
+        tokens_in = getattr(usage, "prompt_tokens", None)
+        tokens_out = getattr(usage, "completion_tokens", None)
+        if tokens_in is None and isinstance(usage, dict):
+            tokens_in = usage.get("prompt_tokens")
+            tokens_out = usage.get("completion_tokens")
+        try:
+            tokens_in = int(tokens_in)  # type: ignore[arg-type]
+            tokens_out = int(tokens_out)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            tokens_in = tokens_out = None  # absent/mocked usage -> estimate
+        if tokens_in is not None and tokens_out is not None:
+            self.usage_totals["tokens_in"] += tokens_in
+            self.usage_totals["tokens_out"] += tokens_out
+        else:
+            self.usage_totals["tokens_in"] += self._estimate_tokens(system) + self._estimate_tokens(user)
+            self.usage_totals["tokens_out"] += self._estimate_tokens(completion)
 
     # ------------------------------------------------------------------
     async def complete(
@@ -55,7 +124,9 @@ class LLMClient:
         max_tokens: Optional[int] = None,
     ) -> str:
         if self.provider == "mock":
-            return self._mock_complete(system, user)
+            result = self._mock_complete(system, user)
+            self._record_usage(system, user, result, None)
+            return result
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": [
@@ -67,18 +138,27 @@ class LLMClient:
             "timeout": self.settings.llm_timeout_seconds,
             "metadata": litellm_trace_metadata(),
         }
-        if self.settings.llm_api_key:
-            kwargs["api_key"] = self.settings.llm_api_key
-        if self.settings.llm_api_base:
-            kwargs["api_base"] = self.settings.llm_api_base
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+        extra_headers: dict[str, str] = {}
         # Ollama Cloud (and any authenticated Ollama endpoint) expects the
         # API key as a Bearer token. LiteLLM's ollama provider does not add
         # this header automatically, so we inject it via extra_headers.
-        if self.provider == "ollama" and self.settings.llm_api_key:
-            kwargs["extra_headers"] = {"Authorization": f"Bearer {self.settings.llm_api_key}"}
+        if self.provider == "ollama" and self.api_key:
+            extra_headers["Authorization"] = f"Bearer {self.api_key}"
+        # OpenRouter rankings/attribution headers (app name as fallback).
+        if self.provider == "openrouter":
+            extra_headers.setdefault("HTTP-Referer", self.settings.app_name)
+            extra_headers.setdefault("X-Title", self.settings.app_name)
+        if extra_headers:
+            kwargs["extra_headers"] = extra_headers
         try:
             resp = await litellm.acompletion(**kwargs)
-            return resp.choices[0].message.content or ""
+            content = resp.choices[0].message.content or ""
+            self._record_usage(system, user, content, getattr(resp, "usage", None))
+            return content
         except Exception as exc:  # provider/network errors
             raise LLMError(f"LLM call failed ({self.model}): {exc}") from exc
 

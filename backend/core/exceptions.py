@@ -33,9 +33,17 @@ class AuthenticationError(LegalAIError):
     """JWT / credentials invalid."""
 
 
+class UserAlreadyExistsError(LegalAIError):
+    """Registration attempted with an email that already has an account."""
+
+
 class AuthorizationError(LegalAIError):
     """Authenticated but insufficient role."""
 
 
 class RateLimitError(LegalAIError):
     """Rate limit exceeded."""
+
+
+class QuotaExceededError(LegalAIError):
+    """Daily token budget exhausted for the caller's subscription tier."""

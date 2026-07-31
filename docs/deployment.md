@@ -40,8 +40,76 @@ overrides service addresses). Key groups:
   `LEGAL_AI_CELERY_BROKER_URL`
 - **Security**: `LEGAL_AI_JWT_ALGORITHM`, `LEGAL_AI_JWT_EXPIRE_MINUTES`,
   `LEGAL_AI_RATE_LIMIT_PER_MINUTE`
+- **Scalability / HA**: `LEGAL_AI_STRICT_INFRA` (default: on when
+  `LEGAL_AI_ENV=production`), `LEGAL_AI_WEB_WORKERS` (uvicorn workers,
+  default 2 in the compose `api` command)
 - **Observability**: `LEGAL_AI_OTEL_ENDPOINT` / `LEGAL_AI_OTEL_ENABLED`,
   `LEGAL_AI_LANGFUSE_*`
+- **Billing**: `LEGAL_AI_PADDLE_*` — disabled by default; see
+  [billing.md](billing.md) for the full Paddle setup (sandbox vs prod,
+  price ids, webhook registration, ngrok for local testing).
+
+## Strict infrastructure mode
+
+Outside production the app degrades gracefully: Milvus/Redis/Postgres
+outages silently fall back to in-memory/SQLite substitutes so development
+works with zero services. **Strict infrastructure mode** (on by default when
+`LEGAL_AI_ENV=production`, override with `LEGAL_AI_STRICT_INFRA=true|false`)
+changes the contract:
+
+- fallbacks are **reported, not silent** — every dependency gets an
+  `infra_status` entry (`ok` / `degraded: reason`) collected at boot;
+- the user store may not fall back to a local SQLite file: with Postgres
+  down it stays unavailable (registration returns 503) instead of writing
+  accounts to a throwaway store;
+- `/ready` returns **HTTP 503** when a critical dependency (Milvus,
+  Postgres) is down, so the orchestrator stops routing traffic.
+
+## Health and readiness probes
+
+- `GET /health` — dumb liveness, always 200 when the process is up.
+- `GET /ready` — live per-dependency probes (`SELECT 1` on the configured
+  database, cache round-trip, vector-store count) plus the boot-time
+  `infra_status`. Always returns `{status, checks}` with
+  `status ∈ {"ready", "degraded", "not_ready"}`; the HTTP code is 200 except
+  in strict mode with a critical dependency down (503, see above). Both
+  endpoints are exempt from rate limiting, as is `/metrics`.
+
+## Per-tier rate limits
+
+`LEGAL_AI_RATE_LIMIT_PER_MINUTE` is now only the **anonymous/IP** default.
+Authenticated requests are limited per subscription tier from the catalog
+(`backend/core/catalog.py`, overridable via `LEGAL_AI_TIER_CATALOG_JSON`):
+
+| Tier | Requests/minute |
+|---|---|
+| anonymous (per IP) | `LEGAL_AI_RATE_LIMIT_PER_MINUTE` (30) |
+| gratuit | 30 |
+| pro | 120 |
+| cabinet | 600 |
+
+The middleware resolves the tier from the JWT `tier` claim — no database
+lookup on the hot path; invalid/expired tokens fall back to the anonymous IP
+bucket.
+
+## Scaling workers
+
+The compose `api` service runs
+`uvicorn ... --workers ${LEGAL_AI_WEB_WORKERS:-2}`. Each worker is a full
+process with its own lifespan (its own AppContext). Anything held in process
+memory is therefore **per-worker**:
+
+- the rate limiter uses shared Redis counters automatically when
+  `LEGAL_AI_REDIS_ENABLED=true` (fixed window, atomic INCR); without Redis
+  each worker enforces its own limit (effective limit × workers);
+- the answer cache, retrieval cache and memory hot cache already sit on the
+  shared cache abstraction, so they are coherent across workers as soon as
+  Redis is enabled;
+- the in-memory vector store fallback is per-worker — do not scale workers
+  without Milvus.
+
+Rule of thumb: **workers > 1 requires Redis, Postgres and Milvus** — exactly
+what strict mode verifies at boot and via `/ready`.
 
 ## Production checklist
 

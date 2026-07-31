@@ -24,6 +24,8 @@ class TokenPayload(BaseModel):
     sub: str
     role: Role
     exp: int
+    user_id: Optional[str] = None  # DB user id (None for dev-store users)
+    tier: str = "gratuit"  # subscription tier claim
 
 
 def create_access_token(
@@ -31,6 +33,8 @@ def create_access_token(
     role: Role,
     settings: Settings,
     expires_minutes: Optional[int] = None,
+    user_id: Optional[str] = None,
+    tier: Optional[str] = None,
 ) -> str:
     """Create a signed JWT for `subject` with the given `role`."""
     minutes = expires_minutes if expires_minutes is not None else settings.jwt_expire_minutes
@@ -41,6 +45,10 @@ def create_access_token(
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(minutes=minutes)).timestamp()),
     }
+    if user_id is not None:
+        claims["user_id"] = user_id
+    if tier is not None:
+        claims["tier"] = tier
     return jwt.encode(claims, settings.secret_key, algorithm=settings.jwt_algorithm)
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -34,6 +35,15 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.1
     llm_max_tokens: int = 4096
     llm_timeout_seconds: float = 60.0
+    openrouter_api_key: str = ""  # falls back to llm_api_key when empty
+    tokenfree_api_key: str = ""  # falls back to llm_api_key when empty
+    # JSON replacing the whole built-in tier catalog (see backend/core/catalog.py)
+    tier_catalog_json: str = ""
+    # --- token metering / quotas / answer cache / cheap routing ---
+    answer_cache_enabled: bool = True
+    answer_cache_semantic_threshold: float = 0.98  # cosine floor for near-duplicate hits
+    answer_cache_max_index: int = 50  # semantic index size (most recent entries)
+    cheap_routing_enabled: bool = True  # simple queries -> tier's cheapest model
     embedding_model: str = "text-embedding-3-small"
     embedding_dimension: int = 384
     embedding_api_base: str = ""  # separate from llm_api_base for split providers
@@ -67,7 +77,12 @@ class Settings(BaseSettings):
     # --- auth / security ---
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60
-    rate_limit_per_minute: int = 30
+    rate_limit_per_minute: int = 30  # anonymous/IP default; tiers override via catalog
+
+    # --- scalability / high availability ---
+    # None => resolved as (env == "production"); set explicitly to override.
+    strict_infra: Optional[bool] = None
+    web_workers: int = 1  # uvicorn workers (compose sets LEGAL_AI_WEB_WORKERS)
 
     # --- observability ---
     otel_endpoint: str = "http://localhost:4318"
@@ -75,6 +90,16 @@ class Settings(BaseSettings):
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
     langfuse_host: str = "http://localhost:3100"
+
+    # --- billing (Paddle; disabled = platform fully functional) ---
+    paddle_enabled: bool = False
+    paddle_env: str = "sandbox"  # sandbox | production
+    paddle_api_key: str = ""
+    paddle_webhook_secret: str = ""
+    paddle_price_pro: str = ""
+    paddle_price_cabinet: str = ""
+    paddle_checkout_success_url: str = "http://localhost:3000/tarifs?success=1"
+    paddle_checkout_cancel_url: str = "http://localhost:3000/tarifs?canceled=1"
 
     # --- Tuning (policy/tuning knobs; defaults preserve current behavior) ---
     # retry budgets (bounded loops, see docs/workflow.md "RETRY STRATEGY")
@@ -158,6 +183,26 @@ class Settings(BaseSettings):
     @property
     def langfuse_enabled(self) -> bool:
         return bool(self.langfuse_public_key and self.langfuse_secret_key)
+
+    @property
+    def strict_infra_enabled(self) -> bool:
+        """Strict infrastructure mode: no silent fallbacks, /ready can 503.
+
+        Defaults on in production, off elsewhere unless explicitly set.
+        """
+        if self.strict_infra is not None:
+            return self.strict_infra
+        return self.env == "production"
+
+    @property
+    def billing_enabled(self) -> bool:
+        """True only when Paddle is enabled AND fully configured."""
+        return bool(
+            self.paddle_enabled
+            and self.paddle_api_key
+            and self.paddle_price_pro
+            and self.paddle_price_cabinet
+        )
 
     def ensure_data_dir(self) -> Path:
         self.data_dir.mkdir(parents=True, exist_ok=True)

@@ -4,7 +4,14 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm ci --no-audit --no-fund
+RUN --mount=type=cache,target=/root/.npm \
+    npm config set fetch-timeout 300000 && \
+    npm config set fetch-retries 5 && \
+    npm config set fetch-retry-mintimeout 30000 && \
+    npm config set fetch-retry-maxtimeout 300000 && \
+    (npm ci --no-audit --no-fund || \
+     (echo "npm ci failed, retrying in 5s..." && sleep 5 && npm ci --no-audit --no-fund) || \
+     (echo "npm ci failed again, retrying in 5s..." && sleep 5 && npm ci --no-audit --no-fund))
 
 # --- build ---
 FROM node:22-alpine AS build

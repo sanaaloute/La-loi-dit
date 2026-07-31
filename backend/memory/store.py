@@ -214,6 +214,84 @@ class MemoryStore:
             self.stats["db_failures"] += 1
 
     # ------------------------------------------------------------------
+    # History (per-user session listing for the chat history API)
+    # ------------------------------------------------------------------
+
+    async def list_sessions(self, user_id: str) -> list[dict[str, Any]]:
+        """List the user's chat sessions, most recently updated first.
+
+        Each entry: session_id, title (first user message, ~80 chars),
+        created_at, updated_at, message_count. Empty list when the DB is
+        unavailable — history must never break the chat path.
+        """
+        try:
+            if await self._ensure_db():
+                from sqlalchemy import select
+
+                t = self._tables["messages"]
+                async with self._session_factory() as session:
+                    rows = (
+                        await session.execute(
+                            select(t).where(t.c.user_id == user_id).order_by(t.c.id)
+                        )
+                    ).all()
+                sessions: dict[str, dict[str, Any]] = {}
+                first_user_msg: dict[str, str] = {}
+                for r in rows:
+                    entry = sessions.setdefault(
+                        r.session_id,
+                        {
+                            "session_id": r.session_id,
+                            "title": "",
+                            "created_at": r.created_at,
+                            "updated_at": r.created_at,
+                            "message_count": 0,
+                        },
+                    )
+                    entry["message_count"] += 1
+                    entry["updated_at"] = r.created_at
+                    if r.role == "user" and r.session_id not in first_user_msg:
+                        first_user_msg[r.session_id] = (r.content or "").strip()
+                for session_id, entry in sessions.items():
+                    entry["title"] = first_user_msg.get(session_id, "")[:80]
+                return sorted(sessions.values(), key=lambda e: e["updated_at"], reverse=True)
+        except Exception:
+            self.stats["db_failures"] += 1
+        return []
+
+    async def get_session_messages(self, user_id: str, session_id: str) -> list[ChatMessage]:
+        """Return one session's messages, oldest first, scoped to `user_id`.
+
+        Empty list when the session doesn't exist, belongs to another user,
+        or the DB is unavailable (the API maps this to 404).
+        """
+        try:
+            if await self._ensure_db():
+                from sqlalchemy import select
+
+                t = self._tables["messages"]
+                async with self._session_factory() as session:
+                    rows = (
+                        await session.execute(
+                            select(t)
+                            .where(t.c.user_id == user_id)
+                            .where(t.c.session_id == session_id)
+                            .order_by(t.c.id)
+                        )
+                    ).all()
+                return [
+                    ChatMessage(
+                        role=r.role,
+                        content=r.content,
+                        created_at=datetime.fromisoformat(r.created_at),
+                    )
+                    for r in rows
+                ]
+        except Exception:
+            self.stats["db_failures"] += 1
+        return []
+
+    # ------------------------------------------------------------------
     # Semantic long-term memory
     # ------------------------------------------------------------------
 

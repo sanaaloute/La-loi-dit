@@ -83,6 +83,7 @@ export interface ChatRequest {
   user_id?: string | null;
   language?: string | null;
   scenario_date?: string | null; // YYYY-MM-DD
+  model?: string | null; // selected model id; omitted = tier default
 }
 
 export interface ChatResponse {
@@ -98,6 +99,137 @@ export interface TokenResponse {
   token_type: string;
   expires_in: number;
   role: string;
+}
+
+export type Tier = "gratuit" | "pro" | "cabinet";
+
+export interface UserFeatures {
+  export: string[];
+  drafting: boolean;
+  priority?: boolean;
+}
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  name?: string | null;
+  role: string;
+  tier: Tier;
+  workspace_id?: string | null;
+  workspace_name: string;
+  features: UserFeatures;
+}
+
+export interface ModelInfo {
+  id: string;
+  provider: string;
+  label: string;
+  tier_required: Tier;
+  allowed: boolean;
+}
+
+export interface ModelList {
+  default_model: string;
+  models: ModelInfo[];
+}
+
+export interface ChatSessionSummary {
+  session_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+}
+
+export interface ChatSessionList {
+  sessions: ChatSessionSummary[];
+}
+
+export interface HistoryMessage {
+  role: "user" | "assistant";
+  content: string;
+  answer: FinalAnswer | null;
+  created_at: string;
+}
+
+export interface ChatSessionDetail {
+  session_id: string;
+  messages: HistoryMessage[];
+}
+
+export type DraftFieldType = "text" | "textarea" | "date" | "number" | "select";
+
+export interface DraftField {
+  name: string;
+  label: string;
+  type: DraftFieldType;
+  required: boolean;
+  placeholder: string;
+  options: string[];
+}
+
+export type DraftCategory = "contract" | "case";
+
+export interface DraftTemplate {
+  id: string;
+  category: DraftCategory;
+  label: string;
+  description: string;
+  fields: DraftField[];
+}
+
+export interface DraftTemplateList {
+  templates: DraftTemplate[];
+}
+
+export interface DraftRequest {
+  template_id: string;
+  fields: Record<string, string>;
+  instructions?: string;
+  model?: string;
+}
+
+export interface DraftResponse {
+  title: string;
+  template_id: string;
+  draft_markdown: string;
+  citations: Citation[];
+  warnings: string[];
+  requires_human_review: boolean;
+  latency_ms: number;
+}
+
+export interface UsageDay {
+  day: string; // YYYY-MM-DD
+  tokens_in: number;
+  tokens_out: number;
+  requests: number;
+}
+
+export interface UsageResponse {
+  tier: Tier;
+  daily_budget: number;
+  today: { tokens_in: number; tokens_out: number; requests: number };
+  remaining_tokens: number;
+  history: UsageDay[]; // last 30 days, most recent first; zero-activity days omitted
+}
+
+export interface BillingConfig {
+  enabled: boolean;
+  provider: "paddle" | null;
+}
+
+export interface CheckoutResponse {
+  checkout_url: string;
+}
+
+export type SubscriptionStatus = "active" | "past_due" | "canceled" | "none";
+
+export interface SubscriptionInfo {
+  tier: string;
+  status: SubscriptionStatus;
+  current_period_end: string | null; // ISO date
+  cancel_at_period_end: boolean;
 }
 
 export type StreamEvent =
@@ -163,6 +295,7 @@ function apiUrl(path: string): string {
 
 const TOKEN_KEY = "legal_ai_token";
 const SESSION_KEY = "legal_ai_session_id";
+const MODEL_KEY = "legal_ai_model";
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -184,6 +317,17 @@ export function setSessionId(sessionId: string | null): void {
   if (typeof window === "undefined") return;
   if (sessionId) window.localStorage.setItem(SESSION_KEY, sessionId);
   else window.localStorage.removeItem(SESSION_KEY);
+}
+
+export function getModel(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(MODEL_KEY);
+}
+
+export function setModel(model: string | null): void {
+  if (typeof window === "undefined") return;
+  if (model) window.localStorage.setItem(MODEL_KEY, model);
+  else window.localStorage.removeItem(MODEL_KEY);
 }
 
 function authHeaders(token?: string | null): Record<string, string> {
@@ -208,6 +352,131 @@ export async function login(username: string, password: string): Promise<TokenRe
   return (await res.json()) as TokenResponse;
 }
 
+export async function register(email: string, password: string, name?: string): Promise<TokenResponse> {
+  const res = await fetch(apiUrl("/auth/register"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, ...(name ? { name } : {}) }),
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new Error(detail ?? `Échec de l'inscription (${res.status})`);
+  }
+  return (await res.json()) as TokenResponse;
+}
+
+export async function me(token?: string | null): Promise<UserProfile> {
+  const res = await fetch(apiUrl("/auth/me"), {
+    headers: { ...authHeaders(token) },
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new Error(detail ?? `Échec de la récupération du profil (${res.status})`);
+  }
+  return (await res.json()) as UserProfile;
+}
+
+export async function usageMe(token?: string | null): Promise<UsageResponse> {
+  const res = await fetch(apiUrl("/usage/me"), {
+    headers: { ...authHeaders(token) },
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec du chargement de l'usage (${res.status})`, res.status);
+  }
+  return (await res.json()) as UsageResponse;
+}
+
+export async function billingConfig(): Promise<BillingConfig> {
+  const res = await fetch(apiUrl("/billing/config"));
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec du chargement de la configuration de paiement (${res.status})`, res.status);
+  }
+  return (await res.json()) as BillingConfig;
+}
+
+export async function createCheckout(tier: "pro" | "cabinet", token?: string | null): Promise<CheckoutResponse> {
+  const res = await fetch(apiUrl("/billing/checkout"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    body: JSON.stringify({ tier }),
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec de la création du paiement (${res.status})`, res.status);
+  }
+  return (await res.json()) as CheckoutResponse;
+}
+
+export async function getSubscription(token?: string | null): Promise<SubscriptionInfo> {
+  const res = await fetch(apiUrl("/billing/subscription"), {
+    headers: { ...authHeaders(token) },
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec du chargement de l'abonnement (${res.status})`, res.status);
+  }
+  return (await res.json()) as SubscriptionInfo;
+}
+
+export async function listModels(token?: string | null): Promise<ModelList> {
+  const res = await fetch(apiUrl("/models"), {
+    headers: { ...authHeaders(token) },
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new Error(detail ?? `Échec du chargement des modèles (${res.status})`);
+  }
+  return (await res.json()) as ModelList;
+}
+
+export async function listSessions(token?: string | null): Promise<ChatSessionList> {
+  const res = await fetch(apiUrl("/chat/sessions"), {
+    headers: { ...authHeaders(token) },
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new Error(detail ?? `Échec du chargement de l'historique (${res.status})`);
+  }
+  return (await res.json()) as ChatSessionList;
+}
+
+export async function getSession(sessionId: string, token?: string | null): Promise<ChatSessionDetail> {
+  const res = await fetch(apiUrl(`/chat/sessions/${encodeURIComponent(sessionId)}`), {
+    headers: { ...authHeaders(token) },
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new Error(detail ?? `Échec du chargement de la conversation (${res.status})`);
+  }
+  return (await res.json()) as ChatSessionDetail;
+}
+
+export async function listDraftTemplates(token?: string | null): Promise<DraftTemplateList> {
+  const res = await fetch(apiUrl("/draft/templates"), {
+    headers: { ...authHeaders(token) },
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec du chargement des modèles de documents (${res.status})`, res.status);
+  }
+  return (await res.json()) as DraftTemplateList;
+}
+
+export async function createDraft(payload: DraftRequest, token?: string | null): Promise<DraftResponse> {
+  const res = await fetch(apiUrl("/draft"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec de la génération du document (${res.status})`, res.status);
+  }
+  return (await res.json()) as DraftResponse;
+}
+
 export async function chat(request: ChatRequest, token?: string | null): Promise<ChatResponse> {
   const res = await fetch(apiUrl("/chat"), {
     method: "POST",
@@ -216,7 +485,7 @@ export async function chat(request: ChatRequest, token?: string | null): Promise
   });
   if (!res.ok) {
     const detail = await safeDetail(res);
-    throw new Error(detail ?? `Erreur du serveur (${res.status})`);
+    throw new ApiError(detail ?? `Erreur du serveur (${res.status})`, res.status);
   }
   return (await res.json()) as ChatResponse;
 }
@@ -236,6 +505,7 @@ export async function streamChat(
   const params = new URLSearchParams({ query: request.query });
   if (request.session_id) params.set("session_id", request.session_id);
   if (request.language) params.set("language", request.language);
+  if (request.model) params.set("model", request.model);
 
   const res = await fetch(`${apiUrl("/chat/stream")}?${params.toString()}`, {
     headers: { Accept: "text/event-stream", ...authHeaders(token) },
@@ -243,7 +513,7 @@ export async function streamChat(
   });
   if (!res.ok) {
     const detail = await safeDetail(res);
-    throw new Error(detail ?? `Flux indisponible (${res.status})`);
+    throw new ApiError(detail ?? `Flux indisponible (${res.status})`, res.status);
   }
   if (!res.body) {
     throw new Error("Flux indisponible (pas de corps de réponse)");
@@ -289,6 +559,16 @@ export async function submitFeedback(payload: FeedbackPayload, token?: string | 
   }
 }
 
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 async function safeDetail(res: Response): Promise<string | null> {
   try {
     const body = (await res.json()) as { detail?: unknown };
@@ -321,9 +601,52 @@ export async function exportAnswer(format: ExportFormat, payload: ExportRequest,
   });
   if (!res.ok) {
     const detail = await safeDetail(res);
-    throw new Error(detail ?? `Export failed (${res.status})`);
+    throw new ApiError(detail ?? `Export failed (${res.status})`, res.status);
   }
   return res.blob();
+}
+
+export async function exportMarkdown(payload: ExportRequest, token?: string | null): Promise<Blob> {
+  const res = await fetch(apiUrl("/export/md"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Export failed (${res.status})`, res.status);
+  }
+  return res.blob();
+}
+
+/**
+ * Export a generated draft by wrapping it in the FinalAnswer shape the
+ * export endpoints expect, then reusing the standard export calls.
+ */
+export async function exportDraft(
+  draft: DraftResponse,
+  format: ExportFormat | "md",
+  token?: string | null,
+): Promise<Blob> {
+  const answer: FinalAnswer = {
+    answer: draft.draft_markdown,
+    citations: draft.citations,
+    evidence: [],
+    confidence: 1,
+    language: "fr",
+    warnings: draft.warnings,
+    conflicts: [],
+    requires_human_review: draft.requires_human_review,
+    refused: false,
+    metadata: {},
+  };
+  const payload: ExportRequest = {
+    query: draft.title,
+    answer,
+    session_id: draft.template_id,
+    latency_ms: draft.latency_ms,
+  };
+  return format === "md" ? exportMarkdown(payload, token) : exportAnswer(format, payload, token);
 }
 
 export function downloadBlob(blob: Blob, filename: string) {

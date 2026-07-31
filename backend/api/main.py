@@ -24,7 +24,9 @@ from backend.core.exceptions import (
     AuthorizationError,
     GuardrailViolation,
     LegalAIError,
+    QuotaExceededError,
     RateLimitError,
+    UserAlreadyExistsError,
 )
 from backend.observability.logging import configure_logging
 
@@ -93,6 +95,8 @@ def create_app() -> FastAPI:
     # --- exception handlers: domain errors -> HTTP codes ---
     app.add_exception_handler(AuthenticationError, _error_handler(401))
     app.add_exception_handler(AuthorizationError, _error_handler(403))
+    app.add_exception_handler(UserAlreadyExistsError, _error_handler(400))
+    app.add_exception_handler(QuotaExceededError, _error_handler(429))
     app.add_exception_handler(RateLimitError, _error_handler(429))
     app.add_exception_handler(GuardrailViolation, _error_handler(400))
     app.add_exception_handler(LegalAIError, _error_handler(500))
@@ -104,20 +108,47 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     @app.get("/ready")
-    async def ready(request: Request) -> dict[str, Any]:
-        """Readiness report: checks every context piece; always HTTP 200."""
+    async def ready(request: Request) -> JSONResponse:
+        """Readiness: live per-dependency probes, not just attribute presence.
+
+        Always 200 with {status, checks} — EXCEPT in strict infra mode
+        (production), where a failed critical dependency (milvus, postgres)
+        yields HTTP 503 so orchestrators stop routing traffic.
+        """
         ctx = getattr(request.app.state, "ctx", None)
-        checks = {
-            "context": ctx is not None,
-            "graph": getattr(request.app.state, "graph", None) is not None,
-            "llm": getattr(ctx, "llm", None) is not None,
-            "cache": getattr(ctx, "cache", None) is not None,
-            "embedder": getattr(ctx, "embedder", None) is not None,
-            "vector_store": getattr(ctx, "vector_store", None) is not None,
-            "retriever": getattr(ctx, "retriever", None) is not None,
-            "memory": getattr(ctx, "memory", None) is not None,
-        }
-        return {"status": "ready" if all(checks.values()) else "degraded", "checks": checks}
+        if ctx is None or getattr(request.app.state, "graph", None) is None:
+            return JSONResponse(
+                {"status": "not_ready", "checks": {"context": "missing", "graph": "missing"}},
+                status_code=200,
+            )
+
+        checks: dict[str, Any] = dict(ctx.infra_status)
+
+        # Live cheap probes against the configured backends.
+        try:
+            await ctx.cache.set("ready:probe", 1, ttl=5)
+            checks["cache_probe"] = "ok" if await ctx.cache.get("ready:probe") == 1 else "degraded: probe failed"
+        except Exception:
+            checks["cache_probe"] = "degraded: probe failed"
+        try:
+            await ctx.vector_store.count()  # type: ignore[union-attr]
+            checks["vector_store_probe"] = "ok"
+        except Exception:
+            checks["vector_store_probe"] = "degraded: probe failed"
+        from backend.users.service import probe_database
+
+        checks["database_probe"] = "ok" if await probe_database(ctx.settings) else "degraded: probe failed"
+
+        def _down(*names: str) -> bool:
+            return any(str(checks.get(name, "")).startswith("degraded") for name in names)
+
+        degraded = any(str(v).startswith("degraded") for v in checks.values())
+        critical_down = _down("milvus", "postgres", "database_probe") or (
+            ctx.settings.milvus_enabled and _down("vector_store_probe")
+        )
+        status = "degraded" if degraded else "ready"
+        code = 503 if (ctx.settings.strict_infra_enabled and critical_down) else 200
+        return JSONResponse({"status": status, "checks": checks}, status_code=code)
 
     @app.get("/metrics", response_class=PlainTextResponse)
     async def prometheus_metrics() -> PlainTextResponse:
@@ -129,13 +160,17 @@ def create_app() -> FastAPI:
         return PlainTextResponse(generate_latest().decode("utf-8"), media_type=CONTENT_TYPE_LATEST)
 
     # --- routers under /api/v1 ---
-    from backend.api.routers import auth, chat, documents, export, search
+    from backend.api.routers import auth, billing, chat, documents, draft, export, models, search, usage
 
     app.include_router(auth.router, prefix="/api/v1")
+    app.include_router(billing.router, prefix="/api/v1")
     app.include_router(chat.router, prefix="/api/v1")
     app.include_router(documents.router, prefix="/api/v1")
+    app.include_router(draft.router, prefix="/api/v1")
     app.include_router(export.router, prefix="/api/v1")
+    app.include_router(models.router, prefix="/api/v1")
     app.include_router(search.router, prefix="/api/v1")
+    app.include_router(usage.router, prefix="/api/v1")
 
     return app
 
