@@ -48,7 +48,7 @@ TIER_CATALOG: dict[str, dict[str, Any]] = {
             {"id": "ollama/llama3.3", "provider": "ollama", "label": "Llama 3.3 (Ollama Cloud)"},
             {"id": "ollama/qwen3:32b", "provider": "ollama", "label": "Qwen 3 32B (Ollama Cloud)"},
             # TokenFree model ids are placeholders — adjust to the ids shown
-            # in your TokenFree dashboard (https://www.tokenfree.ai).
+            # in your TokenFree dashboard (https://www.tokenfree.com).
             {"id": "tokenfree/Llama-3.1-8B-Instruct", "provider": "tokenfree", "label": "Llama 3.1 8B (TokenFree)"},
             {"id": "tokenfree/Qwen2.5-72B-Instruct", "provider": "tokenfree", "label": "Qwen 2.5 72B (TokenFree)"},
         ],

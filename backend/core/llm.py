@@ -38,10 +38,9 @@ PROVIDER_PREFIXES = {
 }
 
 OPENROUTER_DEFAULT_API_BASE = "https://openrouter.ai/api/v1"
-# TokenFree is an OpenAI-compatible API (api key + base_url, see
-# https://www.tokenfree.ai). Their docs show http://api.tokenfree.ai/v1 —
-# we default to https; override with LEGAL_AI_LLM_API_BASE if needed.
-TOKENFREE_DEFAULT_API_BASE = "https://api.tokenfree.ai/v1"
+# TokenFree is an OpenAI-compatible API (Bearer key + /v1/chat/completions,
+# see https://www.tokenfree.com). Override with LEGAL_AI_LLM_API_BASE if needed.
+TOKENFREE_DEFAULT_API_BASE = "https://www.tokenfree.com/v1"
 
 
 class LLMClient:

@@ -108,7 +108,8 @@ class IngestionPipeline:
             if not cleaned.text.strip():
                 raise IngestionError(f"No extractable text in {name}")
 
-            version, changed = self._versions.get_version(document_id, _content_hash(cleaned.text))
+            content_hash = _content_hash(cleaned.text)
+            version, changed = self._versions.check_version(document_id, content_hash)
             if not changed:
                 return DocumentIngestResult(
                     document_id=document_id,
@@ -127,6 +128,9 @@ class IngestionPipeline:
             vectors = await self._embed(chunks)
             await self._upsert(chunks, vectors)
             await self._upsert_bm25(chunks)
+            # Only NOW mark the content as ingested: a failure above leaves the
+            # document re-ingestable instead of skipped as a duplicate.
+            self._versions.commit_version(document_id, content_hash, version)
 
             return DocumentIngestResult(
                 document_id=document_id,
@@ -166,9 +170,6 @@ class IngestionPipeline:
             "version": version,
         }
         if settings is not None:
-            kwargs["parent_size"] = settings.chunk_parent_size
-            kwargs["child_size"] = settings.chunk_child_size
-            kwargs["child_overlap"] = settings.chunk_overlap
             kwargs["max_chunk_size"] = settings.chunk_max_size
             kwargs["overlap"] = settings.chunk_overlap
         strategy = metadata.get("chunk_strategy", "auto")
@@ -177,6 +178,12 @@ class IngestionPipeline:
         if strategy == "semantic":
             return semantic_chunk(doc, document_id, **kwargs)
         if strategy == "parent_child":
+            kwargs.pop("max_chunk_size", None)
+            kwargs.pop("overlap", None)
+            if settings is not None:
+                kwargs["parent_size"] = settings.chunk_parent_size
+                kwargs["child_size"] = settings.chunk_child_size
+                kwargs["child_overlap"] = settings.chunk_overlap
             return parent_child_chunk(doc, document_id, **kwargs)
         raise IngestionError(f"Unknown chunk strategy: {strategy}")
 

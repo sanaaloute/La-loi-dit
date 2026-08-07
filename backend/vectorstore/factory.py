@@ -24,13 +24,29 @@ async def get_vector_store(settings: Settings) -> VectorStoreProtocol:
     silently downgrades to the in-memory store.
     """
     if settings.milvus_enabled:
-        try:
-            from backend.vectorstore.milvus_store import MilvusVectorStore
+        # Retry a few times: the first handshake(s) can flap on NAT'd or
+        # filtered links (WSL<->Windows, VPNs) while the server is fine.
+        attempts = 3
+        for attempt in range(1, attempts + 1):
+            try:
+                from backend.vectorstore.milvus_store import MilvusVectorStore
 
-            store = MilvusVectorStore(settings)
-            await asyncio.wait_for(store.connect(), timeout=settings.milvus_connect_timeout_seconds)
-            logger.info("vector store: Milvus (%s)", settings.milvus_collection)
-            return store
-        except Exception as exc:
-            logger.warning("Milvus unavailable (%s); using in-memory store", exc)
+                store = MilvusVectorStore(settings)
+                await asyncio.wait_for(store.connect(), timeout=settings.milvus_connect_timeout_seconds)
+                logger.info("vector store: Milvus (%s)", settings.milvus_collection)
+                return store
+            except Exception as exc:
+                if attempt == attempts:
+                    logger.warning(
+                        "Milvus unavailable (%s); using in-memory store",
+                        str(exc) or type(exc).__name__,
+                    )
+                else:
+                    logger.debug(
+                        "Milvus connect attempt %d/%d failed (%s); retrying",
+                        attempt,
+                        attempts,
+                        str(exc) or type(exc).__name__,
+                    )
+                    await asyncio.sleep(1.0 * attempt)
     return InMemoryVectorStore()

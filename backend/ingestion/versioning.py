@@ -40,6 +40,27 @@ class VersionStore:
                 pass
             raise
 
+    def check_version(self, document_id: str, content_hash: str) -> tuple[int, bool]:
+        """Read-only ``(version, is_new_or_changed)`` — persists nothing.
+
+        Use together with :meth:`commit_version` so a FAILED ingest does not
+        mark the content hash as seen (which would later skip it as a
+        duplicate).
+        """
+        state = self._load()
+        entry = state.get(document_id)
+        if entry is None:
+            return 1, True
+        if entry.get("hash") == content_hash:
+            return int(entry.get("version", 1)), False
+        return int(entry.get("version", 1)) + 1, True
+
+    def commit_version(self, document_id: str, content_hash: str, version: int) -> None:
+        """Persist the content hash AFTER a successful ingest."""
+        state = self._load()
+        state[document_id] = {"hash": content_hash, "version": version}
+        self._save(state)
+
     def get_version(self, document_id: str, content_hash: str) -> tuple[int, bool]:
         """Return ``(version, is_new_or_changed)`` for a document.
 
@@ -47,18 +68,10 @@ class VersionStore:
         - re-ingest of identical content -> ``(current_version, False)`` (skip)
         - changed content -> ``(version + 1, True)`` and the store is updated
         """
-        state = self._load()
-        entry = state.get(document_id)
-        if entry is None:
-            state[document_id] = {"hash": content_hash, "version": 1}
-            self._save(state)
-            return 1, True
-        if entry.get("hash") == content_hash:
-            return int(entry.get("version", 1)), False
-        version = int(entry.get("version", 1)) + 1
-        state[document_id] = {"hash": content_hash, "version": version}
-        self._save(state)
-        return version, True
+        version, changed = self.check_version(document_id, content_hash)
+        if changed:
+            self.commit_version(document_id, content_hash, version)
+        return version, changed
 
 
 def get_version(

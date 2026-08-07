@@ -20,3 +20,9 @@ build/
 .volumes/
 .kimi-code/
 .agents/
+
+# Locally downloaded build wheels (see data/download_wheels.sh)
+docker/wheels/
+
+# Windows reserved device name — never commit a stray file named "nul"
+nul

@@ -6,6 +6,8 @@ stay inside the fixtures so collection never breaks while they are mid-build.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 import backend.observability.langfuse_client as lf_client
@@ -14,6 +16,40 @@ from backend.core.config import Settings
 from backend.core.context import AppContext
 from backend.core.embeddings import HashEmbeddings
 from backend.core.llm import LLMClient
+
+
+@pytest.fixture(autouse=True, scope="session")
+def isolate_from_local_env():
+    """Hermetic tests: the developer's `.env` / LEGAL_AI_* shell vars must
+    never leak into the suite (a production-like .env turns the embedder into
+    real network calls and flips strict-mode behavior). Individual tests can
+    still set LEGAL_AI_* explicitly via monkeypatch."""
+    from backend.core.config import get_settings
+
+    stripped = {k: os.environ.pop(k) for k in list(os.environ) if k.startswith("LEGAL_AI_")}
+    original_env_file = Settings.model_config.get("env_file")
+    Settings.model_config["env_file"] = None
+    # pymilvus calls dotenv.load_dotenv() at import time (lazily triggered by
+    # MilvusVectorStore.connect mid-session), which would re-pollute os.environ
+    # with the developer's .env AFTER the strip above. Neutralize it for the
+    # session so later Settings() instances stay hermetic.
+    import dotenv
+    import dotenv.main
+
+    real_load_dotenv = dotenv.main.load_dotenv
+
+    def _no_dotenv(*args, **kwargs):  # pragma: no cover - test guard
+        return False
+
+    dotenv.load_dotenv = _no_dotenv
+    dotenv.main.load_dotenv = _no_dotenv
+    get_settings.cache_clear()
+    yield
+    dotenv.load_dotenv = real_load_dotenv
+    dotenv.main.load_dotenv = real_load_dotenv
+    Settings.model_config["env_file"] = original_env_file
+    os.environ.update(stripped)
+    get_settings.cache_clear()
 
 
 @pytest.fixture

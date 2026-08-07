@@ -52,9 +52,12 @@ class Settings(BaseSettings):
     # --- Milvus ---
     milvus_host: str = "localhost"
     milvus_port: int = 19530
+    # When set, takes precedence over host/port — e.g. a Milvus Lite file
+    # path ("./data/milvus_lite.db") for local dev without a server.
+    milvus_uri: str = ""
     milvus_collection: str = "legal_chunks"
     milvus_enabled: bool = False  # auto-fallback to in-memory store when False/unreachable
-    milvus_connect_timeout_seconds: float = 3.0
+    milvus_connect_timeout_seconds: float = 15.0  # cold WSL/docker handshakes exceed 3s
     milvus_filter_overfetch: int = 4
 
     # --- Redis ---

@@ -20,6 +20,9 @@ services:
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
+      args:
+        # PyPI index for the image build (mirror friendly; see .env).
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
     image: legal-ai-burkina:latest
     # Multi-worker uvicorn (default 2; override with LEGAL_AI_WEB_WORKERS).
     # NOTE: in-memory fallbacks (cache, rate limiter, vector store) are
@@ -60,6 +63,8 @@ services:
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
     # NOTE: expects the Celery app at backend.workflows.celery_app:app
     # (being added with the background-task subsystem). Remove/comment this
     # service until that module lands — the API works without it.
@@ -75,6 +80,14 @@ services:
       - api
       - redis
       - postgres
+    # The image's HTTP healthcheck targets :8000, which celery doesn't serve —
+    # ping the worker over the broker instead.
+    healthcheck:
+      test: ["CMD", "celery", "-A", "backend.workflows.celery_app", "inspect", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
     networks: [legal-net]
 
@@ -99,7 +112,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "5432:5432"
+      # Host port is configurable: another postgres may already own 5432.
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -164,11 +178,16 @@ services:
     networks: [legal-net]
 
   milvus:
-    image: milvusdb/milvus:v2.4.15
+    # Server 2.6 to match the pymilvus 3.x client (see requirements.txt).
+    image: milvusdb/milvus:v2.6.0
     command: ["milvus", "run", "standalone"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
+      # Milvus authenticates to MinIO with the same .env-sourced credentials
+      # (it panics on signature mismatch otherwise).
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
     ports:
       - "19530:19530"
       - "9091:9091"
@@ -190,7 +209,8 @@ services:
   temporal:
     image: temporalio/auto-setup:1.24
     environment:
-      DB: postgresql
+      # auto-setup >= 1.24 driver names: postgres12 | postgres12_pgx (pgx recommended)
+      DB: postgres12_pgx
       DB_PORT: "5432"
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PWD: ${POSTGRES_PASSWORD}
@@ -206,7 +226,9 @@ services:
     networks: [legal-net]
 
   temporal-ui:
-    image: temporalio/ui:2.31
+    # 2.34.0: the 2.31 tag's layers are corrupted on the configured registry
+    # mirrors (size-validation failures); this tag pulls cleanly.
+    image: temporalio/ui:2.34.0
     environment:
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_CORS_ORIGINS: ${TEMPORAL_UI_CORS_ORIGINS}
@@ -261,6 +283,7 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
         API_PROXY_TARGET: ${API_PROXY_TARGET}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
       API_PROXY_TARGET: ${API_PROXY_TARGET}

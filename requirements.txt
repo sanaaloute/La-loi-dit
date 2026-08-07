@@ -14,7 +14,15 @@ litellm==1.53.1
 httpx==0.28.1
 
 # Vector store / lexical search
-pymilvus==2.4.9
+# pymilvus 3.x drops the pkg_resources dependency (broken on Python 3.13) and
+# supports both the Milvus server (production) and Milvus Lite (local file,
+# via LEGAL_AI_MILVUS_URI) — milvus-lite is a local-dev convenience, the
+# production compose stack uses the Milvus server image.
+# grpcio pinned alongside: pymilvus excludes the whole 1.68–1.73 line, and
+# pinning spares pip the multi-version backtracking that stalls image builds.
+pymilvus==3.0.1
+grpcio==1.83.0
+milvus-lite>=3.2.0; sys_platform != "linux" or platform_machine == "x86_64"
 rank-bm25==0.2.2
 
 # Datastores

@@ -1,0 +1,14 @@
+# Docker build context exclusions (backend image: context is the repo root)
+.git
+.venv
+.pytest_cache
+__pycache__
+**/__pycache__
+frontend/node_modules
+frontend/.next
+data
+legal_ai_burkina.egg-info
+.kimi
+.kimi-code
+.vscode
+*.pyc

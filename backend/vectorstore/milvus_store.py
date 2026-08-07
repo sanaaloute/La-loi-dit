@@ -12,6 +12,7 @@ is ``chunk_id`` and the vector field uses an HNSW index with COSINE metric.
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any, Optional
 
 from pydantic import ValidationError
@@ -20,6 +21,25 @@ from backend.core.config import Settings
 from backend.core.exceptions import RetrievalError
 from backend.core.models import EvidenceChunk
 from backend.vectorstore.memory_store import matches_filters
+
+
+def _import_pymilvus():
+    """Import pymilvus without its ``load_dotenv()`` side effect.
+
+    pymilvus loads the project ``.env`` into ``os.environ`` at import time;
+    those values then shadow the ``.env.dev`` overrides pydantic applies when
+    building Settings (e.g. MILVUS_HOST=localhost), breaking local runs.
+    """
+    before = dict(os.environ)
+    try:
+        from pymilvus import DataType, MilvusClient
+    finally:
+        for key in set(os.environ) - set(before):
+            os.environ.pop(key, None)
+        for key, value in before.items():
+            if os.environ.get(key) != value:
+                os.environ[key] = value
+    return DataType, MilvusClient
 
 class MilvusVectorStore:
     """Milvus-backed vector store implementing VectorStoreProtocol."""
@@ -38,11 +58,11 @@ class MilvusVectorStore:
                 creation failed.
         """
         try:
-            from pymilvus import DataType, MilvusClient
+            DataType, MilvusClient = _import_pymilvus()
         except ImportError as exc:  # pragma: no cover - depends on env
             raise RetrievalError(f"pymilvus not installed: {exc}") from exc
 
-        uri = f"http://{self._settings.milvus_host}:{self._settings.milvus_port}"
+        uri = self._settings.milvus_uri or f"http://{self._settings.milvus_host}:{self._settings.milvus_port}"
         try:
             self._client = await asyncio.to_thread(MilvusClient, uri=uri)
             exists = await asyncio.to_thread(
@@ -70,6 +90,10 @@ class MilvusVectorStore:
                     schema=schema,
                     index_params=index_params,
                 )
+            else:
+                # On reconnect (Milvus Lite file or server restart) an existing
+                # collection is released; search/query fail until it is loaded.
+                await asyncio.to_thread(self._client.load_collection, self._collection)
             # Fail fast here (not on first search) when the server is down.
             await asyncio.to_thread(self._client.list_collections)
         except RetrievalError:

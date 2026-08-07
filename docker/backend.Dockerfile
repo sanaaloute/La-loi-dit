@@ -1,22 +1,28 @@
 # syntax=docker/dockerfile:1
 
 # ---------------------------------------------------------------------------
-# Builder: compile/install all Python dependencies into /install
+# Builder: install all Python dependencies into /install — fully OFFLINE.
+# The wheels are pre-downloaded on the host (data/download_wheels.sh) so the
+# build never touches a package registry: slow/filtered build networks only
+# need the base image. PIP_INDEX_URL remains as an escape hatch for builds on
+# healthy networks (fallback if a wheel is missing).
 # ---------------------------------------------------------------------------
 FROM python:3.12-slim AS builder
 
-ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_DEFAULT_TIMEOUT=300 \
-    PIP_RETRIES=5
+ARG PIP_INDEX_URL=https://pypi.org/simple
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential curl \
-    && rm -rf /var/lib/apt/lists/*
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=600 \
+    PIP_RETRIES=10 \
+    PIP_INDEX_URL=${PIP_INDEX_URL}
 
 WORKDIR /build
 COPY requirements.txt ./
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --prefix=/install -r requirements.txt
+# NOTE: no apt packages — every dependency ships a manylinux wheel for cp312
+# (grpcio, pydantic-core, SQLAlchemy, lxml, temporalio, ...); the only sdist
+# (sgmllib3k, pure Python) installs without a compiler.
+COPY docker/wheels ./wheels
+RUN pip install --no-index --find-links ./wheels --prefix=/install -r requirements.txt
 
 # ---------------------------------------------------------------------------
 # Runtime: minimal image, non-root user, application code only

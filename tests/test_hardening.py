@@ -30,6 +30,7 @@ _BAD_INFRA_ENV = {
     "LEGAL_AI_REDIS_ENABLED": "true",
     # Closed ports -> connection refused instantly (no slow timeouts), and
     # immune to any service the dev machine happens to run locally.
+    "LEGAL_AI_MILVUS_PORT": "5497",
     "LEGAL_AI_REDIS_URL": "redis://127.0.0.1:5498/0",
     "LEGAL_AI_DATABASE_URL": "postgresql+psycopg://legal:legal@127.0.0.1:5499/legal_ai",
 }

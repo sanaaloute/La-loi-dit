@@ -214,7 +214,7 @@ async def test_tokenfree_completion_kwargs(monkeypatch):
     assert await client.complete("system", "user") == "ok"
     # OpenAI-compatible: "openai/" LiteLLM prefix + default TokenFree base URL.
     assert captured["model"] == "openai/Llama-3.1-8B-Instruct"
-    assert captured["api_base"] == "https://api.tokenfree.ai/v1"
+    assert captured["api_base"] == "https://www.tokenfree.com/v1"
     assert captured["api_key"] == "tf-key"
 
 
@@ -225,7 +225,7 @@ def test_resolve_llm_tokenfree_uses_tokenfree_key():
     assert client.provider == "tokenfree"
     assert client.model == "openai/Llama-3.1-8B-Instruct"
     assert client.api_key == "tf-test"
-    assert client.api_base == "https://api.tokenfree.ai/v1"
+    assert client.api_base == "https://www.tokenfree.com/v1"
 
 
 # ---------------------------------------------------------------------------
