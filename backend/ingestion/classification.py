@@ -1,15 +1,18 @@
 """Heuristic classification of legal documents from their name and content.
 
-These helpers fill in ``authority`` and ``legal_domains`` metadata when the
-caller did not provide them explicitly. They are intentionally conservative:
-when classification is uncertain, they leave values empty/unknown rather than
-guess wrongly.
+These helpers fill in ``authority``, ``legal_domains``, ``document_type``
+and ``law_number`` metadata when the caller did not provide them explicitly.
+They are intentionally conservative: when classification is uncertain, they
+leave values empty/unknown rather than guess wrongly.
 """
 
 from __future__ import annotations
 
+import re
+from typing import Optional
+
 from backend.core.constants import LEGAL_DOMAINS
-from backend.core.models import AuthorityLevel
+from backend.core.models import AuthorityLevel, DocumentType
 
 # Authority rules: each rule is (groups, authority). A group matches when any
 # of its keywords is present; the rule matches when every group matches.
@@ -98,3 +101,55 @@ def infer_legal_domains(name: str, text_sample: str = "") -> list[str]:
         if domain in _DOMAIN_KEYWORDS and any(kw in haystack for kw in _DOMAIN_KEYWORDS[domain]):
             domains.append(domain)
     return domains
+
+
+# Document-type rules: (keywords, type). Order matters — more specific
+# instruments first. In particular "arrêté"/"décision" (DECISION) must beat
+# "arrêt" (CASE_LAW): once normalized, "arrete" contains "arret".
+_DOCUMENT_TYPE_RULES: list[tuple[tuple[str, ...], DocumentType]] = [
+    (("traité", "traite", "acte uniforme", "acte_uniforme"), DocumentType.TREATY),
+    (("code",), DocumentType.CODE),
+    (("ordonnance",), DocumentType.ORDINANCE),
+    (("décret", "decret"), DocumentType.DECREE),
+    (("arrêté", "arrete", "décision", "decision"), DocumentType.DECISION),
+    (("jurisprudence", "arrêt", "arret"), DocumentType.CASE_LAW),
+    (("loi",), DocumentType.LAW),
+]
+
+_LAW_NUMBER_RE = re.compile(
+    # keyword, up to 3 qualifier words ("arrêté conjoint", "loi de finances"),
+    # optional "n°", then the number itself (must start with a digit).
+    r"(?:loi|d[ée]cret|ordonnance|arr[êe]t[ée]?|d[ée]cision)"
+    r"(?:\s+[a-zàâäéèêëîïôöùûüç]+){0,3}?\s*(?:n[°o]?\s*)?(\d[\w\-/]*)",
+    re.IGNORECASE,
+)
+
+
+def infer_document_type(name: str, text_sample: str = "") -> Optional[DocumentType]:
+    """Best-guess instrument type from the document name (then content sample).
+
+    Conservative like :func:`infer_authority`: returns None when nothing
+    matches rather than guessing ``OTHER``.
+    """
+    haystack = _normalize(name)
+    if not any(kw in haystack for rule in _DOCUMENT_TYPE_RULES for kw in rule[0]) and text_sample:
+        haystack += " " + _normalize(text_sample[:2000])
+    for keywords, doc_type in _DOCUMENT_TYPE_RULES:
+        if any(kw in haystack for kw in keywords):
+            return doc_type
+    return None
+
+
+def extract_law_number(name: str) -> Optional[str]:
+    """Extract a structured law number (e.g. "028-2008/AN") from a title.
+
+    Matches ``loi``/``décret``/``ordonnance``/``arrêté``/``décision`` followed
+    by optional qualifier words, an optional ``n°`` and a digit-led number;
+    returns None when absent ("Loi de finances" without a year, titles
+    without any numbered instrument).
+    """
+    match = _LAW_NUMBER_RE.search(name)
+    if not match:
+        return None
+    number = match.group(1).strip().rstrip(".,;:)")
+    return number.upper() or None

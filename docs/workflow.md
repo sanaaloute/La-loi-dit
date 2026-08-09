@@ -1,14 +1,15 @@
 # Workflow
 
 The exact pipeline is defined in `backend/workflows/graph.py`
-(`build_graph`). Retry budgets come from `backend/core/constants.py`:
+(`build_graph`). Retry budgets come from `backend/core/config.py`:
 
 | Budget | Value | Enforced in |
 |---|---|---|
-| `MAX_PLANNING_RETRIES` | 1 | `LLMClient.complete_json` (one corrective retry) |
-| `MAX_RETRIEVAL_RETRIES` | 1 | `_route_after_reasoning`, `_route_after_reflection` |
-| `MAX_REFLECTION_ITERATIONS` | 1 | `_route_after_reflection` |
-| `MAX_GLOBAL_RETRIES` | 1 | runner policy |
+| `max_retrieval_retries` | 1 | `_route_after_reasoning`, `_route_after_reflection` |
+| `max_reflection_iterations` | 1 | `_route_after_reflection` |
+
+The planner's corrective JSON retry is a fixed single retry inside
+`LLMClient.complete_json` (not configurable).
 
 ## Graph
 
@@ -24,16 +25,20 @@ flowchart TB
     ma --> rc[retrieval_coordinator]
     rc --> cr[conflict_resolver]
     cr --> er[evidence_ranking]
-    er --> ra[reasoning_agent]
+    er --> cva[coverage_auditor]
+
+    cva -->|"needs_more_retrieval AND<br/>retrieval_retries < 1"| rc
+    cva -->|else| ra[reasoning_agent]
 
     ra -->|"needs_more_retrieval AND<br/>retrieval_retries < 1"| rc
     ra -->|else| rf[reflection]
 
     rf -->|"should_retry_retrieval AND<br/>reflection_count ≤ 1 AND<br/>retrieval_retries < 1"| rc
-    rf -->|else| cv[citation_verification]
+    rf -->|else| rg[response_generator]
 
-    cv --> rg[response_generator]
-    rg --> og[output_guardrail]
+    rg --> clv[claim_verification]
+    clv --> cv[citation_verification]
+    cv --> og[output_guardrail]
     og --> END2((END))
 ```
 
@@ -82,8 +87,9 @@ sequenceDiagram
         W->>R: retrieve(retry tasks)
     end
     W->>L: reflection (self-critique)
-    W->>W: citation_verification (reject fabricated citations)
     W->>L: response_generator (grounded answer + [n] citations)
+    W->>W: claim_verification (per-claim support levels)
+    W->>W: citation_verification (reject fabricated citations)
     W->>W: output_guardrail (thresholds + disclaimer)
     W-->>API: final_state (FinalAnswer, trace, errors)
     API->>M: append_turn(user msg, answer) — best effort

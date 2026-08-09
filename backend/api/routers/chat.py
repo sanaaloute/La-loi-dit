@@ -42,13 +42,27 @@ from backend.observability.langfuse_client import (
     update_trace_output,
 )
 from backend.security.jwt import TokenPayload
-from backend.security.rbac import require_role
+from backend.security.rbac import has_role, require_role
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["chat"])
 
 _LIST_KEYS = {"trace", "errors"}  # state keys that accumulate across node updates
+
+
+def _strip_trace_frame(event: dict[str, Any], include_trace: bool) -> dict[str, Any]:
+    """Drop internal trace entries from a stream event for non-admin callers.
+
+    Spec §48: the internal chain-of-thought is exposed to administrators
+    only; other roles get trace-free stream frames and an empty final trace.
+    """
+    if include_trace:
+        return event
+    update = event.get("update")
+    if isinstance(update, dict) and "trace" in update:
+        event = {**event, "update": {k: v for k, v in update.items() if k != "trace"}}
+    return event
 
 
 class FeedbackPayload(BaseModel):
@@ -254,9 +268,16 @@ async def chat(
                 _unregister_run(state.get("session_id", ""), run_task)
             response.trace_id = trace_id
             if use_cache and is_cacheable(response.model_dump(mode="json"), settings):
-                await answer_cache.set(payload.query, model_id, response.model_dump(mode="json"))
+                # Never persist the internal trace in the shared answer cache:
+                # it is admin-only (spec §48) and stale for a cached replay.
+                cache_payload = response.model_dump(mode="json")
+                cache_payload["trace"] = []
+                await answer_cache.set(payload.query, model_id, cache_payload)
             update_trace_output(trace, _trace_output_from_response(response), settings=settings)
     await _meter(ctx, user, llm, usage_before, query=payload.query, answer=response.answer.answer)
+    if not has_role(user.role, Role.ADMIN):
+        # Internal chain-of-thought is exposed to administrators only (spec §48).
+        response.trace = []
     return response
 
 
@@ -322,6 +343,7 @@ async def _stream_events(
     usage_before: Optional[dict[str, int]] = None,
     answer_cache: Optional[AnswerCache] = None,
     model_id: str = "",
+    include_trace: bool = False,
 ) -> AsyncIterator[str]:
     """Yield SSE frames: one per node update, then the final ChatResponse.
 
@@ -351,6 +373,7 @@ async def _stream_events(
         pump = asyncio.create_task(_pump_events(graph, state, config, queue))
         session_id = state.get("session_id", "")
         _register_run(session_id, pump)
+        logger.info("chat stream started", extra={"session_id": session_id, "query": payload.query[:80]})
         try:
             cancelled = False
             deadline = started + settings.chat_run_timeout_seconds
@@ -364,6 +387,7 @@ async def _stream_events(
                     # from killing the idle SSE connection during long nodes.
                     if time.perf_counter() > deadline:
                         pump.cancel()
+                        logger.warning("chat stream timed out", extra={"session_id": session_id})
                         yield f"data: {json.dumps({'type': 'error', 'detail': 'Le traitement a dépassé le délai maximal. Réessayez ou simplifiez la question.'}, ensure_ascii=False)}\n\n"
                         return
                     yield ": hb\n\n"
@@ -372,13 +396,15 @@ async def _stream_events(
                     update = value.get("update")
                     if isinstance(update, dict):
                         _merge_update(merged, update)
-                    yield f"data: {json.dumps({'type': 'update', **value}, ensure_ascii=False, default=str)}\n\n"
+                    frame = _strip_trace_frame(value, include_trace)
+                    yield f"data: {json.dumps({'type': 'update', **frame}, ensure_ascii=False, default=str)}\n\n"
                 elif kind == "node_start":
                     yield f"data: {json.dumps({'type': 'node_start', 'node': value}, ensure_ascii=False)}\n\n"
                 elif kind == "done":
                     break
                 elif kind == "cancelled":
                     cancelled = True
+                    logger.info("chat stream cancelled by user", extra={"session_id": session_id})
                     yield f"data: {json.dumps({'type': 'cancelled'}, ensure_ascii=False)}\n\n"
                     break
                 else:  # "error"
@@ -386,6 +412,8 @@ async def _stream_events(
             if cancelled:
                 return
             response = _final_response(merged, state, started, trace_id=trace_id)
+            if not include_trace:
+                response.trace = []
             metrics.chat_latency_seconds.observe(response.latency_ms / 1000.0)
             update_trace_output(trace, _trace_output_from_response(response), settings=settings)
             if memory is not None and merged.get("final_answer") is not None:
@@ -415,10 +443,17 @@ async def _stream_events(
                         except Exception:
                             pass
                 if answer_cache is not None and is_cacheable(response.model_dump(mode="json"), settings):
-                    await answer_cache.set(payload.query, model_id, response.model_dump(mode="json"))
+                    # Cache without the internal trace (admin-only, spec §48).
+                    cache_payload = response.model_dump(mode="json")
+                    cache_payload["trace"] = []
+                    await answer_cache.set(payload.query, model_id, cache_payload)
             yield f"data: {json.dumps({'type': 'final', 'response': response.model_dump(mode='json')}, ensure_ascii=False)}\n\n"
+            logger.info(
+                "chat stream done",
+                extra={"session_id": session_id, "latency_ms": response.latency_ms},
+            )
         except Exception as exc:  # surface failures to the client instead of hanging
-            logger.exception("chat stream failed")
+            logger.exception("chat stream failed", extra={"session_id": session_id})
             metrics.errors_total.labels(kind="chat_stream").inc()
             yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)}, ensure_ascii=False)}\n\n"
         finally:
@@ -427,9 +462,11 @@ async def _stream_events(
                 pump.cancel()
 
 
-async def _cached_stream_events(response: ChatResponse) -> AsyncIterator[str]:
+async def _cached_stream_events(response: ChatResponse, include_trace: bool) -> AsyncIterator[str]:
     """Synthetic SSE sequence for an answer-cache hit (update + final)."""
-    update = {"node": "answer_cache", "update": {"trace": ["answer_cache: hit"]}}
+    update: dict[str, Any] = {"node": "answer_cache", "update": {}}
+    if include_trace:
+        update["update"] = {"trace": ["answer_cache: hit"]}
     yield f"data: {json.dumps({'type': 'update', **update}, ensure_ascii=False)}\n\n"
     yield f"data: {json.dumps({'type': 'final', 'response': response.model_dump(mode='json')}, ensure_ascii=False)}\n\n"
 
@@ -458,11 +495,12 @@ async def chat_stream(
     # bypass. A hit is replayed as a synthetic update+final event sequence.
     answer_cache = AnswerCache(ctx.cache, ctx.embedder, settings)
     use_cache = not session_id
+    include_trace = has_role(user.role, Role.ADMIN)
     if use_cache:
         cached = await answer_cache.get(query, model_id)
         if cached is not None:
             return StreamingResponse(
-                _cached_stream_events(_cached_response(cached, state)),
+                _cached_stream_events(_cached_response(cached, state), include_trace),
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
@@ -481,6 +519,7 @@ async def chat_stream(
             usage_before=usage_before,
             answer_cache=answer_cache if use_cache else None,
             model_id=model_id,
+            include_trace=include_trace,
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
@@ -496,16 +535,20 @@ async def ws_chat(ws: WebSocket) -> None:
         ctx = get_ctx(ws)  # type: ignore[arg-type]
         settings: Settings = ctx.settings
         user_sub = "anonymous"
+        user_role = Role.USER  # anonymous/dev-fallback callers never see the trace
         token = ws.query_params.get("token")
         if token:
             try:
                 from backend.security.jwt import decode_access_token
 
-                user_sub = decode_access_token(token, ctx.settings).sub
+                token_payload = decode_access_token(token, ctx.settings)
+                user_sub = token_payload.sub
+                user_role = token_payload.role
             except Exception:
                 if ctx.settings.env != "development":
                     await ws.close(code=4401)
                     return
+        include_trace = has_role(user_role, Role.ADMIN)
 
         data = await ws.receive_json()
         try:
@@ -536,8 +579,10 @@ async def ws_chat(ws: WebSocket) -> None:
                     update = event.get("update")
                     if isinstance(update, dict):
                         _merge_update(merged, update)
-                    await ws.send_json({"type": "update", **event})
+                    await ws.send_json({"type": "update", **_strip_trace_frame(event, include_trace)})
                 response = _final_response(merged, state, started, trace_id=trace_id)
+                if not include_trace:
+                    response.trace = []
                 update_trace_output(trace, _trace_output_from_response(response), settings=settings)
                 await ws.send_json(
                     {"type": "final", "response": response.model_dump(mode="json")}

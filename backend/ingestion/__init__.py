@@ -9,6 +9,7 @@ package always imports, even with missing optional dependencies.
 from backend.ingestion.loaders import (
     ExtractedDocument,
     load_any,
+    load_csv,
     load_docx,
     load_html,
     load_markdown,
@@ -17,7 +18,7 @@ from backend.ingestion.loaders import (
 )
 from backend.ingestion.text_cleaning import clean_document, clean_text
 from backend.ingestion.chunking import parent_child_chunk, semantic_chunk
-from backend.ingestion.versioning import VersionStore, get_version
+from backend.ingestion.versioning import ArticleDiff, VersionStore
 from backend.ingestion.freshness import FreshnessMonitor, ChangeEvent, DEFAULT_REGISTRY
 from backend.ingestion.crawler import crawl
 
@@ -29,6 +30,7 @@ from backend.ingestion.crawler import crawl
 __all__ = [
     "ExtractedDocument",
     "load_any",
+    "load_csv",
     "load_docx",
     "load_html",
     "load_markdown",
@@ -39,7 +41,7 @@ __all__ = [
     "parent_child_chunk",
     "semantic_chunk",
     "VersionStore",
-    "get_version",
+    "ArticleDiff",
     "FreshnessMonitor",
     "ChangeEvent",
     "DEFAULT_REGISTRY",

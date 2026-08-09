@@ -37,6 +37,10 @@ class BuildSearchTasksArgs(BaseModel):
     aux_top_k: int = 5
 
 
+class ExpandLegalTermsArgs(BaseModel):
+    query: str
+
+
 _FR_MARKERS = (" le ", " la ", " les ", " de ", " du ", " des ", " est ", " quelle", " quel ", " au ", " aux ")
 
 _DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -126,8 +130,20 @@ async def build_search_tasks(ctx: Any, state: Any, args: BuildSearchTasksArgs) -
     return [t.model_dump(mode="json") for t in tasks]
 
 
+@tool(
+    "expand_legal_terms",
+    "Expand legal terms found in the query with synonyms and related terms from the "
+    "legal terminology lexicon (recall-oriented; never replaces the original terms).",
+)
+async def expand_legal_terms(ctx: Any, state: Any, args: ExpandLegalTermsArgs) -> dict[str, list[str]]:
+    from backend.planner.terminology import expand_terms
+
+    return expand_terms(args.query)
+
+
 register_tool(detect_language)
 register_tool(extract_scenario_date)
 register_tool(classify_legal_domains)
 register_tool(build_sub_questions)
 register_tool(build_search_tasks)
+register_tool(expand_legal_terms)

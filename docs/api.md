@@ -67,6 +67,12 @@ Runs the full agentic workflow for one query (`ChatRequest`):
 }
 ```
 
+**Trace gating (spec §48)**: the internal chain-of-thought is exposed to
+ADMIN tokens only. Non-admin roles receive `"trace": []` here, trace-free
+`update` frames on SSE, and a trace-free final object on the WebSocket. The
+shared answer cache never stores the trace, so a cached replay cannot leak it
+either.
+
 ### GET /api/v1/chat/stream (SSE)
 
 Query parameters: `query` (required), `session_id`, `language`, `model`.
@@ -123,7 +129,69 @@ Multipart upload (PDF, DOCX, HTML, MD, …) — ingests and indexes the file.
 
 ### GET /api/v1/documents/{document_id}
 
-Ingestion status/metadata for one document.
+Version/status info for one document, combining the version store
+(`versions.json` — version, content hash, article count) with the document's
+chunks in the vector store (name, chunk count); the latest persisted ingestion
+record (`ingestion_results.json`) is included under `ingestion` when present.
+`404` when the document is unknown to both stores.
+
+```json
+{ "document_id": "…", "document_name": "code-du-travail.pdf", "version": 2,
+  "content_hash": "…", "article_count": 412, "chunk_count": 830,
+  "ingestion": { "status": "indexed", "timestamp": "…" } }
+```
+
+## Citations (`backend/api/routers/citations.py`)
+
+### GET /api/v1/citations/{chunk_id}
+
+Resolves a citation/chunk id to its evidence record — a direct primary-key
+lookup in the vector store (`get_by_ids`), no similarity search, no LLM.
+Returns a `CitationRecord` (metadata subset of `EvidenceChunk`: document
+name/id, article, section, dates, url, content…). `404` when the chunk id is
+unknown, `503` when the vector store is unavailable.
+
+## Sources (`backend/api/routers/sources.py`)
+
+### GET /api/v1/sources/{document_id}
+
+Document-level source record (`SourceRecord`): version, content hash and
+article count from the version store, plus document metadata (name, authority,
+`document_type`, `law_number`, status, publication/effective dates, url,
+language) taken from the document's chunks. `chunk_count` is always included.
+A document is "known" when the version store tracks it or the vector store
+still holds one of its chunks — otherwise `404`.
+
+## Admin (`backend/api/routers/admin.py`)
+
+All endpoints require the ADMIN role, are read-only and work offline.
+
+### GET /api/v1/admin/audit-log?limit=100
+
+Most recent entries of the in-memory audit ring buffer (newest first), filled
+by the audit middleware. `limit` ∈ 1–1000. Response: `{entries, count, cap}`
+where `cap` is the buffer capacity.
+
+### GET /api/v1/admin/ingestion/status
+
+Per-document ingestion state: `documents` (version, content hash, article
+count per document from `versions.json`), `total_documents`,
+`store_updated_at`, and `failed_documents` — the real failure list read from
+`ingestion_results.json` (latest persisted record per document, including the
+error detail).
+
+### GET /api/v1/admin/evaluation/latest
+
+The latest offline evaluation report (`data/eval/eval_report.json`) with
+`generated_at`, `dataset`, `total_cases`, `pass_rate` and the full report
+under `report`. `404` when no report exists, `500` when it is corrupt.
+
+### GET /api/v1/admin/retrieval/analytics
+
+Request analytics aggregated from the in-memory audit log: `total_requests`,
+per-path `requests` / `errors` (status ≥ 500) / `avg_latency_ms`, and per-user
+request counts. Single-process and in-memory only — Prometheus `/metrics`
+stays the cross-process source of truth.
 
 ## Search (`backend/api/routers/search.py`)
 

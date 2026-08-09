@@ -35,6 +35,9 @@ _MIN_CITATION_ACCURACY = 0.99
 _MIN_ANSWER_RELEVANCE = 0.5
 _MIN_RECALL_WHEN_EXPECTED = 0.5
 
+# Cutoff for the rank-aware retrieval metrics reported per case.
+_RANK_K = 5
+
 
 async def build_offline_context(settings: Settings) -> AppContext:
     """Wire an AppContext with the in-memory adapters (zero external services).
@@ -74,15 +77,19 @@ def _aggregate(
     *,
     dataset_path: str,
     disclaimer: str,
+    dataset_note: str = "",
+    issue_coverages: list[float] | None = None,
+    rank_metrics: dict[str, list[float]] | None = None,
 ) -> dict[str, Any]:
     def mean(attr: str) -> float:
         return round(sum(getattr(r, attr) for r in results) / len(results), 4) if results else 0.0
 
     latencies = [r.latency_ms for r in results]
     passed = sum(1 for r in results if r.passed)
-    return {
+    aggregate: dict[str, Any] = {
         "dataset": dataset_path,
         "disclaimer": disclaimer,
+        "dataset_note": dataset_note,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "total_cases": len(results),
         "passed": passed,
@@ -97,6 +104,14 @@ def _aggregate(
         "mean_latency_ms": round(sum(latencies) / len(latencies), 1) if latencies else 0.0,
         "p95_latency_ms": round(_percentile(latencies, 0.95), 1),
     }
+    # Optional metric families, averaged only over the cases that declare the
+    # corresponding expectations (older datasets without them stay compatible).
+    if issue_coverages:
+        aggregate["mean_issue_coverage"] = round(sum(issue_coverages) / len(issue_coverages), 4)
+    for name, values in (rank_metrics or {}).items():
+        if values:
+            aggregate[f"mean_{name}"] = round(sum(values) / len(values), 4)
+    return aggregate
 
 
 async def evaluate(dataset_path: str, out_path: str) -> dict[str, Any]:
@@ -106,6 +121,7 @@ async def evaluate(dataset_path: str, out_path: str) -> dict[str, Any]:
     dataset_file = Path(dataset_path)
     dataset = json.loads(dataset_file.read_text(encoding="utf-8"))
     disclaimer = dataset.get("disclaimer", "")
+    dataset_note = dataset.get("coverage_note", "")
     cases = dataset.get("cases", [])
 
     settings = Settings(llm_provider="mock", data_dir=Path("./data/eval"))
@@ -116,6 +132,13 @@ async def evaluate(dataset_path: str, out_path: str) -> dict[str, Any]:
     graph = build_graph(ctx)
 
     results: list[EvalCaseResult] = []
+    issue_coverages: list[float] = []
+    rank_metric_lists: dict[str, list[float]] = {
+        f"recall_at_{_RANK_K}": [],
+        f"precision_at_{_RANK_K}": [],
+        "mrr": [],
+        f"ndcg_at_{_RANK_K}": [],
+    }
     for case in cases:
         state = initial_state(case["question"], scenario_date=case.get("scenario_date"))
         response = await run_query(graph, ctx, state)
@@ -123,6 +146,8 @@ async def evaluate(dataset_path: str, out_path: str) -> dict[str, Any]:
 
         expected_keywords = case.get("expected_keywords", [])
         expected_documents = case.get("expected_documents", [])
+        expected_articles = case.get("expected_articles", [])
+        expected_issues = case.get("expected_issues", [])
         groundedness = metrics.groundedness(answer)
         citation_accuracy = metrics.citation_accuracy(answer)
         relevance = metrics.answer_relevance(answer.answer, expected_keywords)
@@ -130,8 +155,44 @@ async def evaluate(dataset_path: str, out_path: str) -> dict[str, Any]:
         recall = metrics.retrieval_recall(answer.evidence, expected_documents)
         hallucination = metrics.hallucination_detected(answer)
 
+        # Issue coverage (spec §38): the answer must touch every declared issue
+        # category — an answer discussing only tribunal jurisdiction fails.
+        issue_ratio, missing_issues = metrics.issue_coverage(answer.answer, expected_issues)
+        if expected_issues:
+            issue_coverages.append(issue_ratio)
+
+        # Rank-aware retrieval metrics over the evidence order, for every
+        # expectation kind the case declares (documents and/or articles).
+        ranked_expectations: list[tuple[list[str], list[str]]] = []
+        if expected_documents:
+            ranked_expectations.append(
+                ([c.document_name for c in answer.evidence], expected_documents)
+            )
+        if expected_articles:
+            ranked_expectations.append(
+                ([c.article or "" for c in answer.evidence], expected_articles)
+            )
+        case_rank: dict[str, float] = {}
+        if ranked_expectations:
+            per_kind = {
+                f"recall_at_{_RANK_K}": [
+                    metrics.recall_at_k(ids, rel, _RANK_K) for ids, rel in ranked_expectations
+                ],
+                f"precision_at_{_RANK_K}": [
+                    metrics.precision_at_k(ids, rel, _RANK_K) for ids, rel in ranked_expectations
+                ],
+                "mrr": [metrics.mrr(ids, rel) for ids, rel in ranked_expectations],
+                f"ndcg_at_{_RANK_K}": [
+                    metrics.ndcg_at_k(ids, rel, _RANK_K) for ids, rel in ranked_expectations
+                ],
+            }
+            for name, values in per_kind.items():
+                case_rank[name] = sum(values) / len(values)
+                rank_metric_lists[name].append(case_rank[name])
+
         passed = (
             not hallucination
+            and not missing_issues
             and citation_accuracy >= _MIN_CITATION_ACCURACY
             and groundedness >= _MIN_GROUNDEDNESS
             and relevance >= _MIN_ANSWER_RELEVANCE
@@ -142,6 +203,18 @@ async def evaluate(dataset_path: str, out_path: str) -> dict[str, Any]:
             f"confidence={answer.confidence:.2f} refused={answer.refused} "
             f"evidence={len(answer.evidence)} chunks"
         )
+        if expected_issues:
+            covered = len(expected_issues) - len(missing_issues)
+            detail += f" issues={covered}/{len(expected_issues)}"
+            if missing_issues:
+                detail += f" missing_issues={','.join(missing_issues)}"
+        if case_rank:
+            detail += (
+                f" R@{_RANK_K}={case_rank[f'recall_at_{_RANK_K}']:.2f}"
+                f" P@{_RANK_K}={case_rank[f'precision_at_{_RANK_K}']:.2f}"
+                f" MRR={case_rank['mrr']:.2f}"
+                f" NDCG@{_RANK_K}={case_rank[f'ndcg_at_{_RANK_K}']:.2f}"
+            )
         results.append(
             EvalCaseResult(
                 case_id=case["id"],
@@ -160,7 +233,14 @@ async def evaluate(dataset_path: str, out_path: str) -> dict[str, Any]:
             )
         )
 
-    aggregate = _aggregate(results, dataset_path=str(dataset_file), disclaimer=disclaimer)
+    aggregate = _aggregate(
+        results,
+        dataset_path=str(dataset_file),
+        disclaimer=disclaimer,
+        dataset_note=dataset_note,
+        issue_coverages=issue_coverages,
+        rank_metrics=rank_metric_lists,
+    )
 
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True) if out.parent != Path("") else None

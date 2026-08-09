@@ -2,18 +2,35 @@
 
 Each entry records where a source lives, which authority level its documents
 carry and which search kind it serves. ``authority_for_url`` classifies any
-URL against ``OFFICIAL_DOMAINS`` so official sources always outrank blogs.
+URL against the official domains (``load_official_domains`` — module default
+:data:`backend.core.constants.OFFICIAL_DOMAINS`, overridable via
+``settings.authority_config_path``) so official sources always outrank blogs.
+
+Data source (jurisdiction-configurable)
+---------------------------------------
+The registry's primary source is the ``search_registry`` section of
+``data/legal_sources.json`` (override the file via
+``settings.legal_sources_path``).  A missing/corrupt file falls back to the
+embedded registry below with a structured warning.
 """
 
 from __future__ import annotations
 
-from typing import Optional
+import json
+import logging
+from pathlib import Path
+from typing import Optional, Union
 from urllib.parse import urlparse
 
 from pydantic import BaseModel
 
-from backend.core.constants import OFFICIAL_DOMAINS
+from backend.core.constants import load_official_domains
 from backend.core.models import AuthorityLevel, SearchKind
+
+logger = logging.getLogger(__name__)
+
+#: Bundled legal-sources file shipped with the repository.
+DEFAULT_SOURCES_PATH = Path(__file__).resolve().parents[2] / "data" / "legal_sources.json"
 
 
 class OfficialSource(BaseModel):
@@ -43,7 +60,7 @@ class OfficialSource(BaseModel):
         return f"{self.base_url}{self.rss_path}"
 
 
-DEFAULT_REGISTRY: list[OfficialSource] = [
+_EMBEDDED_REGISTRY: list[OfficialSource] = [
     OfficialSource(
         name="Portail du Gouvernement du Burkina Faso",
         base_url="https://www.gouv.bf",
@@ -116,6 +133,68 @@ DEFAULT_REGISTRY: list[OfficialSource] = [
 ]
 
 
+def resolve_sources_path(path: Optional[Union[str, Path]] = None) -> Path:
+    """Explicit ``path`` → ``settings.legal_sources_path`` → bundled file."""
+    if path:
+        return Path(path)
+    try:
+        from backend.core.config import get_settings
+
+        configured = getattr(get_settings(), "legal_sources_path", None)
+    except Exception:  # settings unavailable: stay on the bundled default
+        configured = None
+    return Path(configured) if configured else DEFAULT_SOURCES_PATH
+
+
+def read_sources_section(
+    section: str, path: Optional[Union[str, Path]] = None
+) -> Optional[object]:
+    """Read one section of the legal-sources JSON file (``None`` on failure)."""
+    resolved = resolve_sources_path(path)
+    try:
+        data = json.loads(resolved.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("legal sources file must be a JSON object")
+        return data.get(section)
+    except Exception as exc:
+        logger.warning(
+            "legal_sources_load_failed",
+            extra={"path": str(resolved), "section": section, "error": str(exc)},
+        )
+        return None
+
+
+_REGISTRY_CACHE: dict[str, list[OfficialSource]] = {}
+
+
+def load_registry(path: Optional[Union[str, Path]] = None) -> list[OfficialSource]:
+    """Load the official-source registry from the legal-sources JSON file.
+
+    Resolution order: explicit ``path`` → ``settings.legal_sources_path`` →
+    the bundled ``data/legal_sources.json``.  A missing/corrupt file falls
+    back to the embedded registry with a structured warning — never raises.
+    """
+    key = str(resolve_sources_path(path))
+    if key not in _REGISTRY_CACHE:
+        raw = read_sources_section("search_registry", key)
+        try:
+            if raw is None:
+                raise ValueError("search_registry section unavailable")
+            _REGISTRY_CACHE[key] = [OfficialSource(**entry) for entry in raw]  # type: ignore[union-attr]
+        except Exception as exc:
+            logger.warning(
+                "search_registry_load_failed",
+                extra={"path": key, "error": str(exc), "fallback": "embedded_registry"},
+            )
+            _REGISTRY_CACHE[key] = list(_EMBEDDED_REGISTRY)
+    return list(_REGISTRY_CACHE[key])
+
+
+#: Default registry, loaded from the bundled legal-sources file at import
+#: (falling back to the embedded registry). Kept importable for compatibility.
+DEFAULT_REGISTRY: list[OfficialSource] = load_registry()
+
+
 # Domain-specific authority overrides; anything else in OFFICIAL_DOMAINS
 # defaults to OFFICIAL_NEWS (still above any non-official source).
 _DOMAIN_AUTHORITY: dict[str, AuthorityLevel] = {
@@ -155,9 +234,10 @@ def authority_for_url(url: Optional[str]) -> AuthorityLevel:
     for domain, authority in _DOMAIN_AUTHORITY.items():
         if host == domain or host.endswith(f".{domain}"):
             return authority
+    official_domains = load_official_domains()
     domain = _registered_domain(host)
-    if domain in OFFICIAL_DOMAINS or any(
-        host == d or host.endswith(f".{d}") for d in OFFICIAL_DOMAINS
+    if domain in official_domains or any(
+        host == d or host.endswith(f".{d}") for d in official_domains
     ):
         return AuthorityLevel.OFFICIAL_NEWS
     if any(marker in host for marker in _BLOG_PLATFORMS):
@@ -171,9 +251,11 @@ def sources_for_kind(
     """Filter the registry for a search kind.
 
     WEB/WEBSITE tasks search every registered source; other kinds match
-    sources registered for exactly that kind.
+    sources registered for exactly that kind.  Without an explicit
+    ``registry``, the registry is loaded from the legal-sources file (see
+    :func:`load_registry`).
     """
-    registry = registry if registry is not None else DEFAULT_REGISTRY
+    registry = registry if registry is not None else load_registry()
     if kind in (SearchKind.WEB, SearchKind.WEBSITE):
         return list(registry)
     return [source for source in registry if source.kind == kind]

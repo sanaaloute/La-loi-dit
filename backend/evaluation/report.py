@@ -27,6 +27,10 @@ def render_markdown(results: list[EvalCaseResult], aggregate: dict[str, Any]) ->
         f"passed: {aggregate.get('passed', 0)} "
         f"({aggregate.get('pass_rate', 0.0):.0%})",
         "",
+    ]
+    if aggregate.get("dataset_note"):
+        lines += [f"_{aggregate['dataset_note']}_", ""]
+    lines += [
         "## Aggregate metrics",
         "",
         "| Metric | Value |",
@@ -37,6 +41,11 @@ def render_markdown(results: list[EvalCaseResult], aggregate: dict[str, Any]) ->
         "mean_faithfulness",
         "mean_citation_accuracy",
         "mean_answer_relevance",
+        "mean_issue_coverage",
+        "mean_recall_at_5",
+        "mean_precision_at_5",
+        "mean_mrr",
+        "mean_ndcg_at_5",
         "hallucination_rate",
         "mean_latency_ms",
         "p95_latency_ms",

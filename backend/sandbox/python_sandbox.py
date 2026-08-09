@@ -127,12 +127,17 @@ def _scrubbed_env() -> dict[str, str]:
     return env
 
 
-async def safe_exec(code: str, timeout: float = 5.0) -> SandboxResult:
+async def safe_exec(code: str, timeout: Optional[float] = None) -> SandboxResult:
     """Validate then execute ``code`` in an isolated subprocess.
 
     Code failing static validation is rejected and reported in the returned
-    SandboxResult (success=False) — it is never executed.
+    SandboxResult (success=False) — it is never executed. ``timeout`` defaults
+    to ``settings.sandbox_timeout_seconds`` when not given.
     """
+    if timeout is None:
+        from backend.core.config import get_settings
+
+        timeout = get_settings().sandbox_timeout_seconds
     try:
         validate_code(code)
     except SandboxError as exc:

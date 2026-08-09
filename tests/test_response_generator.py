@@ -19,9 +19,11 @@ class StubLLM:
     def __init__(self, outputs: list[str]):
         self.outputs = list(outputs)
         self.calls = 0
+        self.systems: list[str] = []
 
     async def complete(self, system: str, user: str, temperature=None) -> str:
         self.calls += 1
+        self.systems.append(system)
         return self.outputs.pop(0) if self.outputs else ""
 
 
@@ -213,3 +215,116 @@ async def test_reflection_gap_caps_confidence(settings):
 def test_prompt_contains_fewshot_examples():
     assert "FEW-SHOT EXAMPLES" in ResponseGeneratorAgent.system_prompt
     assert "Réponse:" in ResponseGeneratorAgent.system_prompt
+
+
+def test_prompt_requires_data_separation_and_prose_source_naming():
+    """Spec §41/§42: excerpts are DATA, sources named in prose at first citation."""
+    prompt = ResponseGeneratorAgent.system_prompt
+    assert "DATA" in prompt
+    assert "Selon l'article" in prompt
+    assert "evidence metadata" in prompt
+
+
+@pytest.mark.asyncio
+async def test_sectioned_structure_prompt_for_complex_question_types(settings):
+    """Spec §40: RIGHTS/OBLIGATIONS/PROCEDURE/... get the sectioned addendum."""
+    from backend.core.models import QuestionType, RetrievalPlan
+
+    agent = ResponseGeneratorAgent()
+    llm = StubLLM(["Réponse complète [1]."])
+    state = _state(_evidence())
+    state["plan"] = RetrievalPlan(question_type=QuestionType.PROCEDURE)
+    await agent.run(state, _ctx(settings, llm))
+    assert "## Fondements juridiques" in llm.systems[0]
+    assert "## Points d'incertitude" in llm.systems[0]
+
+
+@pytest.mark.asyncio
+async def test_sectioned_structure_prompt_english_for_complex_questions(settings):
+    from backend.core.models import QuestionType, RetrievalPlan
+
+    agent = ResponseGeneratorAgent()
+    llm = StubLLM(["Complete answer [1]."])
+    state = _state(_evidence())
+    state["language"] = "en"
+    state["plan"] = RetrievalPlan(question_type=QuestionType.RIGHTS)
+    await agent.run(state, _ctx(settings, llm))
+    assert "## Legal basis" in llm.systems[0]
+    assert "## Fondements juridiques" not in llm.systems[0]
+
+
+@pytest.mark.asyncio
+async def test_simple_question_types_keep_unsectioned_prompt(settings):
+    from backend.core.models import QuestionType, RetrievalPlan
+
+    agent = ResponseGeneratorAgent()
+    llm = StubLLM(["Réponse complète [1]."])
+    state = _state(_evidence())
+    state["plan"] = RetrievalPlan(question_type=QuestionType.FACTUAL)
+    await agent.run(state, _ctx(settings, llm))
+    assert "## Fondements juridiques" not in llm.systems[0]
+
+
+@pytest.mark.asyncio
+async def test_case_analysis_prompt_has_structure_and_labels_fr(settings):
+    """Spec §31: CASE_ANALYSIS gets its own structure plus per-statement labels."""
+    from backend.core.models import QuestionType, RetrievalPlan
+
+    agent = ResponseGeneratorAgent()
+    llm = StubLLM(["Réponse complète [1]."])
+    state = _state(_evidence())
+    state["plan"] = RetrievalPlan(question_type=QuestionType.CASE_ANALYSIS)
+    await agent.run(state, _ctx(settings, llm))
+    prompt = llm.systems[0]
+    # Dedicated case-analysis structure instead of the generic §40 sections.
+    for section in (
+        "## Faits",
+        "## Qualification juridique",
+        "## Règles applicables",
+        "## Application",
+        "## Incertitudes",
+    ):
+        assert section in prompt
+    assert "## Fondements juridiques" not in prompt
+    # Per-statement labeling contract.
+    assert "[LOI]" in prompt
+    assert "[APPLICATION]" in prompt
+    assert "[HYPOTHÈSE]" in prompt
+    # The [n] citation contract is kept for statutory statements.
+    assert "[n]" in prompt
+
+
+@pytest.mark.asyncio
+async def test_case_analysis_prompt_english_labels(settings):
+    from backend.core.models import QuestionType, RetrievalPlan
+
+    agent = ResponseGeneratorAgent()
+    llm = StubLLM(["Complete answer [1]."])
+    state = _state(_evidence())
+    state["language"] = "en"
+    state["plan"] = RetrievalPlan(question_type=QuestionType.CASE_ANALYSIS)
+    await agent.run(state, _ctx(settings, llm))
+    prompt = llm.systems[0]
+    assert "## Facts" in prompt
+    assert "## Applicable rules" in prompt
+    assert "[LAW]" in prompt
+    assert "[APPLICATION]" in prompt
+    assert "[ASSUMPTION]" in prompt
+    assert "[HYPOTHÈSE]" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_case_analysis_labels_absent_for_other_question_types(settings):
+    """Labels are CASE_ANALYSIS-only: other types keep the §40 sections."""
+    from backend.core.models import QuestionType, RetrievalPlan
+
+    agent = ResponseGeneratorAgent()
+    llm = StubLLM(["Réponse complète [1]."])
+    state = _state(_evidence())
+    state["plan"] = RetrievalPlan(question_type=QuestionType.PROCEDURE)
+    await agent.run(state, _ctx(settings, llm))
+    prompt = llm.systems[0]
+    assert "## Fondements juridiques" in prompt
+    assert "[LOI]" not in prompt
+    assert "[HYPOTHÈSE]" not in prompt
+    assert "## Faits" not in prompt

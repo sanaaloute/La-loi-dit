@@ -23,12 +23,15 @@ flowchart TB
         fan --> rm[retrieval_merge]
         rm --> cr[conflict_resolver]
         cr --> er[evidence_ranking]
-        er --> ra[reasoning_agent]
+        er --> cva[coverage_auditor]
+        cva -->|coverage gap<br/>max 1 retry| fan
+        cva --> ra[reasoning_agent]
         ra -->|needs evidence<br/>max 1 retry| fan
         ra --> rf[reflection]
         rf -->|retry retrieval<br/>max 1 iteration| fan
         rf --> rg[response_generator]
-        rg --> cv[citation_verification]
+        rg --> clv[claim_verification]
+        clv --> cv[citation_verification]
         cv --> og[output_guardrail]
     end
 
@@ -131,10 +134,10 @@ credentials.
 
 ### Bounded retries
 
-Retry budgets are hard-coded to **1** everywhere
-(`MAX_PLANNING_RETRIES`, `MAX_RETRIEVAL_RETRIES`,
-`MAX_REFLECTION_ITERATIONS`, `MAX_GLOBAL_RETRIES` in
-`backend/core/constants.py`). There is no path that can loop indefinitely.
+Retry budgets are **1** by default (`max_retrieval_retries`,
+`max_reflection_iterations` in `backend/core/config.py`); the planner's
+corrective JSON retry is a fixed single retry in
+`LLMClient.complete_json`. There is no path that can loop indefinitely.
 
 ### Traceability
 

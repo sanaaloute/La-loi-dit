@@ -72,12 +72,19 @@ works with zero services. **Strict infrastructure mode** (on by default when
 changes the contract:
 
 - fallbacks are **reported, not silent** — every dependency gets an
-  `infra_status` entry (`ok` / `degraded: reason`) collected at boot;
+  `infra_status` entry (`ok` / `degraded: reason`) collected at boot. This
+  covers Milvus/Redis/Postgres and the softer fallbacks too: mock LLM
+  provider, hash embeddings, in-memory cache, SQLite-pivoting user/memory/
+  legal-graph stores;
 - the user store may not fall back to a local SQLite file: with Postgres
   down it stays unavailable (registration returns 503) instead of writing
   accounts to a throwaway store;
-- `/ready` returns **HTTP 503** when a critical dependency (Milvus,
-  Postgres) is down, so the orchestrator stops routing traffic.
+- `/ready` returns **HTTP 503** when a critical dependency is down, so the
+  orchestrator stops routing traffic. The critical set is configurable via
+  `LEGAL_AI_STRICT_CRITICAL_COMPONENTS` (comma-separated, validated at boot;
+  default `milvus,postgres,database_probe,llm,embeddings,user_store`, plus
+  `vector_store_probe` while Milvus is enabled). `redis`, `memory_store` and
+  `legal_graph` stay non-critical unless added explicitly.
 
 ## Health and readiness probes
 

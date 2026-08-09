@@ -85,7 +85,11 @@ def _parse_rss_results(text: str) -> list[dict[str, str]]:
 
 
 def _to_chunk(
-    raw: dict[str, str], source: OfficialSource, task: SearchTask, max_content_chars: int
+    raw: dict[str, str],
+    source: OfficialSource,
+    task: SearchTask,
+    max_content_chars: int,
+    settings: Any,
 ) -> EvidenceChunk:
     """Convert one parsed result into an EvidenceChunk with full metadata."""
     title = raw["title"] or source.name
@@ -97,8 +101,8 @@ def _to_chunk(
         government_body=source.government_body,
         source_kind=task.kind,
         authority=source.authority,
-        confidence=AUTHORITY_WEIGHTS.get(source.authority, 0.15),
-        retrieval_score=0.5,  # upstream source hit; refined by fusion/rerank
+        confidence=AUTHORITY_WEIGHTS.get(source.authority, settings.search_authority_fallback),
+        retrieval_score=settings.search_web_hit_score,  # refined by fusion/rerank
         metadata={"source": source.name, "retrieved_via": "web"},
     )
 
@@ -109,6 +113,7 @@ async def _fetch_source(
     task: SearchTask,
     max_results_per_source: int,
     max_content_chars: int,
+    settings: Any,
 ) -> list[EvidenceChunk]:
     """Fetch and parse one source for one task; [] on any failure."""
     try:
@@ -131,7 +136,7 @@ async def _fetch_source(
             response.raise_for_status()
             raws = _parse_rss_results(response.text)
         return [
-            _to_chunk(raw, source, task, max_content_chars)
+            _to_chunk(raw, source, task, max_content_chars, settings)
             for raw in raws[:max_results_per_source]
         ]
     except Exception as exc:
@@ -189,7 +194,7 @@ async def search_sources(
         ) as client:
             results = await asyncio.gather(
                 *(
-                    _fetch_source(client, source, task, max_results, max_content_chars)
+                    _fetch_source(client, source, task, max_results, max_content_chars, settings)
                     for source, task in jobs
                 ),
                 return_exceptions=True,

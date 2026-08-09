@@ -275,6 +275,16 @@ nested spans, meaningful input/output, and feedback scores).
 - [Administrator guide](docs/administrator.md) — users, ingestion, evaluations
 - [Evaluation](docs/evaluation.md) — quality metrics and the evaluation runner
 
+Post-upgrade (agentic platform) documentation:
+
+- [RAG architecture](docs/RAG_ARCHITECTURE.md) — the upgraded LangGraph pipeline as implemented
+- [Legal retrieval](docs/LEGAL_RETRIEVAL.md) — question types, decomposition, temporal model, ranking, coverage loop
+- [Document processing](docs/DOCUMENT_PROCESSING.md) — loaders, legal chunking, classification, versioning
+- [Citation system](docs/CITATION_SYSTEM.md) — citation contract, claim/citation verification, confidence model
+- [Evaluation framework](docs/EVALUATION.md) — golden dataset, metrics, gates and baseline
+- [Migration guide](docs/MIGRATION.md) — upgrade/rollback notes, schema migration, new settings and endpoints
+- [RAG architecture audit](docs/RAG_ARCHITECTURE_AUDIT.md) — pre-upgrade audit snapshot
+
 ## Configuration
 
 Everything is configured via environment variables prefixed `LEGAL_AI_` (see

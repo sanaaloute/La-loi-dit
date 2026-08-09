@@ -8,6 +8,11 @@ incremental re-indexing.
 
 Fully offline-safe: without network access every check fails soft and
 :meth:`FreshnessMonitor.check_sources` simply returns ``[]``.
+
+Data source (jurisdiction-configurable): the monitored sources come from the
+``freshness_registry`` section of ``data/legal_sources.json`` (override via
+``settings.legal_sources_path``); a missing/corrupt file falls back to the
+embedded registry with a structured warning.
 """
 
 from __future__ import annotations
@@ -49,8 +54,9 @@ class ChangeEvent(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-#: Official Burkina Faso / OHADA sources monitored by default.
-DEFAULT_REGISTRY: list[SourceSpec] = [
+#: Official Burkina Faso / OHADA sources monitored when the legal-sources
+#: file is unavailable (embedded fallback).
+_EMBEDDED_REGISTRY: list[SourceSpec] = [
     SourceSpec(
         name="OHADA — Actualités",
         url="https://www.ohada.org/feed/",
@@ -76,6 +82,56 @@ DEFAULT_REGISTRY: list[SourceSpec] = [
         metadata={"authority": "official_news", "government_body": "Gouvernement du Burkina Faso"},
     ),
 ]
+
+
+#: Bundled legal-sources file shipped with the repository.
+DEFAULT_SOURCES_PATH = Path(__file__).resolve().parents[2] / "data" / "legal_sources.json"
+
+
+def _resolve_sources_path(path: Optional[Union[str, Path]] = None) -> Path:
+    """Explicit ``path`` → ``settings.legal_sources_path`` → bundled file."""
+    if path:
+        return Path(path)
+    try:
+        from backend.core.config import get_settings
+
+        configured = getattr(get_settings(), "legal_sources_path", None)
+    except Exception:  # settings unavailable: stay on the bundled default
+        configured = None
+    return Path(configured) if configured else DEFAULT_SOURCES_PATH
+
+
+_REGISTRY_CACHE: dict[str, list[SourceSpec]] = {}
+
+
+def load_registry(path: Optional[Union[str, Path]] = None) -> list[SourceSpec]:
+    """Load the freshness-monitored sources from the legal-sources JSON file.
+
+    Resolution order: explicit ``path`` → ``settings.legal_sources_path`` →
+    the bundled ``data/legal_sources.json`` (``freshness_registry`` section).
+    A missing/corrupt file falls back to the embedded registry with a
+    structured warning — never raises.
+    """
+    key = str(_resolve_sources_path(path))
+    if key not in _REGISTRY_CACHE:
+        try:
+            data = json.loads(Path(key).read_text(encoding="utf-8"))
+            raw = data.get("freshness_registry") if isinstance(data, dict) else None
+            if not isinstance(raw, list):
+                raise ValueError("freshness_registry section unavailable")
+            _REGISTRY_CACHE[key] = [SourceSpec(**entry) for entry in raw]
+        except Exception as exc:
+            logger.warning(
+                "freshness_registry_load_failed",
+                extra={"path": key, "error": str(exc), "fallback": "embedded_registry"},
+            )
+            _REGISTRY_CACHE[key] = list(_EMBEDDED_REGISTRY)
+    return list(_REGISTRY_CACHE[key])
+
+
+#: Default registry, loaded from the bundled legal-sources file at import
+#: (falling back to the embedded registry). Kept importable for compatibility.
+DEFAULT_REGISTRY: list[SourceSpec] = load_registry()
 
 
 class FreshnessMonitor:
@@ -114,12 +170,13 @@ class FreshnessMonitor:
     async def check_sources(
         self, registry: Optional[Sequence[Union[SourceSpec, dict]]] = None
     ) -> list[ChangeEvent]:
-        """Check every source in ``registry`` (default: :data:`DEFAULT_REGISTRY`).
+        """Check every source in ``registry`` (default: the legal-sources
+        file's ``freshness_registry`` section, see :func:`load_registry`).
 
         Returns one :class:`ChangeEvent` per changed source. Network or parse
         failures are logged and skipped — never raised.
         """
-        sources = [s if isinstance(s, SourceSpec) else SourceSpec(**s) for s in (registry or DEFAULT_REGISTRY)]
+        sources = [s if isinstance(s, SourceSpec) else SourceSpec(**s) for s in (registry or load_registry())]
         state = self._load_state()
         events: list[ChangeEvent] = []
 

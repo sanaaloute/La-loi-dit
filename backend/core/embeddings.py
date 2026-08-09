@@ -33,17 +33,17 @@ class EmbeddingProvider(Protocol):
 
 
 class LiteLLMEmbeddings:
-    #: Max texts per API call (NVIDIA via OpenRouter caps batches at 256).
-    _BATCH_SIZE = 200
-
     def __init__(self, settings: Settings):
         self.settings = settings
         self.dimension = settings.embedding_dimension
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
+        # Batched API calls: providers cap batch sizes (NVIDIA via OpenRouter
+        # caps at 256); the default of 200 stays below that.
+        batch_size = max(1, self.settings.embedding_batch_size)
         vectors: list[list[float]] = []
-        for start in range(0, len(texts), self._BATCH_SIZE):
-            vectors.extend(await self._embed_batch(texts[start : start + self._BATCH_SIZE]))
+        for start in range(0, len(texts), batch_size):
+            vectors.extend(await self._embed_batch(texts[start : start + batch_size]))
         return vectors
 
     async def _embed_batch(self, texts: list[str]) -> list[list[float]]:

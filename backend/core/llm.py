@@ -591,14 +591,39 @@ class LLMClient:
         if "respond" in s or "answer" in s or "rédige" in s:
             # A minimal citation-grounded answer, so tests exercise the real
             # LLM-synthesis path — there is no template fallback anymore.
-            if "[1]" in user:
-                return (
-                    "Sur la base des preuves fournies, la réponse à la question est "
-                    "établie comme suit [1]. Les dispositions citées s'appliquent "
-                    "telles quelles [1]."
-                )
-            return ""
+            return self._mock_grounded_answer(user)
         return json.dumps({}) if "json" in s else ""
+
+    #: Cap on each quoted excerpt in the mock answer (excerpts can be long).
+    _MOCK_QUOTE_CHARS = 1500
+
+    def _mock_grounded_answer(self, user: str) -> str:
+        """Quote each numbered evidence excerpt with its [n] citation marker.
+
+        The mock never invents legal content: it restates only what the prompt
+        actually provided, which keeps the offline pipeline deterministic while
+        letting answer-level evaluation metrics (keyword relevance, issue
+        coverage) see the same legal terms a real synthesis would carry.
+        Returns "" when the prompt contains no numbered excerpt.
+        """
+        if "[1]" not in user:
+            return ""
+        lines = [
+            "Sur la base des preuves fournies, la réponse à la question est "
+            "établie comme suit [1]."
+        ]
+        # Excerpts are "[n] label: content" lines, the first prefixed by the
+        # "Preuves:" header — anchor on the numbered line starts instead of
+        # splitting blocks so the header cannot swallow excerpt [1].
+        entries = re.findall(
+            r"(?ms)^\[(\d+)\][^\n]*?:\s*(.+?)(?=^\[\d+\]|\Z)", user
+        )
+        for index, content in entries:
+            quote = " ".join(content.split())
+            lines.append(f"- {quote[: self._MOCK_QUOTE_CHARS]} [{index}]")
+        if len(lines) == 1:
+            return ""
+        return "\n".join(lines)
 
 
 def get_llm(settings: Settings) -> LLMClient:

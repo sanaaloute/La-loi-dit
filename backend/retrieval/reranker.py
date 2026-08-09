@@ -20,6 +20,7 @@ from typing import Any, Optional
 from backend.core.config import get_settings
 from backend.core.embeddings import HashEmbeddings
 from backend.core.models import EvidenceChunk
+from backend.core.prompts import get_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -50,20 +51,17 @@ def _cosine(a: list[float], b: list[float]) -> float:
 
 
 async def _llm_refine(
-    query: str, chunks: list[EvidenceChunk], llm: Any
+    query: str, chunks: list[EvidenceChunk], llm: Any, excerpt_chars: int
 ) -> Optional[list[float]]:
     """Ask an LLM for 0-1 relevance scores; None on any failure."""
     if llm is None or not hasattr(llm, "complete"):
         return None
     try:
         numbered = "\n".join(
-            f"[{i}] {chunk.content[:300]}" for i, chunk in enumerate(chunks)
+            f"[{i}] {chunk.content[:excerpt_chars]}" for i, chunk in enumerate(chunks)
         )
         raw = await llm.complete(
-            system=(
-                "Score each passage's relevance to the query from 0.0 to 1.0. "
-                'Reply with a JSON array of floats only, e.g. [0.9, 0.2].'
-            ),
+            system=get_prompt("RERANK_RESCORE"),
             user=f"Query: {query}\n\n{numbered}",
         )
         match = re.search(r"\[[^\]]*\]", raw, re.DOTALL)
@@ -131,11 +129,14 @@ async def rerank(
             + confidence_weight * confidence
         )
 
-    llm_scores = await _llm_refine(query, chunks, llm)
+    llm_scores = await _llm_refine(
+        query, chunks, llm, excerpt_chars=settings.rerank_llm_excerpt_chars
+    )
+    llm_blend = settings.rerank_llm_blend_weight
     for i, chunk in enumerate(chunks):
         score = heuristic[i]
         if llm_scores is not None:
-            score = 0.5 * score + 0.5 * llm_scores[i]
+            score = (1.0 - llm_blend) * score + llm_blend * llm_scores[i]
         chunk.rerank_score = max(0.0, min(1.0, score))
 
     ranked = sorted(chunks, key=lambda c: c.rerank_score, reverse=True)

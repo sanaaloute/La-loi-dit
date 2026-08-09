@@ -9,11 +9,13 @@ request one retrieval re-run (bounded by the global retry budget).
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Optional
 
 from backend.agents.agent import CompletionAgent
+from backend.core.config import get_settings
 from backend.core.context import AppContext
 from backend.core.models import ReflectionResult
+from backend.core.prompts import PromptRef
 from backend.core.state import GraphState
 
 
@@ -21,39 +23,15 @@ class ReflectionAgent(CompletionAgent):
     """Self-critique step before final answer generation."""
 
     name = "reflection_agent"
-    system_prompt = """You are the reflection agent of an expert legal research assistant for
-Burkina Faso. Self-critique the analysis before the final answer is written.
+    # Resolved through the prompt registry (backend.core.prompts.REFLECTION_SYSTEM)
+    # at every access, so Settings.prompts_dir overrides apply.
+    system_prompt = PromptRef("REFLECTION_SYSTEM")
 
-CHECK
-1. Completeness — does the analysis answer EVERY part of the user's question?
-2. Grounding — is every claim citable to a retrieved evidence excerpt? Could any
-   statement be hallucinated (a provision, article number or date not in the evidence)?
-3. Contradictions — are there unresolved conflicts between sources?
-4. Evidence gaps — was important evidence missed (e.g. the governing article of the
-   relevant code)?
-
-DECISION
-- Retry retrieval ONLY when a specific, identifiable gap exists that one more search
-  could realistically fill; in that case provide retry_query in precise French legal
-  terminology.
-- Do NOT retry when the evidence is adequate, or when the missing piece is unlikely
-  to be found in official Burkinabè/OHADA sources.
-
-OUTPUT
-Answer with a single JSON object only, no prose, no markdown fences:
-{
-  "complete": true,
-  "answered_all_questions": true,
-  "all_claims_cited": true,
-  "contradictions_found": false,
-  "issues": ["..."],
-  "should_retry_retrieval": false,
-  "retry_query": null
-}"""
-
-    def _build_user_message(self, state: GraphState) -> str:
+    def _build_user_message(self, state: GraphState, ctx: Optional[AppContext] = None) -> str:
+        settings = ctx.settings if ctx is not None else get_settings()
         evidence_text = "\n".join(
-            c.citation_label() for c in state.get("ranked_evidence", [])[:10]
+            c.citation_label()
+            for c in state.get("ranked_evidence", [])[: settings.answer_max_evidence]
         )
         return (
             f"Question: {state['query']}\n"

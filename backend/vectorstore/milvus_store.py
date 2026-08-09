@@ -6,12 +6,14 @@ method raises a clean ``RetrievalError`` on connection/operation failure —
 callers (the factory, the coordinator) catch it and fall back gracefully.
 
 Each EvidenceChunk is serialized to JSON in a VARCHAR field; the primary key
-is ``chunk_id``, ``document_id`` is a scalar field so documents can be listed
-and deleted per logical document, and the vector field uses an HNSW index
-with COSINE metric.  On connect, a collection whose schema predates the
-``document_id`` field is dropped and recreated (log a warning): such a
-collection breaks every document-level operation, so re-ingestion is required
-anyway.
+is ``chunk_id``.  ``document_id``, ``article``, ``status`` and
+``document_type`` are scalar fields: they are filtered natively via Milvus
+``expr`` (everything else falls back to client-side post-filtering with
+``matches_filters``), and ``document_id`` powers per-document list/delete.
+The vector field uses an HNSW index with COSINE metric.  On connect, a
+collection whose schema predates any required scalar field is dropped and
+recreated (log a warning): such a collection breaks document-level
+operations and native filtering, so re-ingestion is required anyway.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from enum import Enum
 from typing import Any, Optional
 
 from pydantic import ValidationError
@@ -31,7 +34,66 @@ from backend.vectorstore.memory_store import matches_filters
 logger = logging.getLogger(__name__)
 
 # Scalar fields every collection must carry (besides chunk_id/vector/chunk_json).
-_REQUIRED_FIELDS = {"chunk_id", "vector", "chunk_json", "document_id"}
+_REQUIRED_FIELDS = {
+    "chunk_id",
+    "vector",
+    "chunk_json",
+    "document_id",
+    "article",
+    "status",
+    "document_type",
+}
+
+# Filter keys promoted to native Milvus ``expr`` filtering; all other filter
+# keys keep the client-side ``matches_filters`` fallback.
+_NATIVE_FILTER_FIELDS = ("document_id", "article", "status", "document_type")
+
+
+def _norm_filter_value(value: Any) -> str:
+    if isinstance(value, Enum):
+        return str(value.value)
+    return str(value)
+
+
+def _scalar(chunk: EvidenceChunk, field: str) -> str:
+    """Value written to a native scalar column ("" when unset)."""
+    value = getattr(chunk, field, None)
+    if value is None:
+        return ""
+    return _norm_filter_value(value)
+
+
+def build_native_filter_expr(
+    filters: Optional[dict[str, Any]],
+) -> tuple[Optional[str], set[str]]:
+    """Split filters into a native Milvus expr and client-side remainder.
+
+    Returns ``(expr, native_keys)``: ``expr`` covers the promoted scalar
+    fields (``document_id``/``article``/``status``/``document_type``) or is
+    None, and ``native_keys`` lists the filter keys it covers so the caller
+    can post-filter only the rest.  Values containing a double quote are left
+    to the client-side path (keeps expr escaping trivially safe).
+    """
+    if not filters:
+        return None, set()
+    parts: list[str] = []
+    native_keys: set[str] = set()
+    for key in _NATIVE_FILTER_FIELDS:
+        if key not in filters:
+            continue
+        expected = filters[key]
+        values = (
+            list(expected)
+            if isinstance(expected, (list, tuple, set))
+            else [expected]
+        )
+        normalized = [_norm_filter_value(v) for v in values]
+        if any('"' in v for v in normalized):
+            continue  # unsafe to inline: client-side fallback handles it
+        quoted = ", ".join(f'"{v}"' for v in normalized)
+        parts.append(f"{key} in [{quoted}]")
+        native_keys.add(key)
+    return (" and ".join(parts) if parts else None), native_keys
 
 
 def _import_pymilvus():
@@ -80,9 +142,10 @@ class MilvusVectorStore:
                 self._client.has_collection, self._collection
             )
             if exists:
-                # Self-heal an outdated schema: a collection without
-                # document_id breaks every document-level operation, so it
-                # must be recreated (re-ingestion is required afterwards).
+                # Self-heal an outdated schema: a collection missing a required
+                # scalar field breaks document-level operations and native
+                # filtering, so it must be recreated (re-ingestion is required
+                # afterwards).
                 desc = await asyncio.to_thread(
                     self._client.describe_collection, self._collection
                 )
@@ -104,6 +167,10 @@ class MilvusVectorStore:
                     "chunk_id", DataType.VARCHAR, is_primary=True, max_length=64
                 )
                 schema.add_field("document_id", DataType.VARCHAR, max_length=64)
+                # Promoted scalars for native expr filtering (spec §11).
+                schema.add_field("article", DataType.VARCHAR, max_length=128)
+                schema.add_field("status", DataType.VARCHAR, max_length=32)
+                schema.add_field("document_type", DataType.VARCHAR, max_length=32)
                 schema.add_field("vector", DataType.FLOAT_VECTOR, dim=self._dim)
                 schema.add_field("chunk_json", DataType.VARCHAR, max_length=65535)
                 index_params = self._client.prepare_index_params()
@@ -145,6 +212,9 @@ class MilvusVectorStore:
             {
                 "chunk_id": chunk.chunk_id,
                 "document_id": chunk.document_id,
+                "article": _scalar(chunk, "article"),
+                "status": _scalar(chunk, "status"),
+                "document_type": _scalar(chunk, "document_type"),
                 "vector": list(vector),
                 "chunk_json": chunk.model_dump_json(),
             }
@@ -169,19 +239,33 @@ class MilvusVectorStore:
         top_k: int,
         filters: Optional[dict[str, Any]] = None,
     ) -> list[EvidenceChunk]:
-        """ANN search (HNSW/COSINE); metadata filters applied client-side."""
+        """ANN search (HNSW/COSINE).
+
+        Promoted scalar fields (``document_id``/``article``/``status``/
+        ``document_type``) are filtered natively via Milvus ``expr``; every
+        other filter key keeps the client-side post-filter with
+        ``matches_filters`` (overfetch xN to compensate).
+        """
         client = self._require_client()
+        expr, native_keys = build_native_filter_expr(filters)
+        remaining = (
+            {k: v for k, v in filters.items() if k not in native_keys}
+            if filters
+            else None
+        )
         overfetch = getattr(self._settings, "milvus_filter_overfetch", 4)
-        limit = top_k * overfetch if filters else top_k
+        limit = top_k * overfetch if remaining else top_k
+        kwargs: dict[str, Any] = {
+            "collection_name": self._collection,
+            "data": [list(vector)],
+            "limit": limit,
+            "output_fields": ["chunk_json"],
+            "search_params": {"metric_type": "COSINE"},
+        }
+        if expr:
+            kwargs["filter"] = expr
         try:
-            hits = await asyncio.to_thread(
-                client.search,
-                collection_name=self._collection,
-                data=[list(vector)],
-                limit=limit,
-                output_fields=["chunk_json"],
-                search_params={"metric_type": "COSINE"},
-            )
+            hits = await asyncio.to_thread(client.search, **kwargs)
         except Exception as exc:
             raise RetrievalError(f"Milvus search failed: {exc}") from exc
 
@@ -193,7 +277,7 @@ class MilvusVectorStore:
                 )
             except (KeyError, ValidationError, ValueError):
                 continue
-            if not matches_filters(chunk, filters):
+            if not matches_filters(chunk, remaining):
                 continue
             # Milvus COSINE returns a similarity in [-1, 1]; map to [0, 1].
             distance = float(hit.get("distance", 0.0))

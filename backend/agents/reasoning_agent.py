@@ -8,10 +8,12 @@ node translates the prose into state updates.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from backend.agents.agent import CompletionAgent
+from backend.core.config import get_settings
 from backend.core.context import AppContext
+from backend.core.prompts import PromptRef
 from backend.core.state import GraphState
 from backend.ingestion.text_cleaning import repair_extraction_artifacts
 
@@ -20,39 +22,19 @@ class ReasoningAgent(CompletionAgent):
     """Reasons over the ranked evidence and signals missing evidence."""
 
     name = "reasoning_agent"
-    system_prompt = """You are the reasoning agent of an expert legal research assistant for Burkina Faso.
+    # Resolved through the prompt registry (backend.core.prompts.REASONING_SYSTEM)
+    # at every access, so Settings.prompts_dir overrides apply.
+    system_prompt = PromptRef("REASONING_SYSTEM")
 
-SCOPE
-- You reason ONLY over the verified evidence excerpts provided with the question.
-- You never use outside knowledge and never invent legal provisions, article
-  numbers, dates or case law.
-
-TASK
-Analyze the evidence in relation to the user's question:
-1. ESTABLISHED — what the evidence actually proves, referring to excerpts as [1], [2], ...
-2. APPLICABLE RULES — which articles/provisions govern the question and how they combine.
-3. GAPS — what the question needs that the evidence does not cover.
-4. CONTRADICTIONS — any disagreement between sources (note which source is more
-   authoritative or more recent).
-
-OUTPUT
-- If the evidence is sufficient: a concise, structured analysis (5-15 lines) in the
-  user's language, citing the excerpts with [n].
-- If the evidence is insufficient: start your answer with exactly "INSUFFICIENT:"
-  and state precisely what is missing (which document, article or point), so that
-  retrieval can be retried.
-
-The excerpts come from PDF extraction and may contain artifacts (e.g. "consente - ment",
-"lie u"); interpret them as the clean French words they stand for."""
-
-    def _build_user_message(self, state: GraphState) -> str:
+    def _build_user_message(self, state: GraphState, ctx: Optional[AppContext] = None) -> str:
+        settings = ctx.settings if ctx is not None else get_settings()
         evidence = list(state.get("ranked_evidence", []))
         if not evidence:
             return f"Question: {state['query']}\n\nNo evidence was retrieved."
         evidence_text = "\n\n".join(
             f"[{i}] {c.citation_label()} ({c.publication_date or 'date inconnue'}): "
-            f"{repair_extraction_artifacts(c.content)[:2000]}"
-            for i, c in enumerate(evidence[:10], start=1)
+            f"{repair_extraction_artifacts(c.content)[: settings.reasoning_max_excerpt_chars]}"
+            for i, c in enumerate(evidence[: settings.answer_max_evidence], start=1)
         )
         return f"Question: {state['query']}\n\nPreuves:\n{evidence_text}"
 

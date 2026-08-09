@@ -50,8 +50,15 @@ class RetrievalBranchAgent(Agent):
         chunks: list[EvidenceChunk] = []
         trace_line = ""
         if ctx.retriever is not None:
+            plan = state.get("plan")
+            temporal_intent = plan.temporal_intent if plan else "any"
+            scenario_date = plan.scenario_date if plan else None
             try:
-                chunks = await ctx.retriever.retrieve(tasks)
+                chunks = await ctx.retriever.retrieve(
+                    tasks,
+                    temporal_intent=temporal_intent,
+                    scenario_date=scenario_date,
+                )
             except Exception as exc:
                 trace_line = f" (erreur: {exc})"
         label = branch_query if len(branch_query) <= 60 else branch_query[:57] + "..."

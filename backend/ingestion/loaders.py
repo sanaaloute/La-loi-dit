@@ -1,4 +1,4 @@
-"""Document loaders: PDF, DOCX, HTML, plain text and Markdown.
+"""Document loaders: PDF, DOCX, HTML, plain text, Markdown and CSV.
 
 All third-party imports (pypdf, python-docx, BeautifulSoup, pytesseract,
 Pillow, httpx) happen lazily inside the loader functions so this module
@@ -9,6 +9,8 @@ imports cleanly even when optional dependencies are missing. Loaders raise
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import re
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -28,6 +30,7 @@ SUPPORTED_EXTENSIONS = {
     ".txt": "txt",
     ".md": "markdown",
     ".markdown": "markdown",
+    ".csv": "csv",
 }
 
 
@@ -250,6 +253,46 @@ def load_markdown(path: Union[str, Path]) -> ExtractedDocument:
     )
 
 
+def load_csv(path: Union[str, Path]) -> ExtractedDocument:
+    """Load a CSV file, rendering rows as text lines with the header preserved.
+
+    Uses the stdlib ``csv`` module with the same encoding tolerance as
+    :func:`load_txt`. Each row becomes a ``header=value`` line so the cells
+    stay self-describing once chunked out of order.
+    """
+    p = Path(path)
+    if not p.is_file():
+        raise IngestionError(f"CSV file not found: {p}")
+    try:
+        raw = _read_text_file(p)
+    except Exception as exc:
+        raise IngestionError(f"Failed to read {p}: {exc}") from exc
+    try:
+        rows = list(csv.reader(io.StringIO(raw)))
+    except csv.Error as exc:
+        raise IngestionError(f"Failed to parse CSV {p}: {exc}") from exc
+    if not rows:
+        raise IngestionError(f"Empty CSV file: {p}")
+
+    header = rows[0]
+    lines = [" | ".join(header)]
+    for row in rows[1:]:
+        if not any(cell.strip() for cell in row):
+            continue  # skip blank lines
+        cells = [
+            f"{header[i]}={cell}" if i < len(header) and header[i].strip() else cell
+            for i, cell in enumerate(row)
+        ]
+        lines.append(" | ".join(cells))
+    text = "\n".join(lines)
+    return ExtractedDocument(
+        name=p.name,
+        text=text,
+        pages=[text],
+        metadata={"loader": "csv", "format": "csv", "path": str(p), "row_count": len(lines) - 1},
+    )
+
+
 def _strip_markdown(raw: str) -> str:
     """Lightweight Markdown-to-text (headings, links, emphasis, code fences)."""
     text = re.sub(r"```.*?```", lambda m: m.group(0).strip("`"), raw, flags=re.DOTALL)
@@ -281,5 +324,6 @@ async def load_any(path: Union[str, Path]) -> ExtractedDocument:
         "html": load_html,
         "txt": load_txt,
         "markdown": load_markdown,
+        "csv": load_csv,
     }
     return await asyncio.to_thread(loaders[kind], p)

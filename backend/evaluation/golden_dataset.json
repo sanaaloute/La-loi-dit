@@ -1,5 +1,6 @@
 {
   "disclaimer": "These are illustrative sample cases for pipeline testing only. The questions and expected answers are NOT verified legal advice and must not be used as such. Seed evidence is synthetic.",
+  "coverage_note": "Illustrative set of 25 cases covering 10 legal domains (at least 2 cases each, including the spec §38 dismissal-rights regression case). Growing the golden set to 100+ cases with real verified texts is planned future work.",
   "cases": [
     {
       "id": "qa-001",
@@ -121,6 +122,107 @@
       "expected_documents": [],
       "domain": "tax_law",
       "difficulty": "hard"
+    },
+    {
+      "id": "qa-016",
+      "question": "Quels sont les droits d'un salarié licencié au Burkina Faso ?",
+      "expected_keywords": ["préavis", "indemnité", "licenciement"],
+      "expected_documents": ["Code du travail du Burkina Faso"],
+      "expected_articles": ["90", "95", "96", "97", "98", "100"],
+      "expected_issues": [
+        {"category": "dismissal_grounds", "keywords": ["motif réel et sérieux", "faute"]},
+        {"category": "notice", "keywords": ["préavis", "délai de prévenance"]},
+        {"category": "compensation", "keywords": ["indemnité de licenciement", "indemnité"]},
+        {"category": "accrued_rights", "keywords": ["droits acquis", "congés payés"]},
+        {"category": "unfair_dismissal", "keywords": ["licenciement abusif", "dommages et intérêts"]},
+        {"category": "legal_remedies", "keywords": ["conciliation", "recours"]},
+        {"category": "jurisdiction", "keywords": ["tribunal du travail", "juridiction compétente"]}
+      ],
+      "domain": "labor_code",
+      "difficulty": "hard",
+      "language": "fr",
+      "note": "Golden regression case (spec §38): the evaluation must FAIL when the answer only discusses tribunal jurisdiction."
+    },
+    {
+      "id": "qa-017",
+      "question": "Quand la responsabilité civile est-elle engagée au Burkina Faso ?",
+      "expected_keywords": ["faute", "dommage"],
+      "expected_documents": ["Code civil du Burkina Faso"],
+      "domain": "civil_law",
+      "difficulty": "medium",
+      "language": "fr"
+    },
+    {
+      "id": "qa-018",
+      "question": "Quel est le délai de prescription des actions civiles au Burkina Faso ?",
+      "expected_keywords": ["trente ans", "prescription"],
+      "expected_documents": ["Code civil du Burkina Faso"],
+      "domain": "civil_law",
+      "difficulty": "hard",
+      "language": "fr"
+    },
+    {
+      "id": "qa-019",
+      "question": "Un commerçant doit-il s'immatriculer au RCCM en droit OHADA ?",
+      "expected_keywords": ["immatriculer", "RCCM"],
+      "expected_documents": ["Acte uniforme OHADA portant droit commercial général (AUDCG)"],
+      "domain": "commercial_law",
+      "difficulty": "easy",
+      "language": "fr"
+    },
+    {
+      "id": "qa-020",
+      "question": "Que comprend le fonds de commerce selon l'Acte uniforme OHADA ?",
+      "expected_keywords": ["clientèle", "enseigne"],
+      "expected_documents": ["Acte uniforme OHADA portant droit commercial général (AUDCG)"],
+      "domain": "commercial_law",
+      "difficulty": "medium",
+      "language": "fr"
+    },
+    {
+      "id": "qa-021",
+      "question": "Quel est le délai du recours pour excès de pouvoir contre un acte administratif au Burkina Faso ?",
+      "expected_keywords": ["deux mois", "excès de pouvoir"],
+      "expected_documents": ["Code du contentieux administratif du Burkina Faso"],
+      "domain": "administrative_law",
+      "difficulty": "hard",
+      "language": "fr"
+    },
+    {
+      "id": "qa-022",
+      "question": "Quelle juridiction connaît des litiges entre un administré et l'État au Burkina Faso ?",
+      "expected_keywords": ["administratives", "État"],
+      "expected_documents": ["Code du contentieux administratif du Burkina Faso"],
+      "domain": "administrative_law",
+      "difficulty": "medium",
+      "language": "fr"
+    },
+    {
+      "id": "qa-023",
+      "question": "Comment les terres rurales sont-elles attribuées aux exploitants au Burkina Faso ?",
+      "expected_keywords": ["commissions villageoises", "attribuent"],
+      "expected_documents": ["Loi n° 034-2009 portant régime foncier rural du Burkina Faso"],
+      "domain": "land_law",
+      "difficulty": "medium",
+      "language": "fr"
+    },
+    {
+      "id": "qa-024",
+      "question": "Quel titre atteste la propriété d'une terre au Burkina Faso ?",
+      "expected_keywords": ["titre foncier"],
+      "expected_documents": ["Loi n° 034-2009 portant régime foncier rural du Burkina Faso"],
+      "domain": "land_law",
+      "difficulty": "easy",
+      "language": "fr"
+    },
+    {
+      "id": "qa-025",
+      "question": "Combien d'associés une SARL peut-elle compter au maximum en droit OHADA ?",
+      "expected_keywords": ["cinquante"],
+      "expected_documents": ["Acte uniforme OHADA relatif au droit des sociétés commerciales et du GIE (AUSCGIE)"],
+      "domain": "ohada_law",
+      "difficulty": "easy",
+      "language": "fr"
     }
   ]
 }

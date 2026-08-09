@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from backend.core.models import SearchKind
+from backend.core.models import QuestionType, SearchKind
 from backend.planner.agent import heuristic_plan
 
 
@@ -30,13 +30,31 @@ def test_scenario_date_extracted():
     assert plan_iso.scenario_date == date(2021, 11, 30)
 
 
-def test_heuristic_plan_does_not_decompose():
-    """Decomposition is LLM-only: the heuristic fallback plans direct searches."""
-    plan = heuristic_plan("Quels sont les droits d'un salarié licencié au Burkina Faso ?")
-    assert plan.sub_questions == ["Quels sont les droits d'un salarié licencié au Burkina Faso ?"]
-    queries = [t.query for t in plan.tasks]
-    assert all("préavis" not in q or q == plan.sub_questions[0] for q in queries)
+def test_heuristic_plan_decomposes_broad_rights_question():
+    """Broad rights questions get a deterministic issue-based decomposition."""
+    query = "Quels sont les droits d'un salarié licencié au Burkina Faso ?"
+    plan = heuristic_plan(query)
+    assert plan.question_type == QuestionType.RIGHTS
+    assert plan.temporal_intent == "any"
     assert plan.legal_domains == ["labor_code"]
+    assert "decomposition" in plan.rationale
+    # the raw query stays the first sub-question, followed by the 7 sub-issues
+    assert plan.sub_questions[0] == query
+    assert len(plan.sub_questions) == 8
+    assert "préavis" in " ".join(plan.sub_questions)
+    # one keyword task per sub-issue, on top of the raw-query tasks
+    keyword_queries = [t.query for t in plan.tasks if t.kind == SearchKind.KEYWORD]
+    assert keyword_queries[0] == query
+    assert any("préavis" in q for q in keyword_queries[1:])
+    assert any("juridiction compétente" in q for q in keyword_queries[1:])
+
+
+def test_heuristic_plan_sets_question_type_and_temporal_intent():
+    plan = heuristic_plan("Quelle était la loi en vigueur le 15/03/2020 ?")
+    assert plan.question_type == QuestionType.HISTORICAL
+    assert plan.temporal_intent == "historical"
+    # no taxonomy match => no decomposition
+    assert plan.sub_questions == ["Quelle était la loi en vigueur le 15/03/2020 ?"]
 
 
 def test_specific_question_not_expanded():

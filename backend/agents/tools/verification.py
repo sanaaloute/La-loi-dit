@@ -94,7 +94,7 @@ async def detect_contradictions(ctx: Any, state: Any, args: DetectContradictions
             a, b = chunks[i], chunks[j]
             key_a = _conflict_key(a)
             key_b = _conflict_key(b)
-            if key_a and key_a == key_b and _contradict(a, b):
+            if key_a and key_a == key_b and _contradict(a, b, ctx.settings):
                 kept, dropped, reason, resolved = resolve_pair(a, b, None)
                 contradictions.append(
                     {

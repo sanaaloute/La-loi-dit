@@ -58,7 +58,7 @@ def _format_confidence(value: float) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _build_pdf(data: ExportRequest) -> bytes:
+def _build_pdf(data: ExportRequest, title: str = "Réponse juridique") -> bytes:
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -113,7 +113,7 @@ def _build_pdf(data: ExportRequest) -> bytes:
     )
 
     story: list[Any] = []
-    story.append(Paragraph("Réponse juridique", title_style))
+    story.append(Paragraph(title, title_style))
     story.append(Paragraph(f"<b>Question :</b> {_strip_markdown(data.query)}", normal_style))
     story.append(Spacer(1, 6))
 
@@ -218,7 +218,7 @@ def _build_pdf(data: ExportRequest) -> bytes:
 # ---------------------------------------------------------------------------
 
 
-def _build_docx(data: ExportRequest) -> bytes:
+def _build_docx(data: ExportRequest, title: str = "Réponse juridique") -> bytes:
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Inches, Pt, RGBColor
@@ -230,9 +230,9 @@ def _build_docx(data: ExportRequest) -> bytes:
     section.left_margin = Inches(0.9)
     section.right_margin = Inches(0.9)
 
-    title = doc.add_heading("Réponse juridique", level=0)
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = title.runs[0]
+    title_heading = doc.add_heading(title, level=0)
+    title_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = title_heading.runs[0]
     run.font.color.rgb = RGBColor(30, 58, 138)
     run.font.size = Pt(20)
 
@@ -310,7 +310,9 @@ def _build_docx(data: ExportRequest) -> bytes:
 # ---------------------------------------------------------------------------
 
 
-def _build_csv(data: ExportRequest) -> bytes:
+def _build_csv(data: ExportRequest, title: str = "Réponse juridique") -> bytes:
+    # ``title`` is accepted for a uniform builder signature; the CSV layout
+    # keeps its own long-standing header instead.
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow(["Assistant Juridique Burkina Faso — Export CSV"])
@@ -372,10 +374,10 @@ def _build_csv(data: ExportRequest) -> bytes:
 # ---------------------------------------------------------------------------
 
 
-def _build_markdown(data: ExportRequest) -> bytes:
+def _build_markdown(data: ExportRequest, title: str = "Réponse juridique") -> bytes:
     """Clean French markdown document; the answer body keeps its markdown."""
     lines: list[str] = [
-        "# Réponse juridique",
+        f"# {title}",
         "",
         f"*Généré le {datetime.now().strftime('%d/%m/%Y à %H:%M')} — Assistant Juridique Burkina Faso*",
         "",
@@ -449,7 +451,7 @@ async def export_answer(
     mime, ext, builder = _FORMATS[format]
     filename = f"reponse-juridique-{datetime.now().strftime('%Y%m%d-%H%M%S')}{ext}"
     try:
-        data = builder(payload)
+        data = builder(payload, title=ctx.settings.export_pdf_title)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Export failed: {exc}") from exc
     return Response(

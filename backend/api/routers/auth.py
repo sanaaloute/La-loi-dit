@@ -3,9 +3,9 @@
 Two account sources, checked in order:
   1. the database user store (``backend.users.UserStore``) — accounts created
      via ``POST /auth/register``;
-  2. the env-var dev store (``LEGAL_AI_DEV_USERS`` plus the development-only
-     admin/admin123 bootstrap) — kept so local dev and existing tooling work
-     unchanged.
+  2. the dev store (``settings.dev_users``, i.e. the ``LEGAL_AI_DEV_USERS``
+     env var, plus the development-only admin/admin123 bootstrap) — kept so
+     local dev and existing tooling work unchanged.
 
 DB-user tokens carry ``user_id`` and ``tier`` claims; dev-store tokens get
 tier "cabinet" so the local dev admin sees every model.
@@ -14,7 +14,6 @@ tier "cabinet" so the local dev admin sees every model.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -70,7 +69,7 @@ def build_user_store(settings: Settings) -> dict[str, dict[str, Any]]:
     if settings.env == "development":
         users["admin"] = {"password_hash": hash_password("admin123"), "role": Role.ADMIN}
 
-    raw = os.environ.get("LEGAL_AI_DEV_USERS", "")
+    raw = settings.dev_users
     for entry in raw.split(","):
         parts = [p.strip() for p in entry.split(":")]
         if len(parts) != 3 or not all(parts):

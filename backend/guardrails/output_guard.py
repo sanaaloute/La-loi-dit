@@ -8,9 +8,14 @@ Enforces three deterministic rules:
   3. Citation integrity — every citation must be ``verified=True`` and
      reference a ``chunk_id`` present in the evidence; unverifiable
      citations are stripped and counted as hallucination suspects.
+  4. Article-number soft check (spec §41) — article numbers cited in the
+     prose that appear in no evidence chunk's ``article`` metadata raise a
+     non-blocking "citation d'article non vérifiée" warning.
 """
 
 from __future__ import annotations
+
+import re
 
 from backend.core.models import EvidenceChunk, FinalAnswer, RiskFlag
 from backend.guardrails.policies import UNSAFE_LEGAL_ADVICE_PATTERNS
@@ -22,6 +27,37 @@ REFUSAL_REASON_NO_EVIDENCE = (
     "Aucune source vérifiable ne permet de répondre à cette question. "
     "Les éléments de preuve disponibles sont insuffisants."
 )
+
+# "article 542" / "articles L123-4" mentions in the answer prose.
+_ARTICLE_REF = re.compile(r"\barticles?\s+([A-Za-z]?\d[\w.\-]*)", re.I)
+
+
+def _normalize_article(ref: str) -> str:
+    """Canonical form for comparing article numbers ("art. 542" -> "542")."""
+    ref = re.sub(r"^(article|art)\.?\s*", "", ref.strip().lower())
+    return ref.rstrip(".,;:)")
+
+
+def flag_unverified_article_citations(answer: FinalAnswer, evidence: list[EvidenceChunk]) -> None:
+    """Warn (never refuse) on article numbers absent from the evidence metadata.
+
+    Heuristic by design: when no evidence chunk carries article metadata there
+    is nothing to verify against and the check stays silent.
+    """
+    known = {_normalize_article(c.article) for c in evidence if c.article}
+    known.discard("")
+    if not known:
+        return
+    unknown: list[str] = []
+    for match in _ARTICLE_REF.finditer(answer.answer):
+        ref = _normalize_article(match.group(1))
+        if ref and ref not in known and ref not in unknown:
+            unknown.append(ref)
+    for ref in unknown:
+        if answer.language.startswith("en"):
+            answer.warnings.append(f"unverified article citation: article {ref}")
+        else:
+            answer.warnings.append(f"citation d'article non vérifiée : article {ref}")
 
 
 async def check_output(answer: FinalAnswer, evidence: list[EvidenceChunk], settings) -> FinalAnswer:
@@ -67,5 +103,8 @@ async def check_output(answer: FinalAnswer, evidence: list[EvidenceChunk], setti
         answer.metadata.setdefault("risk_flags", [])
         if RiskFlag.HALLUCINATION_SUSPECT.value not in answer.metadata["risk_flags"]:
             answer.metadata["risk_flags"].append(RiskFlag.HALLUCINATION_SUSPECT.value)
+
+    # --- 4. article-number soft check (warning only, never blocking) ---
+    flag_unverified_article_citations(answer, effective_evidence)
 
     return answer

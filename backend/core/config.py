@@ -6,7 +6,27 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+#: Dependency names /ready reports on; ``strict_critical_components`` is
+#: validated against this set so a typo fails fast at boot instead of
+#: silently never matching a check.
+KNOWN_INFRA_COMPONENTS = frozenset(
+    {
+        "milvus",
+        "postgres",
+        "database_probe",
+        "vector_store_probe",
+        "cache_probe",
+        "redis",
+        "llm",
+        "embeddings",
+        "user_store",
+        "memory_store",
+        "legal_graph",
+    }
+)
 
 
 class Settings(BaseSettings):
@@ -52,6 +72,18 @@ class Settings(BaseSettings):
     answer_cache_semantic_threshold: float = 0.98  # cosine floor for near-duplicate hits
     answer_cache_max_index: int = 50  # semantic index size (most recent entries)
     cheap_routing_enabled: bool = True  # simple queries -> tier's cheapest model
+    # --- per-node-role model routing (spec §46: cheap models for simple nodes) ---
+    # OFF by default (zero behavior change). When ON, each graph node's LLM
+    # calls go to the role's override model (same provider as the request's
+    # resolved model); roles without an override keep the request's model.
+    # Intended mapping: classification_model -> context/memory (cheap),
+    # planner_model -> planner (cheap), analysis_model -> reasoning/reflection,
+    # synthesis_model -> response_generator (strongest, final answer).
+    model_role_routing_enabled: bool = False
+    planner_model: Optional[str] = None
+    classification_model: Optional[str] = None
+    analysis_model: Optional[str] = None
+    synthesis_model: Optional[str] = None
     embedding_model: str = "text-embedding-3-small"
     embedding_dimension: int = 384
     embedding_api_base: str = ""  # separate from llm_api_base for split providers
@@ -119,10 +151,8 @@ class Settings(BaseSettings):
 
     # --- Tuning (policy/tuning knobs; defaults preserve current behavior) ---
     # retry budgets (bounded loops, see docs/workflow.md "RETRY STRATEGY")
-    max_planning_retries: int = 1
     max_retrieval_retries: int = 1
     max_reflection_iterations: int = 1
-    max_global_retries: int = 1
     # retrieval / ranking
     default_top_k: int = 8
     retrieval_fetch_k: int = 20  # candidates fetched per worker before fusion/rerank
@@ -135,9 +165,41 @@ class Settings(BaseSettings):
     dedup_jaccard_threshold: float = 0.9  # near-duplicate detection
     rerank_similarity_weight: float = 0.75
     rerank_confidence_weight: float = 0.25
+    # --- reranker provider (spec §17/§47) ---
+    # "heuristic" (default, fully offline) | "api" (cross-encoder endpoint:
+    # BGE/Qwen/Cohere rerank via a Cohere-style /rerank API). "api" without
+    # full credentials degrades to the heuristic reranker with a warning.
+    reranker_provider: str = "heuristic"
+    reranker_model: Optional[str] = None  # e.g. bge-reranker-v2-m3, rerank-multilingual-v3.0
+    reranker_api_base: Optional[str] = None
+    reranker_api_key: Optional[str] = None
+    reranker_batch_size: int = 64
+    reranker_timeout_seconds: float = 10.0
+    # --- retrieval tuning knobs (promoted from hardcoded constants; every
+    # default equals the previous literal, so behavior is unchanged) ---
+    retrieval_dense_similarity_floor_cap: float = 0.45  # cap on retrieval_similarity_floor with a real dense embedder
+    retrieval_discriminative_df_ratio: float = 0.2  # max candidate-set doc-frequency share for a "discriminative" term
+    rerank_llm_excerpt_chars: int = 300  # chars of each chunk shown in the LLM rescore prompt
+    rerank_llm_blend_weight: float = 0.5  # weight of the LLM rescore in the final rerank blend
+    reranker_max_retries: int = 1  # extra attempts after the first API rerank failure
+    graph_expansion_score: float = 0.01  # retrieval score stamped on graph-expansion candidates
+    graph_expansion_sources: int = 3  # top-ranked chunks whose graph edges are followed
+    graph_expansion_limit: int = 8  # hard cap on candidates appended by graph expansion
+    temporal_score_unknown: float = 0.3  # "current" intent score when status/dates are unknown
+    temporal_score_repealed_before_date: float = 0.1  # "historical" score when repealed before the scenario date
+    temporal_score_unconfirmed: float = 0.5  # "historical" score when applicability cannot be confirmed
+    search_web_hit_score: float = 0.5  # initial retrieval_score for official-source web hits
+    search_authority_fallback: float = 0.15  # confidence for sources missing from AUTHORITY_WEIGHTS
+    milvus_connect_attempts: int = 3  # Milvus connection attempts before in-memory fallback
+    milvus_connect_backoff_seconds: float = 1.0  # backoff sleep multiplier (x attempt number)
+    embedding_batch_size: int = 200  # texts per embedding API call (NVIDIA via OpenRouter caps at 256)
     ranking_relevance_weight: float = 0.55
     ranking_authority_weight: float = 0.30
     ranking_confidence_weight: float = 0.15
+    # Temporal component blended into the evidence ranking only when the plan's
+    # temporal_intent is "current"/"historical"; intent "any" skips it, so the
+    # legacy relevance/authority/confidence behavior is unchanged (spec §10).
+    ranking_temporal_weight: float = 0.15
     planner_aux_top_k: int = 5  # top_k for auxiliary (gov/regulation/case-law/news) tasks
     search_timeout_seconds: float = 8.0  # per-request web-source fetch timeout
     search_max_results_per_source: int = 5
@@ -146,12 +208,13 @@ class Settings(BaseSettings):
     confidence_threshold: float = 0.55  # below this the answer carries a low-confidence warning
     human_review_threshold: float = 0.40  # below this, escalate to a human legal expert
     min_evidence_score: float = 0.05  # evidence weaker than this is ignored by ranking
+    coverage_retry_threshold: float = 0.6  # below this the coverage auditor requests re-retrieval
     # agents / guardrails
     context_max_turns: int = 10  # conversation window (turns) loaded into context
     memory_recall_limit: int = 5
-    answer_max_bullets: int = 6  # evidence bullets in the template answer
     answer_max_evidence: int = 10  # evidence chunks attached to the FinalAnswer
     input_max_chars: int = 8000  # user queries longer than this is truncated
+    evidence_injection_screening: bool = True  # scan retrieved chunks for embedded instructions before prompting
     # --- chat streaming / run bounds ---
     chat_heartbeat_seconds: float = 10.0  # SSE keepalive frame interval
     chat_run_timeout_seconds: float = 280.0  # hard cap per run (below nginx's 300s proxy_read_timeout)
@@ -169,6 +232,9 @@ class Settings(BaseSettings):
     ingestion_html_timeout_seconds: float = 30.0
     ingestion_freshness_timeout_seconds: float = 20.0
     pdf_parser_max_pages: int = 50
+    # Persist the relational legal knowledge graph (backend/knowledge) at ingest
+    # and let the graph retrieval worker use it; failures never block either path.
+    legal_graph_enabled: bool = True
 
     # --- memory ---
     memory_age_full_penalty_days: float = 90.0
@@ -197,8 +263,104 @@ class Settings(BaseSettings):
     crawler_user_agent: str = "LegalAI-Burkina-Crawler/1.0 (+offline-first)"
     search_user_agent: str = "LegalAI-BurkinaFaso/1.0 (official-source retriever)"
 
+    # --- externalized jurisdictional data files (additive; offline-first) ---
+    # All default to None = load the bundled files under data/ (with embedded
+    # fallbacks on missing/corrupt files, always with a structured warning).
+    # Set a filesystem path to adapt the platform to another jurisdiction.
+    terminology_path: Optional[str] = None  # lexicon JSON for backend/planner/terminology.py (default data/terminology.json)
+    decomposition_path: Optional[str] = None  # issue taxonomy JSON for backend/planner/decomposition.py (default data/decomposition.json)
+    # Single JSON with search_registry / crawler_allowed_domains /
+    # freshness_registry / document_titles sections (default data/legal_sources.json).
+    legal_sources_path: Optional[str] = None
+    # Comma-separated extra domains merged into the crawler allowlist at crawl time.
+    crawler_extra_allowed_domains: str = ""
+    # Standalone {filename: display title} JSON; overrides the document_titles
+    # section of the legal-sources file when set.
+    document_titles_path: Optional[str] = None
+    # JSON with optional authority_weights / official_domains / legal_domains
+    # keys, merged onto the backend.core.constants defaults (see load_* there).
+    authority_config_path: Optional[str] = None
+    # Legal rule store for backend/tools/legal_calculations.py (None = bundled legal_rules.json).
+    legal_rules_path: Optional[str] = None
+
     # --- export ---
-    export_pdf_title: str = "Réponse juridique — Assistant Juridique Burkina Faso"
+    # Heading of exported answer documents (PDF/Word/Markdown). The default
+    # matches the long-standing hardcoded title.
+    export_pdf_title: str = "Réponse juridique"
+
+    # --- prompt overrides ---
+    # Optional directory of prompt override files for the registry in
+    # backend.core.prompts: `<NAME>.md` (or `.txt`) where NAME is a registry
+    # key (e.g. PLANNER_SYSTEM.md). Missing files fall back to the built-in
+    # defaults; unset (None) = built-ins only. Override contents are cached
+    # per file and re-read when the file's mtime changes.
+    prompts_dir: Optional[str] = None
+
+    # --- strict-mode hardening & formerly env-only switches (additive) ---
+    # Comma-separated infra components whose "degraded" status makes /ready
+    # return 503 in strict mode (validated against KNOWN_INFRA_COMPONENTS).
+    # cache/memory_store/legal_graph stay non-critical by default: their
+    # fallbacks (in-memory cache, sqlite/in-memory memory, no-op graph) are
+    # survivable per request and must not pull the API out of rotation.
+    strict_critical_components: str = "milvus,postgres,database_probe,llm,embeddings,user_store"
+    # Extra dev logins, "user:password:role,..." (same parsing as the legacy
+    # LEGAL_AI_DEV_USERS env var, which pydantic maps onto this setting).
+    dev_users: str = ""
+    # Optional sandbox runtimes (off = local subprocess sandbox only); the
+    # LEGAL_AI_E2B_ENABLED / LEGAL_AI_PYODIDE_ENABLED env vars map here.
+    e2b_enabled: bool = False
+    pyodide_enabled: bool = False
+
+    @field_validator("strict_critical_components")
+    @classmethod
+    def _validate_strict_critical_components(cls, value: str) -> str:
+        unknown = [
+            name
+            for name in (c.strip() for c in value.split(","))
+            if name and name not in KNOWN_INFRA_COMPONENTS
+        ]
+        if unknown:
+            raise ValueError(
+                f"unknown strict critical component(s): {', '.join(unknown)} "
+                f"(known: {', '.join(sorted(KNOWN_INFRA_COMPONENTS))})"
+            )
+        return value
+
+    @property
+    def strict_critical_list(self) -> list[str]:
+        """Parsed ``strict_critical_components`` (empty names dropped)."""
+        return [c.strip() for c in self.strict_critical_components.split(",") if c.strip()]
+
+    # --- agent behavior knobs (planner / drafting / verification agents) ---
+    # Defaults preserve the previous hardcoded behavior exactly.
+    # planner agent
+    planner_max_tool_iterations: int = 3  # LLM tool-calling loop budget for the planner
+    planner_max_expansion_tasks: int = 3  # cap on terminology-expansion keyword tasks per plan
+    planner_max_sub_question_tasks: int = 6  # cap on sub-question keyword tasks added to the plan
+    # response generator / confidence
+    answer_max_excerpt_chars: int = 4000  # per-excerpt char cap in the evidence block sent to the LLM
+    answer_child_preview_chars: int = 200  # child-chunk preview length inside a parent excerpt
+    confidence_citation_weight: float = 0.4  # weight of citation accuracy in the aggregate confidence
+    confidence_coverage_weight: float = 0.6  # weight of sub-question coverage in the aggregate confidence
+    confidence_unresolved_conflict_cap: float = 0.6  # confidence cap while source conflicts stay unresolved
+    confidence_reflection_gap_cap: float = 0.75  # confidence cap when reflection flags unanswered parts
+    source_default_authority_weight: float = 0.15  # authority weight assumed for unknown authority levels
+    retrieval_top_mean_count: int = 3  # top-N relevance scores averaged into retrieval confidence
+    temporal_conflict_penalty: float = 0.5  # temporal confidence while conflicts are unresolved
+    temporal_undated_penalty: float = 0.6  # temporal confidence for time-sensitive plans backed by undated sources
+    # reasoning agent
+    reasoning_max_excerpt_chars: int = 2000  # per-chunk char cap in the reasoning evidence digest
+    # coverage auditor / claim verification
+    coverage_term_min_length: int = 4  # min length of a discriminative coverage term
+    coverage_term_match_ratio: float = 0.5  # fraction of a question's terms one text must carry to cover it
+    claim_min_chars: int = 40  # sentences shorter than this are connectors, not standalone claims
+    claim_direct_term_coverage: float = 0.7  # term-coverage bar for DIRECT support
+    claim_indirect_term_coverage: float = 0.4  # term-coverage bar for INDIRECT support
+    claim_contradiction_term_coverage: float = 0.6  # topical-overlap bar above which a number mismatch contradicts
+    # conflict resolver / context agent
+    conflict_prefix_chars: int = 80  # identical-content prefix length compared before declaring a contradiction
+    context_buffer_limit: int = 20  # default window size of the load_conversation_buffer tool
+    context_message_max_chars: int = 2000  # per-message char cap in the loaded conversation buffer
 
     @property
     def langfuse_enabled(self) -> bool:

@@ -168,5 +168,11 @@ WORKER_REGISTRY: dict[SearchKind, type[BaseWorker]] = {
 
 def worker_for(kind: SearchKind, ctx: AppContext) -> Optional[BaseWorker]:
     """Instantiate the worker for a search kind; None for unknown kinds."""
+    if kind == SearchKind.GRAPH:
+        # Lazy import: graph_worker imports BaseWorker from this module, so a
+        # top-level import would be circular.
+        from backend.retrieval.graph_worker import GraphWorker
+
+        return GraphWorker(ctx)
     worker_cls = WORKER_REGISTRY.get(kind)
     return worker_cls(ctx) if worker_cls is not None else None

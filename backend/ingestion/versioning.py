@@ -1,6 +1,9 @@
 """Document version tracking persisted as JSON under ``settings.data_dir``.
 
-A single ``versions.json`` maps ``document_id -> {"hash": ..., "version": ...}``.
+A single ``versions.json`` maps
+``document_id -> {"hash": ..., "version": ..., "articles": {...}}`` where
+``articles`` (optional, absent on legacy records) maps an article key to the
+SHA256 of that article's text for fine-grained change detection (spec §26).
 Writes are atomic-ish: serialized to a temp file then ``os.replace``-d, so a
 crash mid-write cannot corrupt the store.
 """
@@ -10,8 +13,25 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Union
+from typing import Mapping, Optional, Union
+
+
+@dataclass(frozen=True)
+class ArticleDiff:
+    """Article-level changes between the stored record and a new ingest."""
+
+    added_articles: list[str] = field(default_factory=list)
+    modified_articles: list[str] = field(default_factory=list)
+    deleted_articles: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, list[str]]:
+        return {
+            "added_articles": list(self.added_articles),
+            "modified_articles": list(self.modified_articles),
+            "deleted_articles": list(self.deleted_articles),
+        }
 
 
 class VersionStore:
@@ -55,11 +75,50 @@ class VersionStore:
             return int(entry.get("version", 1)), False
         return int(entry.get("version", 1)) + 1, True
 
-    def commit_version(self, document_id: str, content_hash: str, version: int) -> None:
-        """Persist the content hash AFTER a successful ingest."""
+    def commit_version(
+        self,
+        document_id: str,
+        content_hash: str,
+        version: int,
+        article_hashes: Optional[Mapping[str, str]] = None,
+    ) -> None:
+        """Persist the content hash AFTER a successful ingest.
+
+        ``article_hashes`` maps ``article_key -> sha256 of the article text``
+        and enables :meth:`diff_articles`. When omitted, any previously stored
+        article map is preserved untouched.
+        """
         state = self._load()
-        state[document_id] = {"hash": content_hash, "version": version}
+        entry: dict = {"hash": content_hash, "version": version}
+        if article_hashes is not None:
+            entry["articles"] = dict(article_hashes)
+        else:
+            old = state.get(document_id)
+            if old and old.get("articles"):
+                entry["articles"] = dict(old["articles"])
+        state[document_id] = entry
         self._save(state)
+
+    def diff_articles(
+        self, document_id: str, new_article_hashes: Mapping[str, str]
+    ) -> ArticleDiff:
+        """Compare stored article hashes against a new ingest (read-only).
+
+        Legacy records without an article map are treated as empty, so the
+        first diff after the upgrade reports every article as added.
+        """
+        state = self._load()
+        old = (state.get(document_id) or {}).get("articles") or {}
+        added = sorted(k for k in new_article_hashes if k not in old)
+        modified = sorted(
+            k for k in new_article_hashes if k in old and old[k] != new_article_hashes[k]
+        )
+        deleted = sorted(k for k in old if k not in new_article_hashes)
+        return ArticleDiff(
+            added_articles=added,
+            modified_articles=modified,
+            deleted_articles=deleted,
+        )
 
     def list_document_ids(self) -> list[str]:
         """Return all known document ids."""
@@ -73,22 +132,3 @@ class VersionStore:
         del state[document_id]
         self._save(state)
         return True
-        """Return ``(version, is_new_or_changed)`` for a document.
-
-        - first ingest of a document -> ``(1, True)``
-        - re-ingest of identical content -> ``(current_version, False)`` (skip)
-        - changed content -> ``(version + 1, True)`` and the store is updated
-        """
-        version, changed = self.check_version(document_id, content_hash)
-        if changed:
-            self.commit_version(document_id, content_hash, version)
-        return version, changed
-
-
-def get_version(
-    document_id: str,
-    content_hash: str,
-    data_dir: Union[str, Path] = "./data",
-) -> tuple[int, bool]:
-    """Convenience wrapper around :class:`VersionStore`."""
-    return VersionStore(data_dir).get_version(document_id, content_hash)

@@ -5,16 +5,22 @@ Pipeline (see docs/architecture.md for the Mermaid diagram):
     user -> input_guardrail -> planner -> context_agent -> memory_agent
          -> [fan-out: one retrieval_branch per sub-question, in parallel]
          -> retrieval_merge -> conflict_resolver -> evidence_ranking
-         -> reasoning_agent -> reflection_agent -> response_generator
-         -> citation_verification -> output_guardrail -> final answer
+         -> coverage_auditor -> reasoning_agent -> reflection_agent
+         -> response_generator -> claim_verification -> citation_verification
+         -> output_guardrail
+         -> final answer
 
 Bounded loops (max retry = 1 each):
+    coverage_auditor -> retrieval fan-out (missing sub-questions, one retry)
     reasoning -> retrieval fan-out  (missing evidence, one retry)
     reflection -> retrieval fan-out (self-critique, one iteration)
 
-Post-synthesis review: citation_verification runs AFTER response_generator
-so the judge actually sees the drafted answer (it used to run before it and
-always verified an empty draft).
+Post-synthesis review: claim_verification and citation_verification run AFTER
+response_generator so the judges actually see the drafted answer (citation
+verification used to run before it and always verified an empty draft).
+claim_verification runs FIRST so claims are built on the draft with its [n]
+markers (they designate the intended sources); if citation_verification then
+strips an unverifiable marker, the claim simply keeps its recorded support.
 """
 
 from __future__ import annotations
@@ -29,8 +35,10 @@ from langgraph.types import Send
 
 from backend.agents import (
     citation_verification,
+    claim_verification,
     conflict_resolver,
     context_agent,
+    coverage_auditor,
     evidence_ranking,
     input_guardrail,
     memory_agent,
@@ -43,6 +51,7 @@ from backend.agents import (
     retrieval_node,
 )
 from backend.core.context import AppContext
+from backend.core.model_roles import resolve_role_llm
 from backend.core.models import ChatMessage, ChatResponse, FinalAnswer
 from backend.core.state import GraphState
 from backend.planner.agent import planner_node
@@ -59,14 +68,17 @@ def build_graph(ctx: AppContext):
     max_retrieval_retries = settings.max_retrieval_retries
     max_reflection_iterations = settings.max_reflection_iterations
 
-    def bind(fn):
+    def bind(fn, role: Optional[str] = None):
         async def node(state: GraphState) -> dict[str, Any]:
             # Per-request LLM override (tier-gated, set by the API layer):
             # hand nodes a shallow context copy carrying the override.
-            effective_ctx = ctx
-            llm_override = state.get("llm")
-            if llm_override is not None:
-                effective_ctx = replace(ctx, llm=llm_override)
+            # `role` (spec §46) further binds the node to its role's model
+            # when role routing is enabled; otherwise this is a pass-through.
+            base_llm = state.get("llm")
+            if base_llm is None:
+                base_llm = ctx.llm
+            effective_llm = resolve_role_llm(role, base_llm, settings) if role else base_llm
+            effective_ctx = ctx if effective_llm is ctx.llm else replace(ctx, llm=effective_llm)
             return await fn(state, effective_ctx)
 
         return node
@@ -92,6 +104,27 @@ def build_graph(ctx: AppContext):
             for i, q in enumerate(sub_questions)
         ]
 
+    def _route_after_coverage(state: GraphState):
+        """Coverage gap -> one bounded re-retrieval on the missing sub-questions.
+
+        Uses the same mechanism as the reasoning/reflection retry paths: the
+        node sets ``needs_more_retrieval`` (only when the retry budget allows
+        it) and ``retrieval_merge`` counts the pass. The fan-out targets the
+        auditor's missing issues rather than the whole plan.
+        """
+        report = state.get("coverage_report")
+        if (
+            report is not None
+            and state.get("needs_more_retrieval")
+            and state.get("retrieval_retries", 0) < max_retrieval_retries
+        ):
+            issues = report.missing_issues or [state["query"]]
+            return [
+                Send("retrieval_branch", {**state, "branch_query": q, "branch_index": i})
+                for i, q in enumerate(issues)
+            ]
+        return "reasoning_agent"
+
     def _route_after_reasoning(state: GraphState):
         if state.get("needs_more_retrieval") and state.get("retrieval_retries", 0) < max_retrieval_retries:
             return _fanout_retrieval(state)
@@ -111,18 +144,20 @@ def build_graph(ctx: AppContext):
     g = StateGraph(GraphState)
     g.add_node("input_guardrail", bind(input_guardrail.input_guardrail_node))
     g.add_node("refusal", bind(refusal.refusal_node))
-    g.add_node("planner", bind(planner_node))
-    g.add_node("context_agent", bind(context_agent.context_agent_node))
-    g.add_node("memory_agent", bind(memory_agent.memory_agent_node))
+    g.add_node("planner", bind(planner_node, role="planner"))
+    g.add_node("context_agent", bind(context_agent.context_agent_node, role="classification"))
+    g.add_node("memory_agent", bind(memory_agent.memory_agent_node, role="classification"))
     g.add_node("retrieval_branch", bind(retrieval_node.retrieval_branch_node))
     g.add_node("retrieval_merge", bind(retrieval_node.retrieval_merge_node))
     g.add_node("conflict_resolver", bind(conflict_resolver.conflict_resolver_node))
     g.add_node("evidence_ranking", bind(evidence_ranking.evidence_ranking_node))
     g.add_node("parent_expansion", bind(parent_expansion.parent_expansion_node))
-    g.add_node("reasoning_agent", bind(reasoning_agent.reasoning_agent_node))
-    g.add_node("reflection_agent", bind(reflection_agent.reflection_agent_node))
+    g.add_node("coverage_auditor", bind(coverage_auditor.coverage_auditor_node))
+    g.add_node("reasoning_agent", bind(reasoning_agent.reasoning_agent_node, role="analysis"))
+    g.add_node("reflection_agent", bind(reflection_agent.reflection_agent_node, role="analysis"))
     g.add_node("citation_verification", bind(citation_verification.citation_verification_node))
-    g.add_node("response_generator", bind(response_generator.response_generator_node))
+    g.add_node("claim_verification", bind(claim_verification.claim_verification_node))
+    g.add_node("response_generator", bind(response_generator.response_generator_node, role="synthesis"))
     g.add_node("output_guardrail", bind(output_guardrail.output_guardrail_node))
 
     g.add_edge(START, "input_guardrail")
@@ -135,10 +170,12 @@ def build_graph(ctx: AppContext):
     g.add_edge("retrieval_merge", "conflict_resolver")
     g.add_edge("conflict_resolver", "parent_expansion")
     g.add_edge("parent_expansion", "evidence_ranking")
-    g.add_edge("evidence_ranking", "reasoning_agent")
+    g.add_edge("evidence_ranking", "coverage_auditor")
+    g.add_conditional_edges("coverage_auditor", _route_after_coverage)
     g.add_conditional_edges("reasoning_agent", _route_after_reasoning)
     g.add_conditional_edges("reflection_agent", _route_after_reflection)
-    g.add_edge("response_generator", "citation_verification")
+    g.add_edge("response_generator", "claim_verification")
+    g.add_edge("claim_verification", "citation_verification")
     g.add_edge("citation_verification", "output_guardrail")
     g.add_edge("output_guardrail", END)
     return g.compile()

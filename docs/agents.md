@@ -18,12 +18,15 @@ flowchart LR
     fan --> rm[retrieval_merge]
     rm --> cr[conflict_resolver]
     cr --> er[evidence_ranking]
-    er --> ra[reasoning_agent]
+    er --> cva[coverage_auditor]
+    cva --> ra[reasoning_agent]
+    cva -.->|needs_more_retrieval, retry ≤ 1| fan
     ra --> rf[reflection]
     ra -.->|needs_more_retrieval, retry ≤ 1| fan
     rf -.->|should_retry_retrieval, iteration ≤ 1| fan
     rf --> rg[response_generator]
-    rg --> cv[citation_verification]
+    rg --> clv[claim_verification]
+    clv --> cv[citation_verification]
     cv --> og[output_guardrail]
     og --> a[Final answer]
     ref --> a
@@ -108,6 +111,21 @@ contradictions? Produces a `ReflectionResult`. May request one retrieval
 re-run (`should_retry_retrieval`), bounded by `MAX_REFLECTION_ITERATIONS=1`
 and the shared retrieval retry budget. Falls back to a heuristic reflection
 without an LLM.
+
+## claim_verification (`backend/agents/claim_verification.py`)
+
+Post-synthesis, pre-citation-stripping pass (spec §20/§21/§44): runs between
+`response_generator` and `citation_verification`. Splits the draft into
+substantive statements (headings, source lists and short connectors skipped),
+grades each against the evidence with deterministic heuristics
+(`direct`/`indirect`/`insufficient`/`contradictory`, reusing the coverage
+auditor's discriminative terms plus a conservative number-mismatch check) and
+attaches the resulting `Claim` list to the `FinalAnswer`. Insufficient claims
+raise bilingual warnings; contradictory ones also set
+`requires_human_review`. Recomputes
+`confidence_breakdown.legal_support_confidence` as the supported-claim
+fraction dampened by the contradicted share; the aggregate `confidence` is
+untouched. Pure heuristic — no LLM call.
 
 ## citation_verification (`backend/agents/citation_verification.py`)
 

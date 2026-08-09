@@ -17,6 +17,7 @@ from typing import Any, Optional
 from backend.agents.agent import Agent
 from backend.agents.tools import get_tool_spec
 from backend.agents.tools.registry import list_tools
+from backend.core.config import get_settings
 from backend.core.constants import AUTHORITY_WEIGHTS
 from backend.core.context import AppContext
 from backend.core.models import ConflictReport, EvidenceChunk
@@ -45,9 +46,16 @@ def _claims(chunk: EvidenceChunk) -> set[str]:
     return claims
 
 
-def _contradict(a: EvidenceChunk, b: EvidenceChunk) -> bool:
+def _contradict(a: EvidenceChunk, b: EvidenceChunk, settings: Optional[Any] = None) -> bool:
+    """Number-claim sets must be disjoint AND the contents must differ beyond
+    a shared opening prefix (``settings.conflict_prefix_chars`` chars)."""
+    settings = settings or get_settings()
+    prefix = settings.conflict_prefix_chars
     ca, cb = _claims(a), _claims(b)
-    return bool(ca and cb and ca.isdisjoint(cb) and a.content[:80].lower() != b.content[:80].lower())
+    return bool(
+        ca and cb and ca.isdisjoint(cb)
+        and a.content[:prefix].lower() != b.content[:prefix].lower()
+    )
 
 
 def _in_force_at(chunk: EvidenceChunk, when: date) -> bool:
@@ -104,13 +112,14 @@ class ConflictResolverAgent(Agent):
 
         conflicts: list[ConflictReport] = []
         dropped_ids: set[str] = set()
+        settings = ctx.settings if ctx is not None else get_settings()
         for (doc, article), chunks in groups.items():
             for i in range(len(chunks)):
                 for j in range(i + 1, len(chunks)):
                     a, b = chunks[i], chunks[j]
                     if a.chunk_id in dropped_ids or b.chunk_id in dropped_ids:
                         continue
-                    if _contradict(a, b):
+                    if _contradict(a, b, settings):
                         kept, dropped, reason, resolved = resolve_pair(a, b, scenario)
                         dropped_ids.add(dropped.chunk_id)
                         conflicts.append(

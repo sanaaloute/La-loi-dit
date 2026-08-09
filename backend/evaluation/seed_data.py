@@ -50,7 +50,7 @@ def _chunk(
 
 
 def seed_evidence() -> list[EvidenceChunk]:
-    """Return ~15 realistic (but synthetic) French legal excerpt chunks."""
+    """Return ~28 realistic (but synthetic) French legal excerpt chunks."""
     return [
         _chunk(
             document_id="constitution-1991",
@@ -107,12 +107,13 @@ def seed_evidence() -> list[EvidenceChunk]:
             document_name="Code du travail du Burkina Faso",
             article="95",
             content=(
-                "Article 95 — En cas de rupture du contrat de travail à durée "
-                "indéterminée, un préavis doit être observé par la partie qui prend "
-                "l'initiative de la rupture. La durée du préavis est de huit jours "
-                "pour les ouvriers journaliers et payés à l'heure, d'un mois pour "
-                "les employés et ouvriers mensualisés, et de trois mois pour les "
-                "cadres et agents de maîtrise."
+                "Article 95 — En cas de licenciement ou de rupture du contrat de "
+                "travail à durée indéterminée, un préavis doit être observé par la "
+                "partie qui prend l'initiative de la rupture. La durée du préavis "
+                "est de huit jours pour les ouvriers journaliers et payés à "
+                "l'heure, d'un mois pour les employés et ouvriers mensualisés, et "
+                "de trois mois pour les cadres et agents de maîtrise. Le salarié "
+                "licencié conserve le bénéfice de son préavis."
             ),
             authority=AuthorityLevel.LAW,
             publication_date=date(2008, 5, 20),
@@ -124,11 +125,12 @@ def seed_evidence() -> list[EvidenceChunk]:
             document_name="Code du travail du Burkina Faso",
             article="96",
             content=(
-                "Article 96 — L'indemnité de licenciement est calculée sur la base "
-                "du salaire mensuel moyen des douze derniers mois. Elle est fixée à "
-                "vingt-cinq pour cent du salaire mensuel moyen par année de présence "
-                "pour les cinq premières années, trente pour cent de la sixième à la "
-                "dixième année et quarante pour cent au-delà de dix ans."
+                "Article 96 — Le salarié licencié a droit à une indemnité de "
+                "licenciement calculée sur la base du salaire mensuel moyen des "
+                "douze derniers mois. Elle est fixée à vingt-cinq pour cent du "
+                "salaire mensuel moyen par année de présence pour les cinq "
+                "premières années, trente pour cent de la sixième à la dixième "
+                "année et quarante pour cent au-delà de dix ans."
             ),
             authority=AuthorityLevel.LAW,
             publication_date=date(2008, 5, 20),
@@ -311,5 +313,203 @@ def seed_evidence() -> list[EvidenceChunk]:
             government_body="Cour suprême du Burkina Faso",
             url="https://www.coursupreme.bf/arrets/2019-042",
             confidence=0.8,
+        ),
+        # --- Dismissal issues (golden regression case, spec §38) --------------
+        _chunk(
+            document_id="code-travail-2008",
+            document_name="Code du travail du Burkina Faso",
+            article="90",
+            content=(
+                "Article 90 — Le licenciement d'un salarié ne peut intervenir que "
+                "pour un motif réel et sérieux lié à l'aptitude ou à la conduite du "
+                "salarié, ou aux nécessités du fonctionnement de l'entreprise. La "
+                "faute grave est celle qui rend impossible le maintien du salarié "
+                "dans l'entreprise ; le salarié licencié pour faute grave perd le "
+                "bénéfice du préavis."
+            ),
+            authority=AuthorityLevel.LAW,
+            publication_date=date(2008, 5, 20),
+            government_body="Ministère du Travail et de la Protection sociale",
+            url=f"{_JO_URL}/code-du-travail#art-90",
+            confidence=0.95,
+        ),
+        _chunk(
+            document_id="code-travail-2008",
+            document_name="Code du travail du Burkina Faso",
+            article="97",
+            content=(
+                "Article 97 — Le salarié licencié conserve ses droits acquis : le "
+                "paiement des salaires échus, des congés payés acquis jusqu'à la "
+                "date de rupture et de tous autres avantages échus. Ces droits "
+                "acquis sont dus indépendamment du motif du licenciement."
+            ),
+            authority=AuthorityLevel.LAW,
+            publication_date=date(2008, 5, 20),
+            government_body="Ministère du Travail et de la Protection sociale",
+            url=f"{_JO_URL}/code-du-travail#art-97",
+            confidence=0.95,
+        ),
+        _chunk(
+            document_id="code-travail-2008",
+            document_name="Code du travail du Burkina Faso",
+            article="98",
+            content=(
+                "Article 98 — Le licenciement abusif, dépourvu de motif réel et "
+                "sérieux ou entaché d'une irrégularité de procédure, ouvre droit "
+                "pour le salarié licencié à des dommages et intérêts dont le "
+                "montant est fixé par la juridiction compétente au regard du "
+                "préjudice subi."
+            ),
+            authority=AuthorityLevel.LAW,
+            publication_date=date(2008, 5, 20),
+            government_body="Ministère du Travail et de la Protection sociale",
+            url=f"{_JO_URL}/code-du-travail#art-98",
+            confidence=0.95,
+        ),
+        _chunk(
+            document_id="code-travail-2008",
+            document_name="Code du travail du Burkina Faso",
+            article="100",
+            content=(
+                "Article 100 — Le tribunal du travail est compétent pour connaître "
+                "des litiges nés du licenciement. Le salarié licencié dispose d'un "
+                "recours devant cette juridiction après la tentative préalable de "
+                "conciliation devant l'inspection du travail territorialement "
+                "compétente."
+            ),
+            authority=AuthorityLevel.LAW,
+            publication_date=date(2008, 5, 20),
+            government_body="Ministère du Travail et de la Protection sociale",
+            url=f"{_JO_URL}/code-du-travail#art-100",
+            confidence=0.95,
+        ),
+        # --- Civil law ----------------------------------------------------------
+        _chunk(
+            document_id="code-civil-bf",
+            document_name="Code civil du Burkina Faso",
+            article="1382",
+            content=(
+                "Article 1382 — Tout fait quelconque de l'homme, qui cause à "
+                "autrui un dommage, oblige celui par la faute duquel il est arrivé "
+                "à le réparer. La responsabilité civile est engagée par la faute, "
+                "la négligence ou l'imprudence."
+            ),
+            authority=AuthorityLevel.LAW,
+            publication_date=date(1989, 8, 4),
+            government_body="Ministère de la Justice",
+            url=f"{_JO_URL}/code-civil#art-1382",
+        ),
+        _chunk(
+            document_id="code-civil-bf",
+            document_name="Code civil du Burkina Faso",
+            article="2262",
+            content=(
+                "Article 2262 — Les actions en justice, tant réelles que "
+                "personnelles, se prescrivent par trente ans, sans que celui qui "
+                "allègue cette prescription soit obligé d'en rapporter un titre. "
+                "La prescription civile s'acquiert par le non-exercice du droit "
+                "pendant le délai légal."
+            ),
+            authority=AuthorityLevel.LAW,
+            publication_date=date(1989, 8, 4),
+            government_body="Ministère de la Justice",
+            url=f"{_JO_URL}/code-civil#art-2262",
+        ),
+        # --- Commercial law (OHADA) ---------------------------------------------
+        _chunk(
+            document_id="audcg-2010",
+            document_name="Acte uniforme OHADA portant droit commercial général (AUDCG)",
+            article="27",
+            content=(
+                "Article 27 — Toute personne physique ou morale exerçant une "
+                "activité commerciale doit s'immatriculer au registre du commerce "
+                "et du crédit mobilier (RCCM) dans le mois du début de son "
+                "activité. L'immatriculation au RCCM confère la qualité de "
+                "commerçant."
+            ),
+            authority=AuthorityLevel.TREATY_OHADA,
+            publication_date=date(2010, 12, 15),
+            government_body="Organisation pour l'Harmonisation en Afrique du Droit des Affaires (OHADA)",
+            url="https://www.ohada.org/acte-uniforme/audcg#art-27",
+            confidence=0.95,
+        ),
+        _chunk(
+            document_id="audcg-2010",
+            document_name="Acte uniforme OHADA portant droit commercial général (AUDCG)",
+            article="92",
+            content=(
+                "Article 92 — Le fonds de commerce est un bien meuble incorporel "
+                "qui comprend notamment la clientèle, l'enseigne, le nom "
+                "commercial et le droit au bail. La vente du fonds de commerce "
+                "est constatée par un acte écrit et publiée au RCCM."
+            ),
+            authority=AuthorityLevel.TREATY_OHADA,
+            publication_date=date(2010, 12, 15),
+            government_body="Organisation pour l'Harmonisation en Afrique du Droit des Affaires (OHADA)",
+            url="https://www.ohada.org/acte-uniforme/audcg#art-92",
+            confidence=0.95,
+        ),
+        # --- Administrative law ---------------------------------------------------
+        _chunk(
+            document_id="code-contentieux-admin",
+            document_name="Code du contentieux administratif du Burkina Faso",
+            article="12",
+            content=(
+                "Article 12 — Le recours pour excès de pouvoir contre les actes "
+                "administratifs doit être formé dans un délai de deux mois à "
+                "compter de la notification ou de la publication de la décision "
+                "attaquée. L'excès de pouvoir entraîne l'annulation de l'acte "
+                "administratif."
+            ),
+            authority=AuthorityLevel.LAW,
+            publication_date=date(2001, 12, 18),
+            government_body="Ministère de la Justice",
+            url=f"{_JO_URL}/contentieux-administratif#art-12",
+        ),
+        _chunk(
+            document_id="code-contentieux-admin",
+            document_name="Code du contentieux administratif du Burkina Faso",
+            article="3",
+            content=(
+                "Article 3 — Les chambres administratives des juridictions du "
+                "ressort connaissent des litiges entre les administrés et l'État "
+                "ou les collectivités territoriales, notamment en matière de "
+                "fonction publique et de contrats administratifs."
+            ),
+            authority=AuthorityLevel.LAW,
+            publication_date=date(2001, 12, 18),
+            government_body="Ministère de la Justice",
+            url=f"{_JO_URL}/contentieux-administratif#art-3",
+        ),
+        # --- Land law -------------------------------------------------------------
+        _chunk(
+            document_id="loi-034-2009-foncier",
+            document_name="Loi n° 034-2009 portant régime foncier rural du Burkina Faso",
+            article="14",
+            content=(
+                "Article 14 — Les droits d'usage coutumiers sur les terres rurales "
+                "sont reconnus ; leur gestion relève des commissions villageoises "
+                "de gestion foncière rurale qui attribuent les terres aux "
+                "exploitants agricoles."
+            ),
+            authority=AuthorityLevel.LAW,
+            publication_date=date(2009, 6, 16),
+            government_body="Ministère de l'Agriculture",
+            url=f"{_JO_URL}/foncier-rural#art-14",
+        ),
+        _chunk(
+            document_id="loi-034-2009-foncier",
+            document_name="Loi n° 034-2009 portant régime foncier rural du Burkina Faso",
+            article="31",
+            content=(
+                "Article 31 — Le titre foncier est le seul titre de propriété "
+                "reconnu sur les terres ; il est délivré par le service du domaine "
+                "après enquête foncière et purge des droits coutumiers "
+                "préexistants."
+            ),
+            authority=AuthorityLevel.LAW,
+            publication_date=date(2009, 6, 16),
+            government_body="Ministère de l'Agriculture",
+            url=f"{_JO_URL}/foncier-rural#art-31",
         ),
     ]

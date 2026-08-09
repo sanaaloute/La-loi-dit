@@ -65,7 +65,10 @@ class MemoryAgent(Agent):
         user_id = state.get("user_id", "anonymous")
         query = state["query"]
         calls = [
-            ToolCall(name="recall_memories", arguments={"user_id": user_id, "query": query, "limit": 5}),
+            ToolCall(
+                name="recall_memories",
+                arguments={"user_id": user_id, "query": query, "limit": ctx.settings.memory_recall_limit},
+            ),
             ToolCall(name="get_user_preferences", arguments={"user_id": user_id}),
         ]
         results = await execute_tool_calls(TOOL_REGISTRY, calls, ctx, state)

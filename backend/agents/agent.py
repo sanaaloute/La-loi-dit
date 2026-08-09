@@ -72,9 +72,13 @@ class ToolCallingAgent(Agent):
     max_tool_iterations: int = 3
 
     @abstractmethod
-    def _build_user_message(self, state: GraphState) -> str:
+    def _build_user_message(self, state: GraphState, ctx: Optional[AppContext] = None) -> str:
         """Return the initial user message for this agent."""
         ...
+
+    def _tool_iteration_budget(self, ctx: AppContext) -> int:
+        """Tool-calling loop budget; subclasses may source it from settings."""
+        return self.max_tool_iterations
 
     @abstractmethod
     def _parse_final(
@@ -89,7 +93,7 @@ class ToolCallingAgent(Agent):
 
     async def run(self, state: GraphState, ctx: AppContext) -> dict[str, Any]:
         """Run the bounded tool-calling loop and return state updates."""
-        user_message = self._build_user_message(state)
+        user_message = self._build_user_message(state, ctx)
         history: list[tuple[ToolCall, ToolResult]] = []
         messages = [
             {"role": "system", "content": self.system_prompt},
@@ -97,7 +101,7 @@ class ToolCallingAgent(Agent):
         ]
         tool_schemas = [as_function_schema(t) for t in self.tools]
 
-        for iteration in range(self.max_tool_iterations):
+        for iteration in range(self._tool_iteration_budget(ctx)):
             try:
                 output = await ctx.llm.complete_tools(
                     messages,
@@ -137,7 +141,7 @@ class CompletionAgent(Agent):
     """Agent whose LLM produces a single text output (no tool loop)."""
 
     @abstractmethod
-    def _build_user_message(self, state: GraphState) -> str:
+    def _build_user_message(self, state: GraphState, ctx: Optional[AppContext] = None) -> str:
         """Return the user message for this agent."""
         ...
 
@@ -155,7 +159,7 @@ class CompletionAgent(Agent):
         try:
             text = await ctx.llm.complete(
                 self.system_prompt,
-                self._build_user_message(state),
+                self._build_user_message(state, ctx),
                 temperature=ctx.settings.llm_temperature,
             )
         except Exception as exc:

@@ -113,6 +113,70 @@ def test_ready_development_defaults_are_ready(client):
     assert client.get("/health").status_code == 200
 
 
+def test_ready_non_strict_records_new_components_as_ok(client):
+    """The extended infra assessment shows up in /ready but stays non-critical."""
+    response = client.get("/ready")
+    assert response.status_code == 200
+    checks = response.json()["checks"]
+    for name in ("llm", "embeddings", "user_store", "memory_store", "legal_graph"):
+        assert name in checks, name
+        assert checks[name].startswith("ok"), checks[name]
+
+
+def test_ready_strict_mock_llm_is_503(tmp_path, monkeypatch):
+    """Strict mode + the default mock LLM: the llm check is critical."""
+    env = {"LEGAL_AI_STRICT_INFRA": "true", "LEGAL_AI_STRICT_CRITICAL_COMPONENTS": "llm"}
+    with _make_client(tmp_path, monkeypatch, env) as client:
+        response = client.get("/ready")
+        assert response.status_code == 503
+        checks = response.json()["checks"]
+        assert checks["llm"].startswith("degraded")
+
+
+def test_ready_strict_real_provider_but_hash_embeddings_is_503(tmp_path, monkeypatch):
+    """A configured (non-mock) LLM passes, but hash embeddings still 503."""
+    env = {
+        "LEGAL_AI_STRICT_INFRA": "true",
+        "LEGAL_AI_LLM_PROVIDER": "ollama",  # real-looking: not the mock default
+        "LEGAL_AI_STRICT_CRITICAL_COMPONENTS": "embeddings",
+    }
+    with _make_client(tmp_path, monkeypatch, env) as client:
+        response = client.get("/ready")
+        assert response.status_code == 503
+        checks = response.json()["checks"]
+        assert checks["llm"].startswith("ok")
+        assert checks["embeddings"].startswith("degraded")
+
+
+def test_ready_strict_dev_defaults_503_via_default_critical_set(tmp_path, monkeypatch):
+    """With the default critical set, strict mode rejects the dev fallbacks."""
+    with _make_client(tmp_path, monkeypatch, {"LEGAL_AI_STRICT_INFRA": "true"}) as client:
+        response = client.get("/ready")
+        assert response.status_code == 503
+        checks = response.json()["checks"]
+        for name in ("postgres", "llm", "embeddings", "user_store"):
+            assert checks[name].startswith("degraded"), checks[name]
+
+
+def test_strict_critical_components_rejects_unknown_names():
+    from pydantic import ValidationError
+
+    from backend.core.config import Settings
+
+    with pytest.raises(ValidationError, match="unknown strict critical component"):
+        Settings(strict_critical_components="milvus,nope")
+
+
+def test_dev_users_setting_drives_dev_store(tmp_path, monkeypatch):
+    """LEGAL_AI_DEV_USERS reaches the dev login store via Settings.dev_users."""
+    with _make_client(tmp_path, monkeypatch, {"LEGAL_AI_DEV_USERS": "awa:motdepasse1:admin"}) as client:
+        response = client.post(
+            "/api/v1/auth/token", json={"username": "awa", "password": "motdepasse1"}
+        )
+        assert response.status_code == 200
+        assert response.json()["role"] == "admin"
+
+
 # ---------------------------------------------------------------------------
 # Per-tier rate limits
 # ---------------------------------------------------------------------------

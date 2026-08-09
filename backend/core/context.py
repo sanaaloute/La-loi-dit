@@ -108,6 +108,18 @@ async def _assess_infra(ctx: AppContext) -> dict[str, str]:
     else:
         status["redis"] = "degraded: redis unreachable (in-memory fallback)"
 
+    # --- embeddings: HashEmbeddings is the offline placeholder ---
+    from backend.core.embeddings import HashEmbeddings
+
+    if isinstance(ctx.embedder, HashEmbeddings):
+        status["embeddings"] = (
+            "degraded: hash embeddings in strict mode"
+            if settings.strict_infra_enabled
+            else "ok (hash embeddings, offline)"
+        )
+    else:
+        status["embeddings"] = f"ok (configured: {settings.embedding_model})"
+
     # --- milvus / vector store ---
     from backend.vectorstore.memory_store import InMemoryVectorStore
 
@@ -125,18 +137,44 @@ async def _assess_infra(ctx: AppContext) -> dict[str, str]:
         status["milvus"] = "ok"
 
     # --- postgres / primary database (probe the CONFIGURED url only) ---
-    if settings.database_url.startswith("sqlite"):
+    from backend.users.service import probe_database
+
+    configured_sqlite = settings.database_url.startswith("sqlite")
+    db_reachable: Optional[bool] = None  # None => sqlite is the configured backend
+    if configured_sqlite:
         status["postgres"] = (
             "degraded: sqlite database in strict mode"
             if settings.strict_infra_enabled
             else "ok (sqlite, development)"
         )
     else:
-        from backend.users.service import probe_database
+        db_reachable = await probe_database(settings)
+        status["postgres"] = "ok" if db_reachable else "degraded: postgres unreachable"
 
-        if await probe_database(settings):
-            status["postgres"] = "ok"
-        else:
-            status["postgres"] = "degraded: postgres unreachable"
+    # --- sql-backed stores sharing that database (lazy bootstraps, so assess
+    # from the config + the probe above rather than opening more connections) ---
+    def _sql_store_status(fallback_note: str) -> str:
+        if configured_sqlite:
+            return (
+                "degraded: sqlite database in strict mode"
+                if settings.strict_infra_enabled
+                else "ok (sqlite, development)"
+            )
+        if db_reachable:
+            return "ok"
+        return f"degraded: database unreachable ({fallback_note})"
+
+    # user store: falls back to a local SQLite file, or dev-user-only mode in
+    # strict infra (no silent pivot).
+    status["user_store"] = _sql_store_status(
+        "dev-user-only mode" if settings.strict_infra_enabled else "sqlite fallback"
+    )
+    # memory store: falls back to a local SQLite file, then in-memory dicts.
+    status["memory_store"] = _sql_store_status("sqlite/in-memory fallback")
+    # legal graph: falls back to a local SQLite file, then no-op writes.
+    if not settings.legal_graph_enabled:
+        status["legal_graph"] = "ok (disabled)"
+    else:
+        status["legal_graph"] = _sql_store_status("sqlite/no-op fallback")
 
     return status

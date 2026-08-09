@@ -21,7 +21,8 @@ async def parent_expansion_node(state: GraphState, ctx: AppContext) -> dict[str,
     so this node reads ``evidence`` and writes back expanded ``evidence``.
     Keeps child chunks that have no parent as-is.  Populates
     ``parent.child_chunks`` with the matching children so the response generator
-    can see exactly which evidence led to each parent.
+    can see exactly which evidence led to each parent, and stamps the dual
+    ``retrieval_text`` / ``context_text`` fields (spec §7) on expanded parents.
     """
     evidence = list(state.get("evidence", []))
     if not evidence or ctx.vector_store is None:
@@ -59,6 +60,14 @@ async def parent_expansion_node(state: GraphState, ctx: AppContext) -> dict[str,
         # Attach the child to its parent, but avoid duplicates.
         if child not in parent.child_chunks:
             parent.child_chunks.append(child)
+        # Dual text (spec §7): record what matched (the child passage) and
+        # the broader context it was expanded to (the parent article /
+        # section).  First matching child wins when several children share
+        # one parent; every child stays visible under ``parent.child_chunks``.
+        if parent.retrieval_text is None:
+            parent.retrieval_text = child.content
+        if parent.context_text is None:
+            parent.context_text = parent.content
         if parent not in expanded:
             expanded.append(parent)
 

@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from backend.agents.tools.base import tool
 from backend.agents.tools.registry import register_tool
+from backend.core.prompts import PROMPTS, get_prompt
 
 
 class DraftAnswerArgs(BaseModel):
@@ -51,22 +52,19 @@ async def summarize_evidence(ctx: Any, state: Any, args: SummarizeEvidenceArgs) 
     return summary
 
 
-_DISCLAIMER_FR = (
-    "\n\n---\nAvertissement : cette réponse est une aide à la recherche juridique "
-    "fondée sur les sources citées. Elle ne constitue pas un conseil juridique. "
-    "Consultez un professionnel du droit pour votre situation particulière."
-)
+# Canonical disclaimer text lives in the prompt registry
+# (backend.core.prompts — DISCLAIMER_FR/EN). These names are kept as
+# built-in-default re-exports for existing consumers (output_guardrail,
+# tests); the tool below resolves get_prompt() at call time so
+# Settings.prompts_dir overrides apply.
+_DISCLAIMER_FR = PROMPTS["DISCLAIMER_FR"]
 
-_DISCLAIMER_EN = (
-    "\n\n---\nDisclaimer: this answer is legal research assistance grounded in the "
-    "cited sources. It is not legal advice. Consult a licensed legal professional "
-    "for your specific situation."
-)
+_DISCLAIMER_EN = PROMPTS["DISCLAIMER_EN"]
 
 
 @tool("apply_disclaimer", "Append the mandatory legal disclaimer to an answer.")
 async def apply_disclaimer(ctx: Any, state: Any, args: ApplyDisclaimerArgs) -> str:
-    disclaimer = _DISCLAIMER_EN if args.language.startswith("en") else _DISCLAIMER_FR
+    disclaimer = get_prompt("DISCLAIMER_EN" if args.language.startswith("en") else "DISCLAIMER_FR")
     text = args.text.rstrip()
     if disclaimer.strip() not in text:
         text = text + disclaimer

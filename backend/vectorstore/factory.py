@@ -26,7 +26,7 @@ async def get_vector_store(settings: Settings) -> VectorStoreProtocol:
     if settings.milvus_enabled:
         # Retry a few times: the first handshake(s) can flap on NAT'd or
         # filtered links (WSL<->Windows, VPNs) while the server is fine.
-        attempts = 3
+        attempts = max(1, settings.milvus_connect_attempts)
         for attempt in range(1, attempts + 1):
             try:
                 from backend.vectorstore.milvus_store import MilvusVectorStore
@@ -48,5 +48,5 @@ async def get_vector_store(settings: Settings) -> VectorStoreProtocol:
                         attempts,
                         str(exc) or type(exc).__name__,
                     )
-                    await asyncio.sleep(1.0 * attempt)
+                    await asyncio.sleep(settings.milvus_connect_backoff_seconds * attempt)
     return InMemoryVectorStore()

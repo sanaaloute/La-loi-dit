@@ -525,6 +525,7 @@ export async function streamChat(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let sawFinal = false;
 
   for (;;) {
     const { done, value } = await reader.read();
@@ -541,12 +542,27 @@ export async function streamChat(
         const payload = line.slice(5).trim();
         if (!payload) continue;
         try {
-          onEvent(JSON.parse(payload) as StreamEvent);
-        } catch {
+          const event = JSON.parse(payload) as StreamEvent;
+          if (event.type === "final" || event.type === "cancelled" || event.type === "error") {
+            sawFinal = true;
+          }
+          onEvent(event);
+        } catch (err) {
+          // A handler error (e.g. backend "error" frame) must propagate.
+          if (err instanceof Error && !(err instanceof SyntaxError)) throw err;
           // Ignore malformed frames; the final event or an error will follow.
         }
       }
     }
+  }
+
+  // A stream that ends with no terminal frame was truncated somewhere between
+  // the backend and the browser (proxy timeout, worker restart...). Never
+  // fail silently: the caller must show an error instead of just stopping.
+  if (!sawFinal) {
+    throw new Error(
+      "Le flux s'est interrompu avant la réponse finale (proxy ou serveur). Réessayez — ou arrêtez et relancez la question.",
+    );
   }
 }
 

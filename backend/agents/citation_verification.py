@@ -113,6 +113,9 @@ class CitationVerificationAgent(Agent):
             if accuracy < 1.0:
                 # Scale the coverage-aware confidence down by citation accuracy.
                 final.confidence = round(final.confidence * accuracy, 2)
+                if final.confidence_breakdown is not None:
+                    # Post-verification citation accuracy (spec §39).
+                    final.confidence_breakdown.citation_confidence = round(accuracy, 2)
             if warnings:
                 final.warnings.extend(warnings)
 

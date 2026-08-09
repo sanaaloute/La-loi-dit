@@ -14,73 +14,36 @@ from typing import Any
 
 from backend.agents.agent import ToolCallingAgent
 from backend.agents.tools import get_tool_spec
+# Canonical French markers / domain keywords live with the planning tools
+# (also used by the detect_language / classify_legal_domains tools).
+from backend.agents.tools.planning import _DOMAIN_KEYWORDS, _FR_MARKERS
 from backend.agents.tools.registry import list_tools
 from backend.core.context import AppContext
 from backend.core.models import RetrievalPlan, SearchKind, SearchTask
+from backend.core.prompts import PromptRef
 from backend.core.state import GraphState
+from backend.planner.decomposition import deterministic_decompose
+from backend.planner.question_types import classify_question_type, detect_temporal_intent
+from backend.planner.terminology import expand_terms
 
 
 class PlannerAgent(ToolCallingAgent):
     """Turns the user question into a structured retrieval plan."""
 
     name = "planner"
-    system_prompt = """You are the planning agent of an expert legal research assistant for Burkina Faso.
-
-SCOPE
-- Corpus: official sources of Burkina Faso (Constitution, codes, lois, décrets, arrêtés,
-  Journal Officiel), OHADA uniform acts and ratified international instruments.
-- Your only job is to plan the retrieval searches. You NEVER answer the question yourself
-  and never invent article numbers or provisions.
-
-TASK
-1. Identify the legal issue, the domain(s) (family_code, labor_code, commercial_law,
-   ohada_law, criminal_law, tax_law, land_law, administrative_law, constitution...),
-   any scenario date, and the user's language.
-2. Reformulate the question into effective FRENCH search queries using precise legal
-   terminology (the corpus is mostly French), even when the user writes in English.
-3. Break compound questions into focused sub-questions when needed.
-
-TOOLS
-You may call: detect_language, extract_scenario_date, classify_legal_domains,
-build_sub_questions, build_search_tasks.
-
-OUTPUT
-When you have enough information, output a single JSON object, no prose:
-{
-  "sub_questions": ["..."],
-  "tasks": [{"kind": "vector", "query": "...", "top_k": 8, "filters": {}}],
-  "legal_domains": ["family_code"],
-  "retrieval_language": "fr",
-  "response_language": "fr",
-  "scenario_date": null,
-  "rationale": "..."
-}
-
-RULES
-- "kind" is one of: vector, keyword, government, regulation, case_law, news.
-  Always include at least one vector and one keyword task; add government, regulation,
-  case_law or news tasks only when the question clearly calls for them.
-- For BROAD legal questions (droits, procédure, conditions, conséquences, régime...),
-  DECOMPOSE the question into its underlying legal issues and emit one sub_question
-  and one keyword search task PER issue — never answer a broad rights question with a
-  single keyword search, or you will retrieve only the provisions that repeat the
-  question's words instead of the provisions that answer it.
-  Example — « Quels sont les droits d'un salarié licencié ? » decomposes into:
-  motif légitime du licenciement, notification écrite, préavis et indemnité
-  compensatrice, indemnité de licenciement, licenciement abusif et dommages-intérêts,
-  faute lourde, congés payés et certificat de travail, contestation devant le
-  tribunal du travail.
-- retrieval_language is "fr" unless the corpus language clearly differs;
-  response_language always follows the user's language.
-- Prefer official sources (government, Journal Officiel, OHADA)."""
+    # Resolved through the prompt registry (backend.core.prompts.PLANNER_SYSTEM)
+    # at every access, so Settings.prompts_dir overrides apply.
+    system_prompt = PromptRef("PLANNER_SYSTEM")
 
     tools = [
         t for t in list_tools()
-        if t.name in ("detect_language", "extract_scenario_date", "classify_legal_domains", "build_sub_questions", "build_search_tasks")
+        if t.name in ("detect_language", "extract_scenario_date", "classify_legal_domains", "build_sub_questions", "build_search_tasks", "expand_legal_terms")
     ]
-    max_tool_iterations = 3
+    def _tool_iteration_budget(self, ctx: AppContext) -> int:
+        """Tool-loop budget sourced from ``settings.planner_max_tool_iterations``."""
+        return ctx.settings.planner_max_tool_iterations
 
-    def _build_user_message(self, state: GraphState) -> str:
+    def _build_user_message(self, state: GraphState, ctx: Any = None) -> str:
         return f"Question: {state['query']}\n\nBuild a focused retrieval plan."
 
     def _fallback(self, state: GraphState, reason: str) -> dict[str, Any]:
@@ -103,7 +66,7 @@ RULES
         ctx: Any,
         tool_history: list[tuple[Any, Any]],
     ) -> dict[str, Any]:
-        plan = _heuristic_plan(state["query"], state.get("language"))
+        plan = _heuristic_plan(state["query"], state.get("language"), settings=ctx.settings)
         try:
             parsed = json.loads(text.strip()) if text.strip() else {}
             if isinstance(parsed, dict):
@@ -113,6 +76,10 @@ RULES
                 parsed.setdefault("retrieval_language", plan.retrieval_language)
                 parsed.setdefault("response_language", plan.response_language)
                 parsed.setdefault("scenario_date", plan.scenario_date)
+                # Deterministic classification; the LLM output overrides when
+                # it provides its own question_type / temporal_intent.
+                parsed.setdefault("question_type", plan.question_type)
+                parsed.setdefault("temporal_intent", plan.temporal_intent)
                 parsed.setdefault("rationale", plan.rationale)
                 parsed.setdefault("tasks", [t.model_dump(mode="json") for t in plan.tasks])
                 plan = RetrievalPlan.model_validate(parsed)
@@ -134,7 +101,7 @@ RULES
         # not only by the query's own keywords.
         keyword_queries = {t.query for t in plan.tasks if t.kind == SearchKind.KEYWORD}
         aux_top_k = ctx.settings.planner_aux_top_k
-        for sub in plan.sub_questions[:6]:
+        for sub in plan.sub_questions[: ctx.settings.planner_max_sub_question_tasks]:
             if sub and sub != state["query"] and sub not in keyword_queries:
                 plan.tasks.append(SearchTask(kind=SearchKind.KEYWORD, query=sub, top_k=aux_top_k, filters=filters))
                 keyword_queries.add(sub)
@@ -152,31 +119,8 @@ RULES
 
 
 def _detect_language(text: str) -> str:
-    _FR_MARKERS = (" le ", " la ", " les ", " de ", " du ", " des ", " est ", " quelle", " quel ", " au ", " aux ")
     lowered = f" {text.lower()} "
     return "fr" if any(m in lowered for m in _FR_MARKERS) else "en"
-
-
-_DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "constitution": ("constitution", "constitutionnel"),
-    "criminal_law": ("pénal", "penal", "infraction", "crime", "délit", "criminal"),
-    "civil_law": ("civil", "contrat", "responsabilité civile"),
-    "family_code": ("famille", "mariage", "divorce", "filiation", "family"),
-    "labor_code": ("travail", "travailleur", "licenciement", "licencié", "salarié", "salaire", "employeur", "employé", "labor", "labour"),
-    "tax_law": ("impôt", "impots", "fiscal", "taxe", "tva", "tax"),
-    "commercial_law": ("commercial", "société", "commerce", "ohada", "sarl", "sa "),
-    "ohada_law": ("ohada",),
-    "administrative_law": ("administratif", "administration", "fonction publique"),
-    "land_law": ("foncier", "terrain", "land", "propriété"),
-    "procurement_law": ("marchés publics", "appel d'offres", "procurement"),
-    "environmental_law": ("environnement", "pollution", "environmental"),
-    "immigration": ("immigration", "visa", "titre de séjour", "étranger"),
-    "public_service": ("fonction publique", "fonctionnaire", "public service"),
-    "elections": ("élection", "elections", "ceni", "vote"),
-    "health_regulations": ("santé", "health", "hôpital"),
-    "education_regulations": ("éducation", "education", "école", "université"),
-    "government_procedures": ("procédure", "guichet", "procedure"),
-}
 
 
 def _extract_scenario_date(text: str) -> date | None:
@@ -197,19 +141,23 @@ def _extract_scenario_date(text: str) -> date | None:
     return None
 
 
-def _heuristic_plan(query: str, language: str | None = None) -> RetrievalPlan:
+def _heuristic_plan(query: str, language: str | None = None, settings: Any = None) -> RetrievalPlan:
     """Deterministic fallback planner — always available, never hallucinates.
 
-    Note: question decomposition is intentionally LLM-ONLY (see the planner
-    system prompt). This fallback plans direct searches for the query as-is;
-    it never substitutes a pre-written decomposition for the model's.
+    Broad questions (rights, obligations, procedure...) are decomposed into
+    their underlying legal issues via the curated taxonomy in
+    ``backend.planner.decomposition``, with one keyword search task per issue;
+    everything else plans direct searches for the query as-is.  ``settings``
+    defaults to the process-wide ``get_settings()``.
     """
     from backend.core.config import get_settings
 
-    settings = get_settings()
+    settings = settings or get_settings()
     q = query.lower()
     response_language = language or _detect_language(query)
     domains = [d for d, kws in _DOMAIN_KEYWORDS.items() if any(k in q for k in kws)]
+    question_type = classify_question_type(query, response_language)
+    temporal_intent = detect_temporal_intent(query)
 
     top_k = settings.default_top_k
     aux_top_k = settings.planner_aux_top_k
@@ -226,6 +174,32 @@ def _heuristic_plan(query: str, language: str | None = None) -> RetrievalPlan:
     if any(w in q for w in ("récent", "recent", "actuellement", "news", "actualité", "2024", "2025", "2026")):
         tasks.append(SearchTask(kind=SearchKind.NEWS, query=query, top_k=aux_top_k))
 
+    sub_questions = [query]
+    rationale = "heuristic planner"
+    sub_issues = deterministic_decompose(query, question_type, domains)
+    if sub_issues:
+        sub_questions.extend(sub_issues)
+        for issue in sub_issues:
+            tasks.append(SearchTask(kind=SearchKind.KEYWORD, query=issue, top_k=aux_top_k))
+        rationale = "heuristic planner (deterministic decomposition)"
+
+    # Legal terminology expansion (spec §14/§29): one extra keyword task per
+    # matched term group, built from its synonyms + related terms.  Expansion
+    # only ADDS recall-oriented queries; the user's original terms are never
+    # rewritten or replaced.
+    expansions = expand_terms(query)
+    if expansions:
+        keyword_queries = {t.query for t in tasks if t.kind == SearchKind.KEYWORD}
+        expanded: list[str] = []
+        for canonical, terms in list(expansions.items())[: settings.planner_max_expansion_tasks]:
+            expansion_query = " ".join(terms)
+            if expansion_query and expansion_query not in keyword_queries:
+                tasks.append(SearchTask(kind=SearchKind.KEYWORD, query=expansion_query, top_k=aux_top_k))
+                keyword_queries.add(expansion_query)
+                expanded.append(canonical)
+        if expanded:
+            rationale += f"; terminology expansion ({', '.join(expanded)})"
+
     filters: dict[str, Any] = {}
     if domains:
         filters["legal_domains"] = domains
@@ -233,13 +207,15 @@ def _heuristic_plan(query: str, language: str | None = None) -> RetrievalPlan:
         t.filters = {**t.filters, **filters}
 
     return RetrievalPlan(
-        sub_questions=[query],
+        sub_questions=sub_questions,
         tasks=tasks,
         legal_domains=domains,
         retrieval_language="fr",
         response_language=response_language,
         scenario_date=_extract_scenario_date(query),
-        rationale="heuristic planner",
+        question_type=question_type,
+        temporal_intent=temporal_intent,
+        rationale=rationale,
     )
 
 

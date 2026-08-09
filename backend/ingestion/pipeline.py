@@ -12,14 +12,22 @@ import hashlib
 import inspect
 import json
 import logging
-from datetime import date
+import os
+import tempfile
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Sequence, Union
 
+from backend.core.embeddings import HashEmbeddings
 from backend.core.exceptions import IngestionError
-from backend.core.models import AuthorityLevel, DocumentIngestResult, EvidenceChunk
+from backend.core.models import AuthorityLevel, DocumentIngestResult, DocumentType, EvidenceChunk
 from backend.ingestion.chunking import legal_parent_child_chunk, looks_like_legal, parent_child_chunk, semantic_chunk
-from backend.ingestion.classification import infer_authority, infer_legal_domains
+from backend.ingestion.classification import (
+    extract_law_number,
+    infer_authority,
+    infer_document_type,
+    infer_legal_domains,
+)
 from backend.ingestion.loaders import SUPPORTED_EXTENSIONS, ExtractedDocument, load_any
 from backend.ingestion.text_cleaning import clean_document
 from backend.ingestion.versioning import VersionStore
@@ -29,6 +37,80 @@ logger = logging.getLogger(__name__)
 
 def _content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+#: Filename (under ``settings.data_dir``) of the persisted ingestion results.
+RESULTS_FILENAME = "ingestion_results.json"
+
+
+def load_ingestion_results(data_dir: Union[str, Path]) -> dict[str, dict[str, Any]]:
+    """Latest ingestion record per document id (``{}`` when absent/corrupt)."""
+    try:
+        data = json.loads((Path(data_dir) / RESULTS_FILENAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def record_ingestion_result(
+    data_dir: Union[str, Path],
+    result: DocumentIngestResult,
+    *,
+    path: Optional[Union[str, Path]] = None,
+) -> None:
+    """Persist the outcome of one ingest, keeping the latest record per document.
+
+    Merges into ``ingestion_results.json`` and rewrites it atomically (temp
+    file + ``os.replace``), mirroring :class:`VersionStore` so a crash
+    mid-write cannot corrupt the store.
+    """
+    record: dict[str, Any] = {
+        "document_id": result.document_id,
+        "document_name": result.document_name,
+        "status": result.status,
+        "version": result.version,
+        "chunks_created": result.chunks_created,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    if path is not None:
+        record["path"] = str(path)
+    if result.status == "failed":
+        record["error"] = result.detail
+
+    state = load_ingestion_results(data_dir)
+    state[result.document_id] = record
+
+    target = Path(data_dir) / RESULTS_FILENAME
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(target.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(state, fh, ensure_ascii=False, indent=1)
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+#: Fallback article key for chunks without an ``article`` metadata value.
+_NO_ARTICLE_KEY = "__no_article__"
+
+
+def _article_hashes(chunks: Sequence[EvidenceChunk]) -> dict[str, str]:
+    """Hash each article's combined chunk text (spec §26 change detection).
+
+    Chunks sharing an ``article`` key contribute their content in order;
+    article-less chunks fall back to a ``section:``-qualified key, then to
+    ``_NO_ARTICLE_KEY``.
+    """
+    buckets: dict[str, list[str]] = {}
+    for chunk in chunks:
+        key = chunk.article or (f"section:{chunk.section}" if chunk.section else _NO_ARTICLE_KEY)
+        buckets.setdefault(key, []).append(chunk.content)
+    return {key: _content_hash("\n\n".join(contents)) for key, contents in buckets.items()}
 
 
 def _coerce_authority(value: Any) -> AuthorityLevel:
@@ -49,6 +131,70 @@ def _coerce_date(value: Any) -> Optional[date]:
         return None
 
 
+#: Bundled legal-sources file shipped with the repository.
+_DEFAULT_SOURCES_PATH = Path(__file__).resolve().parents[2] / "data" / "legal_sources.json"
+
+_TITLE_CACHE: dict[str, dict[str, str]] = {}
+
+
+def _read_titles_file(resolved: Path) -> dict[str, str]:
+    """Read a standalone ``{filename: display title}`` JSON file (fallback-safe)."""
+    try:
+        data = json.loads(resolved.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("document titles file must be a JSON object")
+        return {str(k): str(v) for k, v in data.items()}
+    except Exception as exc:
+        logger.warning(
+            "document_titles_load_failed",
+            extra={"path": str(resolved), "error": str(exc), "fallback": "embedded_title_map"},
+        )
+        return dict(IngestionPipeline._DOCUMENT_TITLE_MAP)
+
+
+def load_document_titles(path: Optional[Union[str, Path]] = None) -> dict[str, str]:
+    """Resolve the document display-title map (jurisdiction-configurable).
+
+    Resolution order: explicit ``path`` (standalone ``{filename: title}``
+    JSON) → ``settings.document_titles_path`` (same shape) → the
+    ``document_titles`` section of the legal-sources file
+    (``settings.legal_sources_path`` or the bundled
+    ``data/legal_sources.json``).  A missing/corrupt source falls back to the
+    embedded ``IngestionPipeline._DOCUMENT_TITLE_MAP`` with a structured
+    warning — never raises.
+    """
+    try:
+        from backend.core.config import get_settings
+
+        settings = get_settings()
+    except Exception:  # settings unavailable: stay on the bundled default
+        settings = None
+
+    standalone = path or getattr(settings, "document_titles_path", None)
+    if standalone:
+        key = str(standalone)
+        if key not in _TITLE_CACHE:
+            _TITLE_CACHE[key] = _read_titles_file(Path(key))
+        return _TITLE_CACHE[key]
+
+    sources_path = getattr(settings, "legal_sources_path", None) or _DEFAULT_SOURCES_PATH
+    key = f"{sources_path}#document_titles"
+    if key not in _TITLE_CACHE:
+        try:
+            data = json.loads(Path(sources_path).read_text(encoding="utf-8"))
+            raw = data.get("document_titles") if isinstance(data, dict) else None
+            if not isinstance(raw, dict):
+                raise ValueError("document_titles section unavailable")
+            _TITLE_CACHE[key] = {str(k): str(v) for k, v in raw.items()}
+        except Exception as exc:
+            logger.warning(
+                "document_titles_load_failed",
+                extra={"path": str(sources_path), "error": str(exc), "fallback": "embedded_title_map"},
+            )
+            _TITLE_CACHE[key] = dict(IngestionPipeline._DOCUMENT_TITLE_MAP)
+    return _TITLE_CACHE[key]
+
+
 class IngestionPipeline:
     """Orchestrates document ingestion against an :class:`AppContext`.
 
@@ -59,7 +205,19 @@ class IngestionPipeline:
     def __init__(self, ctx: Any):
         self.ctx = ctx
         data_dir = getattr(getattr(ctx, "settings", None), "data_dir", Path("./data"))
+        self._data_dir = data_dir
         self._versions = VersionStore(data_dir)
+
+    def _record_result(
+        self, result: DocumentIngestResult, *, path: Optional[Union[str, Path]] = None
+    ) -> None:
+        """Persist the ingest outcome (spec §49); best-effort, never raises."""
+        try:
+            record_ingestion_result(self._data_dir, result, path=path)
+        except Exception:
+            logger.warning(
+                "failed to persist ingestion result for %s", result.document_id, exc_info=True
+            )
 
     # ------------------------------------------------------------------ API
 
@@ -69,7 +227,7 @@ class IngestionPipeline:
         try:
             doc = await load_any(p)
         except IngestionError as exc:
-            return DocumentIngestResult(
+            result = DocumentIngestResult(
                 document_id=self._document_id(metadata.get("document_id"), p.name),
                 document_name=metadata.get("document_name") or p.name,
                 chunks_created=0,
@@ -77,6 +235,8 @@ class IngestionPipeline:
                 status="failed",
                 detail=str(exc),
             )
+            self._record_result(result, path=p)
+            return result
         metadata.setdefault("document_name", doc.name)
         doc_meta = dict(doc.metadata)
         doc_meta.update(metadata.pop("extra_metadata", {}) or {})
@@ -96,6 +256,8 @@ class IngestionPipeline:
             return str(explicit)
         return hashlib.sha256(name.encode("utf-8")).hexdigest()[:16]
 
+    #: Embedded fallback display titles; the effective map is resolved by
+    #: :func:`load_document_titles` (legal-sources file / settings override).
     _DOCUMENT_TITLE_MAP: dict[str, str] = {
         "code-du-travail-burkina-faso.pdf": "Code du travail du Burkina Faso (Loi 028-2008/AN)",
         "constitution-burkina-faso.pdf": "Constitution du Burkina Faso (IVème République, 1991)",
@@ -110,16 +272,24 @@ class IngestionPipeline:
     def _display_name(cls, name: str) -> str:
         """Map a raw filename to a human-readable legal title when known."""
         lowered = name.lower().replace("\\", "/").split("/")[-1]
-        return cls._DOCUMENT_TITLE_MAP.get(lowered, name)
+        return load_document_titles().get(lowered, name)
 
     @staticmethod
     def _enrich_metadata(
         metadata: dict[str, Any], doc: ExtractedDocument
     ) -> dict[str, Any]:
-        """Infer authority / legal domains from the document when not supplied.
+        """Infer authority / domains / type / law number when not supplied.
 
         Keeps explicit caller-provided values untouched; only fills gaps so
-        future retrieval and ranking can use proper provenance signals.
+        future retrieval and ranking can use proper provenance signals.  The
+        display titles resolved by :func:`load_document_titles` carry the
+        official law numbers (e.g. "(Loi 028-2008/AN)"), so ``law_number``
+        is extracted from the display name first, then from the raw name.
+
+        Temporal defaults (kept deliberately simple): ``valid_from`` defaults
+        to ``effective_date``; ``status`` becomes "future" only when the
+        effective date lies ahead, otherwise the model default ("active")
+        stands — we do not claim repeal/expiry without explicit data.
         """
         name = metadata.get("document_name") or doc.name
         text_sample = doc.text[:2000] if doc.text else ""
@@ -128,6 +298,18 @@ class IngestionPipeline:
         if not metadata.get("legal_domains"):
             metadata = {**metadata, "legal_domains": infer_legal_domains(name, text_sample)}
         metadata["document_name"] = IngestionPipeline._display_name(name)
+        display_name = metadata["document_name"]
+        if not metadata.get("document_type"):
+            metadata["document_type"] = infer_document_type(display_name, text_sample)
+        if not metadata.get("law_number"):
+            metadata["law_number"] = extract_law_number(display_name) or extract_law_number(name)
+        if not metadata.get("issuing_authority") and metadata.get("government_body"):
+            metadata["issuing_authority"] = metadata["government_body"]
+        effective = _coerce_date(metadata.get("effective_date"))
+        if not metadata.get("valid_from") and effective:
+            metadata["valid_from"] = effective
+        if not metadata.get("status") and effective and effective > date.today():
+            metadata["status"] = "future"
         return metadata
 
     async def _delete_document_chunks(self, document_id: str) -> int:
@@ -185,7 +367,7 @@ class IngestionPipeline:
             content_hash = _content_hash(cleaned.text)
             version, changed = self._versions.check_version(document_id, content_hash)
             if not changed:
-                return DocumentIngestResult(
+                result = DocumentIngestResult(
                     document_id=document_id,
                     document_name=display_name,
                     chunks_created=0,
@@ -193,6 +375,8 @@ class IngestionPipeline:
                     status="skipped_duplicate",
                     detail="Content unchanged since last ingest",
                 )
+                self._record_result(result, path=source_meta.get("path"))
+                return result
 
             # Remove previous version chunks so the index never keeps stale data.
             if version > 1:
@@ -202,25 +386,49 @@ class IngestionPipeline:
             chunks = self._dedupe(chunks)
             if not chunks:
                 raise IngestionError(f"Chunking produced no chunks for {display_name}")
+            self._stamp_document_metadata(chunks, metadata)
+
+            article_hashes = _article_hashes(chunks)
+            article_diff = self._versions.diff_articles(document_id, article_hashes)
+            logger.info(
+                "article_diff document_id=%s version=%d added=%d modified=%d deleted=%d",
+                document_id,
+                version,
+                len(article_diff.added_articles),
+                len(article_diff.modified_articles),
+                len(article_diff.deleted_articles),
+            )
 
             vectors = await self._embed(chunks)
             await self._upsert(chunks, vectors)
             await self._upsert_bm25(chunks)
             # Only NOW mark the content as ingested: a failure above leaves the
             # document re-ingestable instead of skipped as a duplicate.
-            self._versions.commit_version(document_id, content_hash, version)
+            self._versions.commit_version(
+                document_id, content_hash, version, article_hashes=article_hashes
+            )
+            # Legal knowledge graph persistence (spec §19/§34): additive and
+            # best-effort — a graph failure must never fail ingestion.
+            await self._persist_legal_graph(
+                document_id, display_name, metadata, chunks, content_hash, version
+            )
 
-            return DocumentIngestResult(
+            detail_payload: dict[str, Any] = {"article_diff": article_diff.to_dict()}
+            if source_meta:
+                detail_payload["source"] = source_meta
+            result = DocumentIngestResult(
                 document_id=document_id,
                 document_name=display_name,
                 chunks_created=len(chunks),
                 version=version,
                 status="indexed",
-                detail=json.dumps({"source": source_meta}, default=str) if source_meta else "",
+                detail=json.dumps(detail_payload, default=str),
             )
+            self._record_result(result, path=source_meta.get("path"))
+            return result
         except Exception as exc:
             logger.exception("Ingestion failed for %s", name)
-            return DocumentIngestResult(
+            result = DocumentIngestResult(
                 document_id=document_id,
                 document_name=name,
                 chunks_created=0,
@@ -228,6 +436,8 @@ class IngestionPipeline:
                 status="failed",
                 detail=str(exc),
             )
+            self._record_result(result, path=source_meta.get("path"))
+            return result
 
     async def delete_document(self, document_id: str) -> DocumentIngestResult:
         """Remove a logical document from the vector store, keyword index and version registry."""
@@ -348,6 +558,43 @@ class IngestionPipeline:
             unique.append(chunk)
         return unique
 
+    @staticmethod
+    def _stamp_document_metadata(chunks: list[EvidenceChunk], metadata: dict[str, Any]) -> None:
+        """Propagate document-level enrichment onto every chunk (spec §6).
+
+        Only fills fields the enrichment actually resolved; chunk defaults
+        (``status="active"``, ``jurisdiction="Burkina Faso"``) stand otherwise.
+        """
+        document_type = metadata.get("document_type")
+        if document_type is not None and not isinstance(document_type, DocumentType):
+            try:
+                document_type = DocumentType(str(document_type))
+            except ValueError:
+                document_type = None
+        fields: dict[str, Any] = {
+            "document_type": document_type,
+            "law_number": metadata.get("law_number"),
+            "issuing_authority": metadata.get("issuing_authority"),
+            "jurisdiction": metadata.get("jurisdiction"),
+            "status": metadata.get("status"),
+            "valid_from": _coerce_date(metadata.get("valid_from")),
+            "valid_until": _coerce_date(metadata.get("valid_until")),
+        }
+        for chunk in chunks:
+            for field, value in fields.items():
+                if value is not None:
+                    setattr(chunk, field, value)
+
+    def _embedding_model_name(self) -> Optional[str]:
+        """Name of the embedder in use, stamped on chunks at upsert time."""
+        embedder = getattr(self.ctx, "embedder", None)
+        if embedder is None:
+            return None
+        if isinstance(embedder, HashEmbeddings):
+            return "hash-embeddings"  # deterministic offline embedder
+        settings = getattr(self.ctx, "settings", None)
+        return getattr(settings, "embedding_model", None)
+
     async def _embed(self, chunks: list[EvidenceChunk]) -> list[list[float]]:
         embedder = getattr(self.ctx, "embedder", None)
         if embedder is None or not hasattr(embedder, "embed"):
@@ -357,6 +604,10 @@ class IngestionPipeline:
             raise IngestionError(
                 f"Embedder returned {len(vectors)} vectors for {len(chunks)} chunks"
             )
+        model_name = self._embedding_model_name()
+        if model_name:
+            for chunk in chunks:
+                chunk.embedding_model = model_name
         return vectors
 
     async def _upsert(self, chunks: list[EvidenceChunk], vectors: list[list[float]]) -> None:
@@ -388,6 +639,85 @@ class IngestionPipeline:
                 await result
         except Exception:
             logger.exception("BM25 add_documents failed; vector index is unaffected")
+
+    async def _persist_legal_graph(
+        self,
+        document_id: str,
+        display_name: str,
+        metadata: dict[str, Any],
+        chunks: list[EvidenceChunk],
+        content_hash: str,
+        version: int,
+    ) -> None:
+        """Upsert the document, its articles and extracted relationships into
+        the relational legal knowledge graph (spec §19/§34).
+
+        Fully best-effort: any failure is logged as a warning and swallowed so
+        graph persistence can never fail ingestion. No-op when
+        ``legal_graph_enabled`` is off.
+        """
+        try:
+            from backend.knowledge.extraction import extract_from_chunks
+            from backend.knowledge.models import LegalArticleRecord, LegalDocumentRecord
+            from backend.knowledge.store import graph_store_for
+
+            store = graph_store_for(self.ctx)
+            if store is None:
+                return
+
+            def _iso(value: Any) -> Optional[str]:
+                coerced = _coerce_date(value)
+                return coerced.isoformat() if coerced else None
+
+            document_type = metadata.get("document_type")
+            authority = metadata.get("authority")
+            await store.upsert_document(
+                LegalDocumentRecord(
+                    document_id=document_id,
+                    name=display_name,
+                    document_type=str(getattr(document_type, "value", document_type) or "") or None,
+                    law_number=metadata.get("law_number"),
+                    jurisdiction=metadata.get("jurisdiction") or "",
+                    status=metadata.get("status") or "",
+                    issuing_authority=metadata.get("issuing_authority"),
+                    authority=str(getattr(authority, "value", authority) or "") or None,
+                    publication_date=_iso(metadata.get("publication_date")),
+                    effective_date=_iso(metadata.get("effective_date")),
+                    source_url=metadata.get("url"),
+                    version=version,
+                    content_hash=content_hash,
+                )
+            )
+
+            # One article row per distinct article key (first chunk wins).
+            seen_articles: set[str] = set()
+            articles: list[LegalArticleRecord] = []
+            for chunk in chunks:
+                if not chunk.article or chunk.article in seen_articles:
+                    continue
+                seen_articles.add(chunk.article)
+                articles.append(
+                    LegalArticleRecord(
+                        document_id=document_id,
+                        article=chunk.article,
+                        section=chunk.section,
+                        hierarchy=dict(chunk.hierarchy),
+                        page=chunk.page,
+                        text_preview=chunk.content[:300],
+                        status=chunk.status or "",
+                        valid_from=chunk.valid_from.isoformat() if chunk.valid_from else None,
+                        valid_until=chunk.valid_until.isoformat() if chunk.valid_until else None,
+                    )
+                )
+            await store.upsert_articles(document_id, articles)
+
+            await store.add_relationships(extract_from_chunks(chunks))
+        except Exception:
+            logger.warning(
+                "legal graph persistence failed for document_id=%s; ingestion is unaffected",
+                document_id,
+                exc_info=True,
+            )
 
 
 # ---------------------------------------------------------------------- CLI

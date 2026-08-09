@@ -46,6 +46,48 @@ ROLE_HIJACKING_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"from\s+now\s+on\s+(you|tu)\s+(are|es|seras|will\s+be)", re.I), "persistent role override attempt"),
 ]
 
+# ---------------------------------------------------------------------------
+# Retrieved-document injection (spec §42): screening, not blocking
+# ---------------------------------------------------------------------------
+
+# Instructions embedded in retrieved chunks. Unlike the user-query tables
+# above, a match here never blocks anything by itself: the document guard
+# (``backend.guardrails.document_guard``) neutralizes the offending sentences.
+# Names are short stable identifiers returned by ``scan_document_text``.
+DOCUMENT_INJECTION_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"ignore[rz]?\s+(toutes\s+)?(les|tes|vos)\s+(instructions|consignes)", re.I),
+     "instruction_override"),
+    (re.compile(r"\bignore\s+(all\s+|any\s+)?(previous|prior|above|the|your|these|those)\s+instructions", re.I),
+     "instruction_override"),
+    (re.compile(r"\bdisregard\s+(?:(?:all|any|the|your|previous|prior|above|these|those)\s+)*instructions", re.I),
+     "instruction_override"),
+    (re.compile(r"\bsystem\s*prompt\b", re.I), "system_prompt_reference"),
+    (re.compile(r"\btu\s+es\s+(maintenant|désormais)\b", re.I), "role_hijack"),
+    (re.compile(r"\byou\s+are\s+now\b", re.I), "role_hijack"),
+    (re.compile(r"\bnouvelles?\s+instructions?\b", re.I), "new_instruction"),
+    (re.compile(r"\bnew\s+instructions?\s*:", re.I), "new_instruction"),
+    (re.compile(r"\bagis\s+comme\b", re.I), "act_as"),
+    (re.compile(r"\bact\s+as\s+(a|an|if)\b", re.I), "act_as"),
+    (re.compile(r"\bDAN\b|\bdo\s+anything\s+now\b", re.I), "dan_jailbreak"),
+    (re.compile(r"sans\s+aucune\s+(restriction|limite|filtre)|without\s+(any\s+)?(restrictions?|limits?|filters?)", re.I),
+     "no_restrictions"),
+    (re.compile(r"developer\s+mode|mode\s+d[ée]veloppeur", re.I), "developer_mode"),
+]
+
+
+def scan_document_text(text: str) -> list[str]:
+    """Return the names of the document-injection patterns matching ``text``.
+
+    Pure detection — no mutation. Table order is preserved and each name is
+    reported at most once.
+    """
+    names: list[str] = []
+    for pattern, name in DOCUMENT_INJECTION_PATTERNS:
+        if name not in names and pattern.search(text or ""):
+            names.append(name)
+    return names
+
+
 TOOL_ABUSE_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bos\.system\b", re.I), "os.system invocation"),
     (re.compile(r"\bsubprocess\b", re.I), "subprocess invocation"),
@@ -112,4 +154,6 @@ __all__ = [
     "TOOL_ABUSE_PATTERNS",
     "UNSAFE_LEGAL_ADVICE_PATTERNS",
     "PII_PATTERNS",
+    "DOCUMENT_INJECTION_PATTERNS",
+    "scan_document_text",
 ]

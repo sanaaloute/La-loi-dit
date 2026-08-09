@@ -7,9 +7,10 @@ evaluation runner.
 
 from __future__ import annotations
 
+import math
 import re
 import unicodedata
-from typing import Iterable
+from typing import Any, Iterable, Mapping, Sequence
 
 from backend.core.models import EvidenceChunk, FinalAnswer
 
@@ -127,6 +128,150 @@ def retrieval_recall(evidence: list[EvidenceChunk], expected_documents: Iterable
         return 1.0
     found = sum(1 for d in expected if any(_doc_matches(c.document_name, d) for c in evidence))
     return found / len(expected)
+
+
+# ---------------------------------------------------------------------------
+# Rank-aware retrieval metrics
+#
+# Ranked ids are matched against relevant ids with the same accent- and
+# case-insensitive substring rule as the set-based metrics, so a golden
+# document name does not need to be character-identical to the retrieved one.
+# ---------------------------------------------------------------------------
+
+
+def _hits_in_top_k(ranked_ids: Sequence[str], relevant: list[str], k: int) -> tuple[int, list[int]]:
+    """Count relevant ids found in the top-k; also return their 1-based ranks.
+
+    A relevant id counts once, at its best (lowest) rank. `k <= 0` means no
+    position is inspected.
+    """
+    found = 0
+    ranks: list[int] = []
+    for rel in relevant:
+        for rank, ranked_id in enumerate(ranked_ids[: max(0, k)], start=1):
+            if _doc_matches(ranked_id, rel):
+                found += 1
+                ranks.append(rank)
+                break
+    return found, ranks
+
+
+def _clean_relevant(relevant_ids: Iterable[str]) -> list[str]:
+    """Drop blank relevant ids, preserving order and duplicates-free input."""
+    seen: list[str] = []
+    for item in relevant_ids:
+        if item and item.strip() and item not in seen:
+            seen.append(item)
+    return seen
+
+
+def recall_at_k(ranked_ids: Sequence[str], relevant_ids: Iterable[str], k: int) -> float:
+    """Fraction of relevant ids found within the top-k positions.
+
+    Returns 1.0 when there is nothing relevant to find (consistent with
+    :func:`retrieval_recall`), and 0.0 when relevant ids exist but ``k <= 0``
+    or none of them appears in the top-k.
+    """
+    relevant = _clean_relevant(relevant_ids)
+    if not relevant:
+        return 1.0
+    if k <= 0:
+        return 0.0
+    found, _ = _hits_in_top_k(ranked_ids, relevant, k)
+    return found / len(relevant)
+
+
+def precision_at_k(ranked_ids: Sequence[str], relevant_ids: Iterable[str], k: int) -> float:
+    """Fraction of the top-k positions occupied by a relevant id.
+
+    The denominator is ``min(k, len(ranked_ids))``: a system that retrieved
+    fewer than k results is not penalized for the missing slots. Mirrors
+    :func:`retrieval_precision` for empty inputs: an empty ranked list scores
+    1.0 when there are no relevant ids and 0.0 otherwise.
+    """
+    relevant = _clean_relevant(relevant_ids)
+    slots = min(max(0, k), len(ranked_ids))
+    if slots == 0:
+        return 1.0 if not relevant else 0.0
+    if not relevant:
+        return 0.0
+    found, _ = _hits_in_top_k(ranked_ids, relevant, slots)
+    return found / slots
+
+
+def mrr(ranked_ids: Sequence[str], relevant_ids: Iterable[str]) -> float:
+    """Mean reciprocal rank: 1/rank of the first relevant id, 0.0 if none.
+
+    Returns 0.0 when the relevant set is empty (no relevant answer exists to
+    rank) or when no relevant id appears anywhere in the ranked list.
+    """
+    relevant = _clean_relevant(relevant_ids)
+    if not relevant:
+        return 0.0
+    best_rank: float | None = None
+    for rank, ranked_id in enumerate(ranked_ids, start=1):
+        if any(_doc_matches(ranked_id, rel) for rel in relevant):
+            best_rank = float(rank)
+            break
+    return 1.0 / best_rank if best_rank else 0.0
+
+
+def ndcg_at_k(ranked_ids: Sequence[str], relevant_ids: Iterable[str], k: int) -> float:
+    """Normalized discounted cumulative gain at k with binary relevance.
+
+    A position gains ``1 / log2(rank + 1)`` when it holds a relevant id;
+    the ideal ranking places every relevant id first. Returns 1.0 when there
+    is nothing relevant to rank (the ideal and actual lists agree trivially)
+    and 0.0 when relevant ids exist but ``k <= 0`` or none is in the top-k.
+    """
+    relevant = _clean_relevant(relevant_ids)
+    if not relevant:
+        return 1.0
+    if k <= 0:
+        return 0.0
+    dcg = 0.0
+    matched: set[str] = set()
+    for rank, ranked_id in enumerate(ranked_ids[:k], start=1):
+        for rel in relevant:
+            if rel not in matched and _doc_matches(ranked_id, rel):
+                dcg += 1.0 / math.log2(rank + 1)
+                matched.add(rel)
+                break
+    ideal = sum(1.0 / math.log2(rank + 1) for rank in range(1, min(len(relevant), k) + 1))
+    return dcg / ideal if ideal else 0.0
+
+
+# ---------------------------------------------------------------------------
+# Issue coverage (per-case answer completeness)
+# ---------------------------------------------------------------------------
+
+
+def issue_coverage(
+    answer_text: str,
+    expected_issues: Iterable[Mapping[str, Any]],
+) -> tuple[float, list[str]]:
+    """Fraction of expected issue categories covered by the answer text.
+
+    Each expected issue is a mapping with a ``category`` name and a
+    ``keywords`` list; the issue counts as covered when at least one of its
+    keywords appears in the answer (accent/case-insensitive substring, same
+    normalization as the other metrics). Returns the coverage ratio and the
+    names of the uncovered categories — the evaluation of a case must fail
+    when this list is non-empty (e.g. an answer discussing only tribunal
+    jurisdiction misses dismissal grounds, notice, compensation, ...).
+    Returns ``(1.0, [])`` when no issues are declared.
+    """
+    issues = [i for i in expected_issues if i.get("category")]
+    if not issues:
+        return 1.0, []
+    normalized_answer = _normalize(answer_text)
+    missing: list[str] = []
+    for issue in issues:
+        keywords = [k for k in issue.get("keywords", []) if k and k.strip()]
+        if keywords and any(_normalize(k) in normalized_answer for k in keywords):
+            continue
+        missing.append(str(issue["category"]))
+    return (len(issues) - len(missing)) / len(issues), missing
 
 
 # ---------------------------------------------------------------------------

@@ -15,7 +15,9 @@ from typing import Annotated, Any, Optional, TypedDict
 
 from backend.core.models import (
     Citation,
+    Claim,
     ConflictReport,
+    CoverageReport,
     EvidenceChunk,
     FinalAnswer,
     GuardrailResult,
@@ -61,8 +63,10 @@ class GraphState(TypedDict, total=False):
     reasoning_notes: str
     draft_answer: str
     reflection: ReflectionResult
+    coverage_report: CoverageReport
     verified_citations: list[Citation]
     citation_accuracy: float
+    claims: list[Claim]
     final_answer: FinalAnswer
 
     # --- parallel retrieval fan-out (additive reducers) ---

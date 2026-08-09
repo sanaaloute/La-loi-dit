@@ -32,10 +32,22 @@ async def test_seeded_labor_question_returns_grounded_answer(seeded_graph, seede
         "input_guardrail",
         "planner",
         "retrieval_coordinator",
+        "coverage_auditor",
         "response_generator",
+        "claim_verification",
         "output_guardrail",
     ):
         assert any(t.startswith(node) for t in response.trace), f"missing trace for {node}"
+
+
+async def test_coverage_auditor_reretrieval_respects_retry_budget(graph, ctx):
+    """Empty store: the auditor requests one re-retrieval, bounded by max_retrieval_retries."""
+    state = initial_state("Quel est le préavis de licenciement au Burkina Faso ?")
+    final = await graph.ainvoke(state)
+    traces = [t for t in final["trace"] if t.startswith("coverage_auditor")]
+    assert traces, "coverage_auditor did not run"
+    assert any("re-retrieval requested" in t for t in traces)
+    assert final["retrieval_retries"] == ctx.settings.max_retrieval_retries
 
 
 async def test_empty_store_declares_insufficient_evidence(graph, ctx):

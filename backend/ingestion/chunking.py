@@ -3,9 +3,14 @@
 - :func:`parent_child_chunk` — large parent chunks for LLM context, small
   child chunks (linked via ``parent_chunk_id``) for dense retrieval.
 - :func:`semantic_chunk` — splits on legal structure boundaries
-  (``Article N``, ``Art. N``, ``Section``, ``Chapitre``, ``Titre``...) and
-  stamps ``article``/``section`` on each chunk; oversized articles fall
-  back to size-based splitting.
+  (``Article N``, ``Art. N``, ``Section``, ``Chapitre``, ``Titre``,
+  ``Partie``, ``Livre``, ``Annexe``) and stamps ``article``/``section``
+  on each chunk; oversized articles fall back to size-based splitting.
+
+Heading levels are tracked separately: every chunk also carries a
+``hierarchy`` map (``{"livre": "I", "titre": "II", ...}``) with the ordered
+heading path in force, while ``section`` keeps the deepest heading string
+for backward compatibility.
 
 Both stamp full provenance metadata (document name, article, section, page,
 publication date, government body, URL, version) on every chunk.
@@ -22,24 +27,104 @@ from backend.ingestion.loaders import ExtractedDocument
 
 # --- legal boundary detection -------------------------------------------------
 
+# Article numbers: "1", "1.2", "123-4", ordinal forms "1er"/"1ère" and the
+# spelled-out "premier"/"première" used for the first article of French codes.
+_ARTICLE_NUM_RE = r"([0-9]+(?:[.\-][0-9A-Za-z]+)*|premier|premi[èe]re)(?:er|[èe]re)?"
+
 _ARTICLE_HEADING_RE = re.compile(
-    r"^[ \t]*(?:article|art\.)\s*(?:n[°o]?\s*)?([0-9]+(?:[.\-][0-9A-Za-z]+)*)\b",
+    r"^[ \t]*(?:article|art\.)\s*(?:n[°o]?\s*)?" + _ARTICLE_NUM_RE + r"\b",
     re.IGNORECASE | re.MULTILINE,
 )
 _SECTION_HEADING_RE = re.compile(
-    r"^[ \t]*(section|chapitre|titre|partie|livre)\s+([IVXLCDM]+|[0-9]+)\b",
+    r"^[ \t]*(section|chapitre|titre|partie|livre|annexe)\s+([IVXLCDM]+|[0-9]+)\b",
     re.IGNORECASE | re.MULTILINE,
 )
+# Boundary groups: 1=article word, 2=article number, 3=level word,
+# 4=level number, 5=annexe word, 6=annexe number (optional).
 _BOUNDARY_RE = re.compile(
-    r"^[ \t]*(?:(article|art\.)\s*(?:n[°o]?\s*)?([0-9]+(?:[.\-][0-9A-Za-z]+)*)"
-    r"|(section|chapitre|titre|partie|livre)\s+([IVXLCDM]+|[0-9]+))\b",
+    r"^[ \t]*(?:(article|art\.)\s*(?:n[°o]?\s*)?" + _ARTICLE_NUM_RE + r"\b"
+    r"|(section|chapitre|titre|partie|livre)\s+([IVXLCDM]+|[0-9]+)\b"
+    r"|(annexe)\b(?:[ \t]+([IVXLCDM]+|[0-9]+)\b)?)",
     re.IGNORECASE | re.MULTILINE,
 )
+
+# Hierarchy levels from highest to lowest; ``annexe`` is handled separately
+# (an annexe replaces the whole heading path instead of nesting under it).
+_HIERARCHY_LEVELS = ("livre", "partie", "titre", "chapitre", "section")
+
+_FR_ORDINAL_ONE = {"premier", "première", "premiere"}
+
+
+def _normalize_article_number(raw: str) -> str:
+    """Canonical article key: "1er"/"premier" collapse to "1"."""
+    lowered = raw.strip().lower()
+    if lowered in _FR_ORDINAL_ONE:
+        return "1"
+    return raw.strip()
+
+
+def _update_hierarchy(hierarchy: dict[str, str], level: str, number: str) -> dict[str, str]:
+    """Return a new hierarchy with ``level`` set and all deeper levels dropped."""
+    if level == "annexe":
+        return {"annexe": number} if number else {}
+    updated: dict[str, str] = {}
+    for existing in _HIERARCHY_LEVELS:
+        if existing == level:
+            updated[level] = number
+            break
+        if existing in hierarchy:
+            updated[existing] = hierarchy[existing]
+    return updated
+
+
+def _deepest_heading(hierarchy: dict[str, str]) -> Optional[str]:
+    """Compat ``section`` string: the deepest heading currently in force."""
+    if "annexe" in hierarchy:
+        return f"Annexe {hierarchy['annexe']}".rstrip()
+    for level in reversed(_HIERARCHY_LEVELS):
+        if level in hierarchy:
+            return f"{level.capitalize()} {hierarchy[level]}"
+    return None
 
 
 def looks_like_legal(text: str) -> bool:
     """Heuristic: at least two article/section headings => structured legal text."""
     return len(_BOUNDARY_RE.findall(text)) >= 2
+
+
+def _boundary_segments(
+    text: str,
+) -> list[tuple[int, str, Optional[str], Optional[str], dict[str, str]]]:
+    """Split ``text`` on legal boundaries.
+
+    Returns ``(start, body, article, section, hierarchy)`` tuples. ``section``
+    is the deepest heading in force (compat behavior); ``hierarchy`` is the
+    ordered level map (``{"titre": "II", "chapitre": "1", ...}``) stamped on
+    every chunk.  Text before the first heading is kept as a preamble segment.
+    """
+    matches = list(_BOUNDARY_RE.finditer(text))
+    segments: list[tuple[int, str, Optional[str], Optional[str], dict[str, str]]] = []
+    hierarchy: dict[str, str] = {}
+
+    if matches and matches[0].start() > 0:
+        preamble = text[: matches[0].start()].strip()
+        if preamble:
+            segments.append((0, preamble, None, None, {}))
+
+    for i, match in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        body = text[match.start() : end].strip()
+        if not body:
+            continue
+        if match.group(1) is not None:  # article / art.
+            article = _normalize_article_number(match.group(2))
+            segments.append((match.start(), body, article, _deepest_heading(hierarchy), dict(hierarchy)))
+        else:  # section / chapitre / titre / partie / livre / annexe
+            level = (match.group(3) or match.group(5)).lower()
+            number = match.group(4) or match.group(6) or ""
+            hierarchy = _update_hierarchy(hierarchy, level, number)
+            segments.append((match.start(), body, None, _deepest_heading(hierarchy), dict(hierarchy)))
+    return segments
 
 
 # --- provenance ---------------------------------------------------------------
@@ -252,26 +337,10 @@ def legal_parent_child_chunk(
             child_overlap=child_overlap,
         )
 
-    segments: list[tuple[int, str, Optional[str], Optional[str]]] = []
-    if matches[0].start() > 0:
-        preamble = text[: matches[0].start()].strip()
-        if preamble:
-            segments.append((0, preamble, None, None))
-
-    for i, match in enumerate(matches):
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        body = text[match.start() : end].strip()
-        if not body:
-            continue
-        if match.group(1) is not None:  # article / art.
-            article = match.group(2)
-            segments.append((match.start(), body, article, None))
-        else:  # section / chapitre / titre / partie / livre
-            section = f"{match.group(3).capitalize()} {match.group(4)}"
-            segments.append((match.start(), body, None, section))
+    segments = _boundary_segments(text)
 
     chunks: list[EvidenceChunk] = []
-    for start, body, article, section in segments:
+    for start, body, article, section, hierarchy in segments:
         # Legal parents follow article/section boundaries. Keep the whole segment
         # as one parent so the LLM always sees the complete article/section context,
         # even when it exceeds the configured parent_size.
@@ -281,6 +350,7 @@ def legal_parent_child_chunk(
             content=piece_text,
             article=article,
             section=section,
+            hierarchy=dict(hierarchy),
             page=_page_for_offset(offsets, start + piece_offset),
             **{**prov, "metadata": {**prov["metadata"], "role": "parent"}},
         )
@@ -291,6 +361,7 @@ def legal_parent_child_chunk(
                     content=child_text,
                     article=article,
                     section=section,
+                    hierarchy=dict(hierarchy),
                     parent_chunk_id=parent.chunk_id,
                     page=_page_for_offset(offsets, start + piece_offset + child_offset),
                     **{**prov, "metadata": {**prov["metadata"], "role": "child"}},
@@ -343,28 +414,10 @@ def semantic_chunk(
             for start, piece in _split_sized(text, max_chunk_size, overlap)
         ]
 
-    segments: list[tuple[int, str, Optional[str], Optional[str]]] = []
-    current_section: Optional[str] = None
-
-    if matches[0].start() > 0:  # preamble before the first heading
-        preamble = text[: matches[0].start()].strip()
-        if preamble:
-            segments.append((0, preamble, None, None))
-
-    for i, match in enumerate(matches):
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        body = text[match.start() : end].strip()
-        if not body:
-            continue
-        if match.group(1) is not None:  # article / art.
-            article = match.group(2)
-            segments.append((match.start(), body, article, current_section))
-        else:  # section / chapitre / titre / partie / livre
-            current_section = f"{match.group(3).capitalize()} {match.group(4)}"
-            segments.append((match.start(), body, None, current_section))
+    segments = _boundary_segments(text)
 
     chunks: list[EvidenceChunk] = []
-    for start, body, article, section in segments:
+    for start, body, article, section, hierarchy in segments:
         if len(body) <= max_chunk_size:
             pieces = [(start, body)]
         else:  # oversized article: size-based fallback, metadata preserved
@@ -375,6 +428,7 @@ def semantic_chunk(
                     content=piece,
                     article=article,
                     section=section,
+                    hierarchy=dict(hierarchy),
                     page=_page_for_offset(offsets, piece_start),
                     **prov,
                 )

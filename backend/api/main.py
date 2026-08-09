@@ -165,8 +165,11 @@ def create_app() -> FastAPI:
         """Readiness: live per-dependency probes, not just attribute presence.
 
         Always 200 with {status, checks} — EXCEPT in strict infra mode
-        (production), where a failed critical dependency (milvus, postgres)
-        yields HTTP 503 so orchestrators stop routing traffic.
+        (production), where a failed critical dependency yields HTTP 503 so
+        orchestrators stop routing traffic. The critical set is configurable
+        via ``strict_critical_components`` (default: milvus, postgres,
+        database_probe, llm, embeddings, user_store); a failed
+        vector_store_probe also counts while milvus is enabled.
         """
         ctx = getattr(request.app.state, "ctx", None)
         if ctx is None or getattr(request.app.state, "graph", None) is None:
@@ -196,7 +199,7 @@ def create_app() -> FastAPI:
             return any(str(checks.get(name, "")).startswith("degraded") for name in names)
 
         degraded = any(str(v).startswith("degraded") for v in checks.values())
-        critical_down = _down("milvus", "postgres", "database_probe") or (
+        critical_down = _down(*ctx.settings.strict_critical_list) or (
             ctx.settings.milvus_enabled and _down("vector_store_probe")
         )
         status = "degraded" if degraded else "ready"
@@ -213,16 +216,21 @@ def create_app() -> FastAPI:
         return PlainTextResponse(generate_latest().decode("utf-8"), media_type=CONTENT_TYPE_LATEST)
 
     # --- routers under /api/v1 ---
-    from backend.api.routers import auth, billing, chat, documents, draft, export, models, search, usage
+    from backend.api.routers import admin, articles, auth, billing, chat, citations, documents, draft, export, legal, models, search, sources, usage
 
+    app.include_router(admin.router, prefix="/api/v1")
+    app.include_router(articles.router, prefix="/api/v1")
     app.include_router(auth.router, prefix="/api/v1")
     app.include_router(billing.router, prefix="/api/v1")
     app.include_router(chat.router, prefix="/api/v1")
+    app.include_router(citations.router, prefix="/api/v1")
     app.include_router(documents.router, prefix="/api/v1")
     app.include_router(draft.router, prefix="/api/v1")
     app.include_router(export.router, prefix="/api/v1")
+    app.include_router(legal.router, prefix="/api/v1")
     app.include_router(models.router, prefix="/api/v1")
     app.include_router(search.router, prefix="/api/v1")
+    app.include_router(sources.router, prefix="/api/v1")
     app.include_router(usage.router, prefix="/api/v1")
 
     return app

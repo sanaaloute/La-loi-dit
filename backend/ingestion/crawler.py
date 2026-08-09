@@ -4,16 +4,26 @@ Depth-limited BFS restricted to an allowed-domain list, with a delay between
 requests and optional robots.txt respect. All third-party imports (httpx,
 BeautifulSoup) are lazy; without network access every fetch fails soft and
 the crawl simply returns what it gathered (often ``[]``) — a true no-op.
+
+Data source (jurisdiction-configurable)
+---------------------------------------
+The default allowed-domain list comes from the ``crawler_allowed_domains``
+section of ``data/legal_sources.json`` (override the file via
+``settings.legal_sources_path``), merged at crawl time with the
+comma-separated ``settings.crawler_extra_allowed_domains``.  A missing or
+corrupt file falls back to the embedded list below with a structured warning.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import urllib.parse
 import urllib.robotparser
 from collections import deque
+from pathlib import Path
 from typing import Any, Optional, Sequence, Union
 
 from backend.core.config import get_settings
@@ -21,8 +31,11 @@ from backend.ingestion.loaders import ExtractedDocument
 
 logger = logging.getLogger(__name__)
 
-#: Official domains crawled when no explicit allowlist is given.
-DEFAULT_ALLOWED_DOMAINS: tuple[str, ...] = (
+#: Bundled legal-sources file shipped with the repository.
+DEFAULT_SOURCES_PATH = Path(__file__).resolve().parents[2] / "data" / "legal_sources.json"
+
+#: Official domains crawled when the legal-sources file is unavailable.
+_EMBEDDED_ALLOWED_DOMAINS: tuple[str, ...] = (
     "gouvernement.gov.bf",
     "assembleenationale.bf",
     "legiburkina.bf",
@@ -30,6 +43,59 @@ DEFAULT_ALLOWED_DOMAINS: tuple[str, ...] = (
     "sig.gov.bf",
     "ohada.org",
 )
+
+
+def _resolve_sources_path(path: Optional[Union[str, Path]] = None) -> Path:
+    """Explicit ``path`` → ``settings.legal_sources_path`` → bundled file."""
+    if path:
+        return Path(path)
+    try:
+        configured = getattr(get_settings(), "legal_sources_path", None)
+    except Exception:  # settings unavailable: stay on the bundled default
+        configured = None
+    return Path(configured) if configured else DEFAULT_SOURCES_PATH
+
+
+_DOMAINS_CACHE: dict[str, tuple[str, ...]] = {}
+
+
+def load_allowed_domains(path: Optional[Union[str, Path]] = None) -> tuple[str, ...]:
+    """Load the crawler allowed-domain list from the legal-sources JSON file.
+
+    Resolution order: explicit ``path`` → ``settings.legal_sources_path`` →
+    the bundled ``data/legal_sources.json``.  A missing/corrupt file falls
+    back to the embedded list with a structured warning — never raises.
+    """
+    key = str(_resolve_sources_path(path))
+    if key not in _DOMAINS_CACHE:
+        try:
+            data = json.loads(Path(key).read_text(encoding="utf-8"))
+            raw = data.get("crawler_allowed_domains") if isinstance(data, dict) else None
+            if not isinstance(raw, list):
+                raise ValueError("crawler_allowed_domains section unavailable")
+            _DOMAINS_CACHE[key] = tuple(str(d) for d in raw)
+        except Exception as exc:
+            logger.warning(
+                "crawler_allowed_domains_load_failed",
+                extra={"path": key, "error": str(exc), "fallback": "embedded_domains"},
+            )
+            _DOMAINS_CACHE[key] = _EMBEDDED_ALLOWED_DOMAINS
+    return _DOMAINS_CACHE[key]
+
+
+#: Default allowed domains, loaded from the bundled legal-sources file at
+#: import (falling back to the embedded list). Kept importable for compatibility.
+DEFAULT_ALLOWED_DOMAINS: tuple[str, ...] = load_allowed_domains()
+
+
+def _default_allowed(seed_netloc: str, settings: Any) -> tuple[str, ...]:
+    """Default allowlist for one crawl: seed domain + file + settings extras."""
+    extra = tuple(
+        d.strip()
+        for d in getattr(settings, "crawler_extra_allowed_domains", "").split(",")
+        if d.strip()
+    )
+    return tuple({seed_netloc, *load_allowed_domains(), *extra})
 
 _SKIP_EXTENSIONS = re.compile(
     r"\.(pdf|zip|jpe?g|png|gif|svg|mp4|mp3|docx?|xlsx?|pptx?)(\?.*)?$",
@@ -103,10 +169,12 @@ async def crawl(
     """Breadth-first crawl starting at ``seed_url``.
 
     Stays within ``allowed_domains`` (defaults to the seed's own domain plus
-    :data:`DEFAULT_ALLOWED_DOMAINS`), waits ``delay_seconds`` between fetches
-    and honors robots.txt when ``respect_robots`` is true. Returns one
-    :class:`ExtractedDocument` per fetched page, with the page URL and crawl
-    depth in metadata. Offline: returns ``[]`` (or pages gathered so far).
+    the legal-sources file's ``crawler_allowed_domains`` — see
+    :func:`load_allowed_domains` — plus ``crawler_extra_allowed_domains``),
+    waits ``delay_seconds`` between fetches and honors robots.txt when
+    ``respect_robots`` is true. Returns one :class:`ExtractedDocument` per
+    fetched page, with the page URL and crawl depth in metadata. Offline:
+    returns ``[]`` (or pages gathered so far).
     """
     settings = get_settings()
     max_pages = max_pages if max_pages is not None else settings.crawler_max_pages
@@ -121,8 +189,10 @@ async def crawl(
         return []
 
     seed_parts = urllib.parse.urlsplit(seed_url)
-    allowed = tuple(allowed_domains) if allowed_domains else (
-        tuple({seed_parts.netloc, *DEFAULT_ALLOWED_DOMAINS})
+    allowed = (
+        tuple(allowed_domains)
+        if allowed_domains
+        else _default_allowed(seed_parts.netloc, settings)
     )
 
     queue: deque[tuple[str, int]] = deque([(seed_url, 0)])

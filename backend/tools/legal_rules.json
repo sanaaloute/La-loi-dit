@@ -1,0 +1,56 @@
+{
+  "meta": {
+    "jurisdiction": "Burkina Faso",
+    "domain": "droit du travail",
+    "instrument": "Code du travail",
+    "source": "Code du travail du Burkina Faso, loi n°028-2008/AN du 13 mai 2008",
+    "verified": false,
+    "note": "Valeurs issues de la structure communément documentée du Code du travail (loi n°028-2008/AN). AVANT TOUT USAGE EN PRODUCTION, chaque durée et chaque taux doit être vérifié contre le texte officiel en vigueur (Journal Officiel du Burkina Faso) ainsi que contre la convention collective applicable, qui peut prévoir des dispositions plus favorables."
+  },
+  "notice_periods": [
+    {
+      "rule_id": "preavis_ouvrier_journalier",
+      "label": "Préavis — ouvriers payés à l'heure, à la journée ou à la semaine",
+      "categories": ["ouvrier", "ouvrier journalier", "journalier", "ouvrier horaire", "ouvrier hebdomadaire"],
+      "duration": 8,
+      "unit": "days",
+      "source": "Code du travail, loi n°028-2008/AN — durée du préavis (référence d'article à confirmer)",
+      "verified": false,
+      "note": "Durée communément documentée pour les ouvriers payés à l'heure, à la journée ou à la semaine. À vérifier contre le texte officiel en vigueur avant usage en production."
+    },
+    {
+      "rule_id": "preavis_employe_mensualise",
+      "label": "Préavis — employés mensualisés",
+      "categories": ["employé", "employé mensualisé", "employe", "employe mensualise", "mensualisé"],
+      "duration": 1,
+      "unit": "months",
+      "source": "Code du travail, loi n°028-2008/AN — durée du préavis (référence d'article à confirmer)",
+      "verified": false,
+      "note": "Durée communément documentée pour les employés payés au mois. À vérifier contre le texte officiel en vigueur avant usage en production."
+    },
+    {
+      "rule_id": "preavis_cadre",
+      "label": "Préavis — cadres et assimilés",
+      "categories": ["cadre", "cadre supérieur", "cadre superieur", "agent de maîtrise", "agent de maitrise", "maîtrise"],
+      "duration": 3,
+      "unit": "months",
+      "source": "Code du travail, loi n°028-2008/AN — durée du préavis (référence d'article à confirmer)",
+      "verified": false,
+      "note": "Durée communément documentée pour les cadres et assimilés. À vérifier contre le texte officiel en vigueur avant usage en production."
+    }
+  ],
+  "severance": {
+    "rule_id": "indemnite_licenciement",
+    "label": "Indemnité de licenciement",
+    "basis": "monthly_salary",
+    "computation": "marginal_brackets",
+    "brackets": [
+      {"from_years": 0, "to_years": 5, "rate": 0.25},
+      {"from_years": 5, "to_years": 10, "rate": 0.30},
+      {"from_years": 10, "to_years": null, "rate": 0.40}
+    ],
+    "source": "Code du travail, loi n°028-2008/AN — indemnité de licenciement (référence d'article à confirmer)",
+    "verified": false,
+    "note": "Barème communément documenté : pourcentage du salaire mensuel moyen par année d'ancienneté, calculé par tranches marginales (25 % jusqu'à 5 ans, 30 % de 5 à 10 ans, 40 % au-delà de 10 ans). Les années incomplètes sont proratisées. À vérifier contre le texte officiel en vigueur et la convention collective avant usage en production."
+  }
+}

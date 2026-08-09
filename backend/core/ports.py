@@ -7,6 +7,7 @@ in `backend/core/context.py`.
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, Optional, Protocol
 
 from backend.core.models import (
@@ -33,7 +34,24 @@ class VectorStoreProtocol(Protocol):
 class RetrieverProtocol(Protocol):
     """Executes the retrieval plan's search tasks, in parallel."""
 
-    async def retrieve(self, tasks: list[SearchTask]) -> list[EvidenceChunk]: ...
+    async def retrieve(
+        self,
+        tasks: list[SearchTask],
+        *,
+        temporal_intent: str = "any",
+        scenario_date: Optional[date] = None,
+    ) -> list[EvidenceChunk]: ...
+
+
+class RerankerProvider(Protocol):
+    """Reorders fused evidence by relevance (spec §17, §47).
+
+    Implementations MUST set ``rerank_score`` in [0, 1] on every chunk and
+    return the chunks sorted by that score, descending. They never raise:
+    a broken backend falls back to the offline heuristic reranker.
+    """
+
+    async def rerank(self, query: str, chunks: list[EvidenceChunk]) -> list[EvidenceChunk]: ...
 
 
 class MemoryStoreProtocol(Protocol):
