@@ -28,7 +28,7 @@ from typing import Any, Optional
 from backend.core import catalog
 from backend.core.config import Settings
 from backend.core.exceptions import AuthorizationError, QuotaExceededError
-from backend.core.llm import LLMClient
+from backend.core.llm import FailoverLLMClient, LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +52,37 @@ def _provider_api_key(provider: str, settings: Settings) -> str:
     if provider == "tokenfree":
         return settings.tokenfree_api_key or settings.llm_api_key
     return settings.llm_api_key
+
+
+def _first_catalog_model(provider: str, settings: Settings) -> str:
+    """First catalog model id for a provider, scanning tiers cheap -> premium."""
+    for tier in catalog.TIER_ORDER:
+        for entry in catalog.get_tier(tier, settings=settings).get("models", []):
+            if entry.get("provider") == provider:
+                return entry["id"]
+    return ""
+
+
+def with_failover(client: LLMClient, settings: Settings) -> LLMClient:
+    """Wrap `client` in a failover chain over the other configured providers.
+
+    Providers listed in ``llm_fallback_providers`` are appended in order,
+    using their first catalog model; providers without an API key are skipped.
+    Returns `client` unchanged for the mock provider or when no fallback is
+    available, so offline/test behavior is untouched.
+    """
+    if settings.llm_provider.lower() == "mock":
+        return client
+    clients = [client]
+    for provider in (p.strip() for p in settings.llm_fallback_providers.split(",")):
+        if not provider or provider == client.provider:
+            continue
+        api_key = _provider_api_key(provider, settings)
+        model_id = _first_catalog_model(provider, settings)
+        if not api_key or not model_id:
+            continue
+        clients.append(LLMClient(settings, provider=provider, model=model_id, api_key=api_key))
+    return FailoverLLMClient(clients) if len(clients) > 1 else client
 
 
 def is_simple_query(query: str) -> bool:
@@ -113,12 +144,13 @@ def resolve_llm(
         return ctx.llm  # offline mode: gating enforced above, client stays mock
     if entry is None:
         return ctx.llm  # empty catalog for this tier: keep the default client
-    return LLMClient(
+    resolved = LLMClient(
         settings,
         provider=entry.provider,
         model=entry.id,
         api_key=_provider_api_key(entry.provider, settings),
     )
+    return with_failover(resolved, settings)
 
 
 async def check_budget(user_store: Any, user: Any, settings: Settings) -> None:

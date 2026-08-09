@@ -22,7 +22,8 @@ COPY requirements.txt ./
 # (grpcio, pydantic-core, SQLAlchemy, lxml, temporalio, ...); the only sdist
 # (sgmllib3k, pure Python) installs without a compiler.
 COPY docker/wheels ./wheels
-RUN pip install --no-index --find-links ./wheels --prefix=/install -r requirements.txt
+RUN pip install --no-index --find-links ./wheels --prefix=/install -r requirements.txt \
+    && pip install --no-index --find-links ./wheels --prefix=/install --no-deps setuptools wheel
 
 # ---------------------------------------------------------------------------
 # Runtime: minimal image, non-root user, application code only
@@ -43,7 +44,9 @@ COPY --from=builder /install /usr/local
 WORKDIR /app
 COPY pyproject.toml ./
 COPY backend ./backend
-RUN pip install --no-deps -e . \
+# Build tools were copied from the builder, so install the package in editable
+# mode without touching any package index.
+RUN pip install --no-deps --no-build-isolation -e . \
     && mkdir -p /app/data \
     && chown -R app:app /app
 

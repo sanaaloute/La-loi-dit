@@ -200,6 +200,105 @@ def parent_child_chunk(
     return chunks
 
 
+def legal_parent_child_chunk(
+    doc: ExtractedDocument,
+    document_id: str,
+    *,
+    document_name: Optional[str] = None,
+    authority: AuthorityLevel = AuthorityLevel.UNKNOWN,
+    publication_date: Optional[date] = None,
+    effective_date: Optional[date] = None,
+    government_body: Optional[str] = None,
+    url: Optional[str] = None,
+    legal_domains: Optional[Sequence[str]] = None,
+    version: int = 1,
+    parent_size: Optional[int] = None,
+    child_size: Optional[int] = None,
+    child_overlap: Optional[int] = None,
+) -> list[EvidenceChunk]:
+    """Parent-child chunking where parents follow legal article/section boundaries.
+
+    Parents are created at legal headings (Article N, Section, Chapitre, Titre,
+    Partie, Livre).  Each parent is then split into child chunks for dense
+    retrieval.  This gives the RAG layer meaningful context (whole article or
+    section) while keeping the retrieval units small and precise.
+    """
+    cfg = _settings()
+    parent_size = parent_size if parent_size is not None else cfg.chunk_parent_size
+    child_size = child_size if child_size is not None else cfg.chunk_child_size
+    child_overlap = child_overlap if child_overlap is not None else cfg.chunk_overlap
+    prov = _provenance(
+        document_id, version, document_name or doc.name, authority,
+        publication_date, effective_date, government_body, url, legal_domains,
+    )
+    text = doc.text or "\n\n".join(doc.pages)
+    offsets = _page_offsets(doc.pages) if len(doc.pages) > 1 else []
+
+    matches = list(_BOUNDARY_RE.finditer(text))
+    if not matches:
+        # No legal structure detected: fall back to plain parent-child chunking.
+        return parent_child_chunk(
+            doc, document_id,
+            document_name=document_name or doc.name,
+            authority=authority,
+            publication_date=publication_date,
+            effective_date=effective_date,
+            government_body=government_body,
+            url=url,
+            legal_domains=legal_domains,
+            version=version,
+            parent_size=parent_size,
+            child_size=child_size,
+            child_overlap=child_overlap,
+        )
+
+    segments: list[tuple[int, str, Optional[str], Optional[str]]] = []
+    if matches[0].start() > 0:
+        preamble = text[: matches[0].start()].strip()
+        if preamble:
+            segments.append((0, preamble, None, None))
+
+    for i, match in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        body = text[match.start() : end].strip()
+        if not body:
+            continue
+        if match.group(1) is not None:  # article / art.
+            article = match.group(2)
+            segments.append((match.start(), body, article, None))
+        else:  # section / chapitre / titre / partie / livre
+            section = f"{match.group(3).capitalize()} {match.group(4)}"
+            segments.append((match.start(), body, None, section))
+
+    chunks: list[EvidenceChunk] = []
+    for start, body, article, section in segments:
+        # Legal parents follow article/section boundaries. Keep the whole segment
+        # as one parent so the LLM always sees the complete article/section context,
+        # even when it exceeds the configured parent_size.
+        piece_text = body
+        piece_offset = 0
+        parent = EvidenceChunk(
+            content=piece_text,
+            article=article,
+            section=section,
+            page=_page_for_offset(offsets, start + piece_offset),
+            **{**prov, "metadata": {**prov["metadata"], "role": "parent"}},
+        )
+        chunks.append(parent)
+        for child_offset, child_text in _split_sized(piece_text, child_size, child_overlap):
+            chunks.append(
+                EvidenceChunk(
+                    content=child_text,
+                    article=article,
+                    section=section,
+                    parent_chunk_id=parent.chunk_id,
+                    page=_page_for_offset(offsets, start + piece_offset + child_offset),
+                    **{**prov, "metadata": {**prov["metadata"], "role": "child"}},
+                )
+            )
+    return chunks
+
+
 def semantic_chunk(
     doc: ExtractedDocument,
     document_id: str,

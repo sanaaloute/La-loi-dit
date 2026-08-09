@@ -1,29 +1,69 @@
-"""Context Agent: assembles the conversation window so context survives
-long conversations, server restarts and workflow interruptions (buffer is
-persisted; Temporal replays in-flight runs)."""
+"""Context Agent.
+
+Assembles the conversation window so context survives long conversations,
+server restarts and workflow interruptions.  Uses the ``load_conversation_buffer``
+tool (a thin wrapper around the memory store).
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
+from pydantic import BaseModel
+
+from backend.agents.agent import Agent
+from backend.agents.tools import TOOL_REGISTRY, ToolCall, execute_tool_calls
+from backend.agents.tools.base import tool
+from backend.agents.tools.registry import register_tool
 from backend.core.context import AppContext
-from backend.core.models import plain_message_content
 from backend.core.state import GraphState
 
 
-async def context_agent_node(state: GraphState, ctx: AppContext) -> dict[str, Any]:
-    session_id = state.get("session_id", "")
+class LoadConversationBufferArgs(BaseModel):
+    session_id: str
+    limit: int = 20
+
+
+@tool("load_conversation_buffer", "Load the recent conversation window for a session.")
+async def load_conversation_buffer(ctx: Any, state: Any, args: LoadConversationBufferArgs) -> list[dict[str, Any]]:
+    from backend.core.models import plain_message_content
+
     buffer: list[dict[str, Any]] = []
-    max_turns = ctx.settings.context_max_turns
-    if ctx.memory is not None and session_id:
-        messages = await ctx.memory.load_buffer(session_id, limit=max_turns * 2)
-        # Assistant turns are stored as FinalAnswer JSON; unwrap to the plain
-        # answer text (capped like the former storage format) for prompts.
+    if ctx.memory is not None and args.session_id:
+        messages = await ctx.memory.load_buffer(args.session_id, limit=args.limit)
         buffer = [
             {"role": m.role, "content": plain_message_content(m.content)[:2000]}
             for m in messages
         ]
-    return {
-        "conversation_context": buffer,
-        "trace": [*state.get("trace", []), f"context_agent: {len(buffer)} messages in window"],
-    }
+    return buffer
+
+
+register_tool(load_conversation_buffer)
+
+
+class ContextAgent(Agent):
+    """Loads conversation context for the current session."""
+
+    name = "context_agent"
+    system_prompt = (
+        "You are the context agent. Load the recent conversation history so that "
+        "subsequent agents can produce coherent, multi-turn answers."
+    )
+
+    async def run(self, state: GraphState, ctx: AppContext) -> dict[str, Any]:
+        session_id = state.get("session_id", "")
+        call = ToolCall(
+            name="load_conversation_buffer",
+            arguments={"session_id": session_id, "limit": ctx.settings.context_max_turns},
+        )
+        results = await execute_tool_calls(TOOL_REGISTRY, [call], ctx, state)
+        result = results[0]
+        buffer = result.output if result.error is None else []
+        return {
+            "conversation_context": buffer,
+            "trace": [*state.get("trace", []), f"context_agent: {len(buffer)} messages in window"],
+            "errors": [*state.get("errors", []), f"context_agent: {result.error}"] if result.error else [],
+        }
+
+
+context_agent_node = ContextAgent().run

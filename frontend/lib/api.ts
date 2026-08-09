@@ -234,7 +234,9 @@ export interface SubscriptionInfo {
 
 export type StreamEvent =
   | { type: "update"; node: string; update: Record<string, unknown> }
+  | { type: "node_start"; node: string }
   | { type: "final"; response: ChatResponse }
+  | { type: "cancelled" }
   | { type: "error"; detail: string };
 
 export interface FeedbackPayload {
@@ -258,7 +260,8 @@ export const PIPELINE_NODES: PipelineNode[] = [
   { id: "planner", label: "Planificateur" },
   { id: "context_agent", label: "Agent de contexte" },
   { id: "memory_agent", label: "Agent mémoire" },
-  { id: "retrieval_coordinator", label: "Recherche" },
+  { id: "retrieval_branch", label: "Recherches parallèles" },
+  { id: "retrieval_merge", label: "Fusion des preuves" },
   { id: "conflict_resolver", label: "Résolution de conflits" },
   { id: "evidence_ranking", label: "Classement des preuves" },
   { id: "reasoning_agent", label: "Raisonnement" },
@@ -556,6 +559,19 @@ export async function submitFeedback(payload: FeedbackPayload, token?: string | 
   if (!res.ok) {
     const detail = await safeDetail(res);
     throw new Error(detail ?? `Échec de l'envoi du feedback (${res.status})`);
+  }
+}
+
+/** Ask the backend to stop an in-flight chat run (UI stop button). */
+export async function cancelChat(sessionId: string, token?: string | null): Promise<void> {
+  try {
+    await fetch(apiUrl("/chat/cancel"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+  } catch {
+    // Best effort: the local AbortController already stops the client side.
   }
 }
 

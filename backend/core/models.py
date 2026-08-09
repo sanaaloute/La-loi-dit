@@ -104,6 +104,7 @@ class EvidenceChunk(BaseModel):
     authority: AuthorityLevel = AuthorityLevel.UNKNOWN
     language: str = "fr"
     parent_chunk_id: Optional[str] = None  # parent-child chunking
+    child_chunks: list["EvidenceChunk"] = Field(default_factory=list)  # populated on parents after expansion
     version: int = 1
     confidence: float = 0.0  # source confidence score
     retrieval_score: float = 0.0  # raw score from the retriever
@@ -276,7 +277,7 @@ class DocumentIngestResult(BaseModel):
     document_name: str
     chunks_created: int
     version: int
-    status: Literal["indexed", "failed", "skipped_duplicate"] = "indexed"
+    status: Literal["indexed", "failed", "skipped_duplicate", "deleted"] = "indexed"
     detail: str = ""
 
 

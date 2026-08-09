@@ -54,7 +54,7 @@ export default function AppHeader({ token: tokenProp, onTokenChange, leftSlot, c
   const handleTokenChange = onTokenChange ?? setInternalToken;
 
   return (
-    <header className="glass z-20 flex items-center justify-between gap-2 px-4 py-3 sm:px-6">
+    <header className="glass z-40 flex items-center justify-between gap-2 px-4 py-3 sm:px-6">
       <div className="flex min-w-0 items-center gap-3">
         {leftSlot}
         <Link href="/" className="flex shrink-0 items-center gap-3" title="Yawoto — accueil">

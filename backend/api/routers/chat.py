@@ -17,6 +17,7 @@ correct trace.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -24,6 +25,7 @@ from typing import Any, AsyncIterator, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
+from langchain_core.callbacks import AsyncCallbackHandler
 from pydantic import BaseModel, ValidationError
 
 from backend.api.deps import get_ctx, get_graph, require_user
@@ -53,6 +55,42 @@ class FeedbackPayload(BaseModel):
     trace_id: str
     score: Literal["thumbs-up", "thumbs-down"] | int = "thumbs-up"
     comment: Optional[str] = None
+
+
+class CancelPayload(BaseModel):
+    session_id: str
+
+
+# In-flight graph executions keyed by session_id, so /chat/cancel can stop
+# them. Entries are removed as soon as the run ends (success, error, cancel).
+_RUNNING: dict[str, "asyncio.Task[Any]"] = {}
+
+
+def _register_run(session_id: str, task: "asyncio.Task[Any]") -> None:
+    if session_id:
+        _RUNNING[session_id] = task
+
+
+def _unregister_run(session_id: str, task: "asyncio.Task[Any]") -> None:
+    if _RUNNING.get(session_id) is task:
+        _RUNNING.pop(session_id, None)
+
+
+@router.post("/chat/cancel")
+async def chat_cancel(
+    payload: CancelPayload,
+    user: TokenPayload = Depends(require_role(Role.VIEWER)),
+) -> dict[str, bool]:
+    """Stop an in-flight chat run for the given session (UI stop button).
+
+    Cancelling the task raises CancelledError inside the LangGraph execution,
+    so the workflow really stops in the backend — no orphan LLM calls.
+    """
+    task = _RUNNING.get(payload.session_id)
+    if task is None or task.done():
+        return {"cancelled": False}
+    task.cancel()
+    return {"cancelled": True}
 
 
 def _state_user_id(payload: ChatRequest, user: TokenPayload) -> str:
@@ -204,13 +242,72 @@ async def chat(
             feature="chat",
             settings=settings,
         ) as (trace_id, trace, handler):
-            response = await run_query(graph, ctx, state, config=_graph_config(handler))
+            run_task = asyncio.create_task(run_query(graph, ctx, state, config=_graph_config(handler)))
+            _register_run(state.get("session_id", ""), run_task)
+            try:
+                response = await asyncio.wait_for(run_task, timeout=settings.chat_run_timeout_seconds)
+            except asyncio.TimeoutError:
+                raise HTTPException(status_code=504, detail="le traitement a dépassé le délai maximal")
+            except asyncio.CancelledError:
+                raise HTTPException(status_code=409, detail="request cancelled by user")
+            finally:
+                _unregister_run(state.get("session_id", ""), run_task)
             response.trace_id = trace_id
             if use_cache and is_cacheable(response.model_dump(mode="json"), settings):
                 await answer_cache.set(payload.query, model_id, response.model_dump(mode="json"))
             update_trace_output(trace, _trace_output_from_response(response), settings=settings)
     await _meter(ctx, user, llm, usage_before, query=payload.query, answer=response.answer.answer)
     return response
+
+
+async def _pump_events(
+    graph: Any,
+    state: GraphState,
+    config: Optional[dict[str, Any]],
+    queue: "asyncio.Queue[tuple[str, Any]]",
+) -> None:
+    """Forward graph stream events into a queue; cancelled via /chat/cancel.
+
+    Cancelling this task raises CancelledError inside the LangGraph stream,
+    which stops the workflow for real, then reports "cancelled" to the
+    consumer so the SSE stream can close cleanly without persisting anything.
+    """
+    from backend.workflows.graph import stream_query
+
+    try:
+        async for event in stream_query(graph, state, config=config):
+            await queue.put(("update", event))
+        await queue.put(("done", None))
+    except asyncio.CancelledError:
+        await queue.put(("cancelled", None))
+    except Exception as exc:  # surfaced to the consumer as an error frame
+        await queue.put(("error", exc))
+
+
+class _NodeStartHandler(AsyncCallbackHandler):
+    """LangChain async callback: pushes a queue event when a graph node STARTS.
+
+    LangGraph "updates" stream mode only fires AFTER each node completes, so
+    without this the UI cannot show which node is currently running (or stuck).
+    """
+
+    def __init__(self, queue: "asyncio.Queue[tuple[str, Any]]"):
+        super().__init__()
+        self._queue = queue
+        self._last_node: Optional[str] = None
+
+    async def on_chain_start(
+        self,
+        serialized: dict[str, Any],
+        inputs: dict[str, Any],
+        *,
+        metadata: Optional[dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> None:
+        node = (metadata or {}).get("langgraph_node")
+        if node and node != self._last_node:
+            self._last_node = node
+            self._queue.put_nowait(("node_start", node))
 
 
 async def _stream_events(
@@ -246,13 +343,48 @@ async def _stream_events(
         started = time.perf_counter()
         merged: dict[str, Any] = {}
         metrics.chat_requests_total.inc()
-        config = _graph_config(handler)
+        queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+        callbacks: list[Any] = [_NodeStartHandler(queue)]
+        if handler is not None:
+            callbacks.insert(0, handler)
+        config = {"callbacks": callbacks}
+        pump = asyncio.create_task(_pump_events(graph, state, config, queue))
+        session_id = state.get("session_id", "")
+        _register_run(session_id, pump)
         try:
-            async for event in stream_query(graph, state, config=config):
-                update = event.get("update")
-                if isinstance(update, dict):
-                    _merge_update(merged, update)
-                yield f"data: {json.dumps({'type': 'update', **event}, ensure_ascii=False, default=str)}\n\n"
+            cancelled = False
+            deadline = started + settings.chat_run_timeout_seconds
+            while True:
+                try:
+                    kind, value = await asyncio.wait_for(
+                        queue.get(), timeout=settings.chat_heartbeat_seconds
+                    )
+                except asyncio.TimeoutError:
+                    # Heartbeat: keeps proxies (nginx, next dev) and browsers
+                    # from killing the idle SSE connection during long nodes.
+                    if time.perf_counter() > deadline:
+                        pump.cancel()
+                        yield f"data: {json.dumps({'type': 'error', 'detail': 'Le traitement a dépassé le délai maximal. Réessayez ou simplifiez la question.'}, ensure_ascii=False)}\n\n"
+                        return
+                    yield ": hb\n\n"
+                    continue
+                if kind == "update":
+                    update = value.get("update")
+                    if isinstance(update, dict):
+                        _merge_update(merged, update)
+                    yield f"data: {json.dumps({'type': 'update', **value}, ensure_ascii=False, default=str)}\n\n"
+                elif kind == "node_start":
+                    yield f"data: {json.dumps({'type': 'node_start', 'node': value}, ensure_ascii=False)}\n\n"
+                elif kind == "done":
+                    break
+                elif kind == "cancelled":
+                    cancelled = True
+                    yield f"data: {json.dumps({'type': 'cancelled'}, ensure_ascii=False)}\n\n"
+                    break
+                else:  # "error"
+                    raise value
+            if cancelled:
+                return
             response = _final_response(merged, state, started, trace_id=trace_id)
             metrics.chat_latency_seconds.observe(response.latency_ms / 1000.0)
             update_trace_output(trace, _trace_output_from_response(response), settings=settings)
@@ -289,6 +421,10 @@ async def _stream_events(
             logger.exception("chat stream failed")
             metrics.errors_total.labels(kind="chat_stream").inc()
             yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)}, ensure_ascii=False)}\n\n"
+        finally:
+            _unregister_run(session_id, pump)
+            if not pump.done():
+                pump.cancel()
 
 
 async def _cached_stream_events(response: ChatResponse) -> AsyncIterator[str]:

@@ -82,3 +82,116 @@ def test_ranking_orders_relevant_chunk_first():
     ranked = sorted([noise, relevant], key=final_score, reverse=True)
     assert ranked[0] is relevant
     assert final_score(relevant) > final_score(noise)
+
+
+async def test_retrieval_branch_searches_its_subquestion(seeded_ctx):
+    """One parallel branch runs vector+keyword search for its sub-question."""
+    from backend.agents.retrieval_node import RetrievalBranchAgent
+
+    state = {
+        "query": "droits du salarié licencié",
+        "branch_query": "préavis de licenciement",
+        "branch_index": 0,
+        "tasks": [],
+    }
+    result = await RetrievalBranchAgent().run(state, seeded_ctx)
+    assert result["branch_evidence"], "branch should return evidence for a seeded topic"
+    assert result["branch_trace"][0].startswith("retrieval_branch 1:")
+    # No concurrent-channel violations: branches only touch additive channels.
+    assert set(result) == {"branch_evidence", "branch_trace"}
+
+
+async def test_retrieval_merge_fuses_branches_and_counts_retry(seeded_ctx):
+    from backend.agents.retrieval_node import RetrievalMergeAgent
+
+    chunks = [
+        EvidenceChunk(content="preuve A"),
+        EvidenceChunk(content="preuve B"),
+        EvidenceChunk(content="preuve A"),  # duplicate content, different id
+    ]
+    state = {
+        "query": "q",
+        "trace": [],
+        "evidence": [],
+        "branch_evidence": chunks,
+        "branch_trace": ["retrieval_branch 1: 'a' -> 2 chunks", "retrieval_branch 2: 'b' -> 1 chunks"],
+        "needs_more_retrieval": True,
+        "retrieval_retries": 0,
+    }
+    result = await RetrievalMergeAgent().run(state, seeded_ctx)
+    assert len(result["evidence"]) == 3
+    assert result["retrieval_retries"] == 1
+    assert result["needs_more_retrieval"] is False
+    trace = "\n".join(result["trace"])
+    assert "retrieval_branch 1" in trace and "retrieval_branch 2" in trace
+    assert "parallel branch(es)" in trace
+
+
+def test_merge_branch_chunks_reducer_dedups():
+    from backend.core.state import merge_branch_chunks
+
+    a = EvidenceChunk(content="A")
+    b = EvidenceChunk(content="B")
+    merged = merge_branch_chunks([a], [a, b])
+    assert {c.chunk_id for c in merged} == {a.chunk_id, b.chunk_id}
+    # Retry pass: re-adding the same chunks must not double them.
+    again = merge_branch_chunks(merged, [a, b])
+    assert len(again) == 2
+
+
+async def test_rerank_llm_hook_blends_scores():
+    """The LLM rescore hook blends 50/50 with the heuristic score."""
+    from backend.core.embeddings import HashEmbeddings
+    from backend.retrieval.reranker import rerank
+
+    class _ScoreLLM:
+        async def complete(self, system, user, **kwargs):
+            count = user.count("[")
+            return "[" + ", ".join(["0.95"] * count) + "]"
+
+    chunks = [_chunk("licenciement préavis indemnité"), _chunk("autre contenu hors sujet")]
+    ranked = await rerank("préavis licenciement", chunks, top_k=2, llm=_ScoreLLM(), embedder=HashEmbeddings())
+    assert len(ranked) == 2
+    # LLM gave 0.95 everywhere: every chunk's score is lifted above the pure
+    # heuristic floor of the off-topic chunk.
+    assert all(c.rerank_score > 0.4 for c in ranked)
+
+
+async def test_coordinator_passes_llm_to_rerank_when_enabled(seeded_ctx, settings):
+    """Coordinator wires ctx.llm into rerank when rerank_llm_enabled is True."""
+    import backend.retrieval.coordinator as coord_module
+
+    calls = []
+
+    class _RecordingLLM:
+        async def complete(self, system, user, **kwargs):
+            calls.append(user)
+            return "[0.5]"
+
+    seeded_ctx.llm = _RecordingLLM()
+    settings.rerank_llm_enabled = True
+    seeded_ctx.settings = settings
+    coordinator = coord_module.RetrievalCoordinator(seeded_ctx)
+    tasks = [SearchTask(kind=SearchKind.VECTOR, query="préavis licenciement", top_k=4)]
+    results = await coordinator.retrieve(tasks)
+    assert results
+    assert calls, "expected the rerank LLM hook to be called"
+
+
+async def test_coordinator_skips_llm_rerank_when_disabled(seeded_ctx, settings):
+    import backend.retrieval.coordinator as coord_module
+
+    calls = []
+
+    class _RecordingLLM:
+        async def complete(self, system, user, **kwargs):
+            calls.append(user)
+            return "[0.5]"
+
+    seeded_ctx.llm = _RecordingLLM()
+    settings.rerank_llm_enabled = False
+    seeded_ctx.settings = settings
+    coordinator = coord_module.RetrievalCoordinator(seeded_ctx)
+    tasks = [SearchTask(kind=SearchKind.VECTOR, query="préavis licenciement", top_k=4)]
+    await coordinator.retrieve(tasks)
+    assert not calls

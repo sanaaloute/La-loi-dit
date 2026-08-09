@@ -11,6 +11,7 @@ import {
   MessageSquarePlus,
   PanelRight,
   Send,
+  Square,
   ThumbsDown,
   ThumbsUp,
   User,
@@ -25,6 +26,7 @@ import HistoryPanel from "@/components/HistoryPanel";
 import ModelPicker from "@/components/ModelPicker";
 import {
   ApiError,
+  cancelChat,
   chat,
   getModel,
   getSession,
@@ -79,6 +81,7 @@ export default function ChatWindow() {
   const [historyRefresh, setHistoryRefresh] = useState(0);
   const [historyLoading, setHistoryLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     setSessionIdState(getSessionId());
@@ -89,6 +92,18 @@ export default function ChatWindow() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, busy]);
+
+  // Elapsed-time indicator while a run is in flight (helps spot a stuck node).
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!busy) {
+      setElapsed(0);
+      return;
+    }
+    const t0 = Date.now();
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [busy]);
 
   const markNode = useCallback((nodeId: string) => {
     setStatuses((prev) => {
@@ -193,9 +208,30 @@ export default function ChatWindow() {
     [token],
   );
 
+  const interrupted = useCallback(() => {
+    setMessages((prev) => [...prev, { id: nextId(), role: "assistant", text: "Génération interrompue par l'utilisateur." }]);
+  }, []);
+
+  const stop = useCallback(() => {
+    abortRef.current?.abort();
+    if (sessionId) void cancelChat(sessionId, token);
+  }, [sessionId, token]);
+
   const send = useCallback(async () => {
     const query = input.trim();
     if (!query || busy) return;
+
+    // Ensure a session id exists up front so the run can be cancelled
+    // server-side (the backend keys in-flight runs by session_id).
+    let sid = sessionId;
+    if (!sid) {
+      sid = crypto.randomUUID();
+      setSessionId(sid);
+      setSessionIdState(sid);
+    }
+
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     setInput("");
     setBusy(true);
@@ -203,8 +239,9 @@ export default function ChatWindow() {
     setTab("agents");
     setMessages((prev) => [...prev, { id: nextId(), role: "user", text: query }]);
 
-    const request = { query, session_id: sessionId ?? undefined, language: "fr", model: model ?? undefined };
+    const request = { query, session_id: sid, language: "fr", model: model ?? undefined };
     let streamed = false;
+    let cancelled = false;
 
     try {
       await streamChat(
@@ -213,24 +250,39 @@ export default function ChatWindow() {
           if (event.type === "update") {
             streamed = true;
             markNode(event.node);
+          } else if (event.type === "node_start") {
+            // Node started executing: show it as running in real time.
+            streamed = true;
+            markNode(event.node);
           } else if (event.type === "final") {
             streamed = true;
             acceptResponse(event.response);
+          } else if (event.type === "cancelled") {
+            streamed = true;
+            cancelled = true;
           } else if (event.type === "error") {
             throw new Error(event.detail || "Erreur pendant le traitement");
           }
         },
         token,
+        controller.signal,
       );
+      if (cancelled) interrupted();
     } catch (err) {
-      if (err instanceof ApiError && err.status === 429) {
+      if (err instanceof Error && err.name === "AbortError") {
+        interrupted();
+      } else if (err instanceof ApiError && err.status === 409) {
+        interrupted();
+      } else if (err instanceof ApiError && err.status === 429) {
         quotaReached(err.message);
       } else if (!streamed) {
         try {
           const response = await chat(request, token);
           acceptResponse(response);
         } catch (postErr) {
-          if (postErr instanceof ApiError && postErr.status === 429) {
+          if (postErr instanceof ApiError && postErr.status === 409) {
+            interrupted();
+          } else if (postErr instanceof ApiError && postErr.status === 429) {
             quotaReached(postErr.message);
           } else {
             failWith(
@@ -242,9 +294,10 @@ export default function ChatWindow() {
         failWith(err instanceof Error ? `Erreur : ${err.message}` : "Une erreur est survenue.");
       }
     } finally {
+      abortRef.current = null;
       setBusy(false);
     }
-  }, [input, busy, sessionId, token, model, markNode, acceptResponse, failWith, quotaReached]);
+  }, [input, busy, sessionId, token, model, markNode, acceptResponse, failWith, quotaReached, interrupted]);
 
   function newConversation() {
     setMessages([]);
@@ -463,7 +516,7 @@ export default function ChatWindow() {
                       <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-law-cyan opacity-75" />
                       <span className="relative inline-flex h-3 w-3 rounded-full bg-law-cyan" />
                     </span>
-                    Traitement en cours par les agents…
+                    Traitement en cours par les agents… ({elapsed}s)
                   </div>
                 )}
               </div>
@@ -483,14 +536,25 @@ export default function ChatWindow() {
                 className="flex-1 resize-none rounded-xl border border-slate-700/60 bg-slate-900/60 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-law-cyan/60 focus:bg-slate-900/80 focus:outline-none disabled:opacity-60"
                 disabled={busy}
               />
-              <button
-                type="button"
-                onClick={() => void send()}
-                disabled={busy || input.trim().length === 0}
-                className="btn-primary flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-white disabled:opacity-50 disabled:hover:translate-y-0"
-              >
-                <Send className="h-5 w-5" />
-              </button>
+              {busy ? (
+                <button
+                  type="button"
+                  onClick={stop}
+                  title="Arrêter la génération"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-red-500/80 text-white transition hover:bg-red-500"
+                >
+                  <Square className="h-5 w-5" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void send()}
+                  disabled={input.trim().length === 0}
+                  className="btn-primary flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-white disabled:opacity-50 disabled:hover:translate-y-0"
+                >
+                  <Send className="h-5 w-5" />
+                </button>
+              )}
             </div>
             <p className="mx-auto mt-2 max-w-3xl text-center text-[10px] text-slate-500">
               Avertissement : cet outil est une aide à la recherche juridique. Ses réponses ne

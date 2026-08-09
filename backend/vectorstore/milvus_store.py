@@ -173,6 +173,55 @@ class MilvusVectorStore:
                 break
         return results
 
+    async def get_by_ids(self, chunk_ids: list[str]) -> list[EvidenceChunk]:
+        """Fetch chunks by chunk_id from Milvus."""
+        if not chunk_ids:
+            return []
+        client = self._require_client()
+        # Build a filter expression for the varchar primary key.
+        quoted = [f"'{cid}'" for cid in chunk_ids]
+        filter_expr = f"chunk_id in [{','.join(quoted)}]"
+        try:
+            hits = await asyncio.to_thread(
+                client.query,
+                collection_name=self._collection,
+                filter=filter_expr,
+                output_fields=["chunk_json"],
+            )
+        except Exception as exc:
+            raise RetrievalError(f"Milvus get_by_ids failed: {exc}") from exc
+
+        results: list[EvidenceChunk] = []
+        for hit in hits or []:
+            try:
+                chunk = EvidenceChunk.model_validate_json(hit["chunk_json"])
+            except (KeyError, ValidationError, ValueError):
+                continue
+            results.append(chunk)
+        return results
+
+    async def get_by_document_id(self, document_id: str) -> list[EvidenceChunk]:
+        """Fetch all chunks belonging to a logical document."""
+        client = self._require_client()
+        try:
+            hits = await asyncio.to_thread(
+                client.query,
+                collection_name=self._collection,
+                filter=f"document_id == '{document_id}'",
+                output_fields=["chunk_json"],
+            )
+        except Exception as exc:
+            raise RetrievalError(f"Milvus get_by_document_id failed: {exc}") from exc
+
+        results: list[EvidenceChunk] = []
+        for hit in hits or []:
+            try:
+                chunk = EvidenceChunk.model_validate_json(hit["chunk_json"])
+            except (KeyError, ValidationError, ValueError):
+                continue
+            results.append(chunk)
+        return results
+
     async def delete(self, chunk_ids: list[str]) -> None:
         """Delete chunks by primary key."""
         if not chunk_ids:
@@ -195,3 +244,20 @@ class MilvusVectorStore:
             return int(stats.get("row_count", 0))
         except Exception as exc:
             raise RetrievalError(f"Milvus count failed: {exc}") from exc
+
+    async def delete_by_document_id(self, document_id: str) -> int:
+        """Delete all chunks belonging to a logical document. Returns rows deleted."""
+        client = self._require_client()
+        try:
+            hits = await asyncio.to_thread(
+                client.query,
+                collection_name=self._collection,
+                filter=f"document_id == '{document_id}'",
+                output_fields=["chunk_id"],
+            )
+        except Exception as exc:
+            raise RetrievalError(f"Milvus query for document deletion failed: {exc}") from exc
+        ids = [h["chunk_id"] for h in (hits or []) if "chunk_id" in h]
+        if ids:
+            await self.delete(ids)
+        return len(ids)

@@ -75,3 +75,33 @@ def test_chat_feedback_accepts_trace_id():
             json={"trace_id": "a" * 32, "score": "thumbs-up", "comment": "test"},
         )
     assert response.status_code == 202
+
+
+def test_chat_cancel_unknown_session_returns_false():
+    with _client() as client:
+        response = client.post("/api/v1/chat/cancel", json={"session_id": "does-not-exist"})
+    assert response.status_code == 200
+    assert response.json() == {"cancelled": False}
+
+
+def test_chat_cancel_stops_registered_task():
+    import asyncio
+
+    from backend.api.routers import chat as chat_router
+
+    async def scenario():
+        task = asyncio.create_task(asyncio.sleep(60))
+        chat_router._register_run("sess-cancel-test", task)
+        try:
+            with _client() as client:
+                response = client.post("/api/v1/chat/cancel", json={"session_id": "sess-cancel-test"})
+            assert response.status_code == 200
+            assert response.json() == {"cancelled": True}
+            await asyncio.sleep(0)  # let the cancellation land
+            assert task.cancelled()
+        finally:
+            chat_router._unregister_run("sess-cancel-test", task)
+            if not task.done():
+                task.cancel()
+
+    asyncio.run(scenario())

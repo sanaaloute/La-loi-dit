@@ -18,6 +18,7 @@ from backend.core.cache import CacheProtocol, InMemoryCache, RedisCache, get_cac
 from backend.core.config import Settings, get_settings
 from backend.core.embeddings import EmbeddingProvider, get_embedder
 from backend.core.llm import LLMClient, get_llm
+from backend.core.model_router import with_failover
 from backend.core.ports import MemoryStoreProtocol, RetrieverProtocol, VectorStoreProtocol
 from backend.observability.langfuse_client import register_litellm_callbacks
 
@@ -51,7 +52,7 @@ async def build_context(settings: Optional[Settings] = None) -> AppContext:
 
     ctx = AppContext(
         settings=settings,
-        llm=get_llm(settings),
+        llm=with_failover(get_llm(settings), settings),
         cache=await get_cache(settings),
         embedder=get_embedder(settings),
     )

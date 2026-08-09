@@ -12,6 +12,7 @@ langchain-core>=0.3.26,<0.4.0
 # LLM gateway (OpenAI-compatible, multi-provider)
 litellm==1.53.1
 httpx==0.28.1
+ollama>=0.4.0
 
 # Vector store / lexical search
 # pymilvus 3.x drops the pkg_resources dependency (broken on Python 3.13) and

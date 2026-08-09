@@ -15,6 +15,7 @@ import logging
 
 from backend.core.config import get_settings
 from backend.core.context import AppContext
+from backend.core.embeddings import HashEmbeddings
 from backend.core.models import EvidenceChunk, SearchTask
 from backend.retrieval.dedup import deduplicate
 from backend.retrieval.fusion import reciprocal_rank_fusion
@@ -88,8 +89,10 @@ class RetrievalCoordinator:
         max_top_k = max((task.top_k for task in tasks), default=settings.default_top_k)
         # Score ALL candidates first, then apply the relevance floor, then
         # truncate — truncating before filtering would drop discriminative
-        # matches ranked just below the cut.
-        scored = await rerank(tasks[0].query, fused, top_k=len(fused), llm=None)
+        # matches ranked just below the cut. The LLM rescore hook (when
+        # enabled) blends a 0-1 relevance judgment into the heuristic score.
+        rerank_llm = self.ctx.llm if settings.rerank_llm_enabled else None
+        scored = await rerank(tasks[0].query, fused, top_k=len(fused), llm=rerank_llm, embedder=self.ctx.embedder)
         # Relevance floor: a chunk must share real content tokens with the
         # query — otherwise irrelevant queries would still return
         # high-confidence but off-topic chunks. A single shared token is
@@ -98,31 +101,46 @@ class RetrievalCoordinator:
         min_shared_tokens = settings.retrieval_min_shared_tokens
         similarity_floor = settings.retrieval_similarity_floor
         weak_similarity_floor = settings.retrieval_weak_similarity_floor
+
+        # Dense embedding models produce cosine scores that rarely exceed 0.5 for
+        # good matches in a legal corpus. A floor of 0.7 rejects too much valid
+        # evidence; cap it at 0.45 when a real model is in use. HashEmbeddings
+        # (offline/tests) can keep the configured floor because its scores are
+        # already normalized/noisy.
+        if not isinstance(self.ctx.embedder, HashEmbeddings):
+            similarity_floor = min(similarity_floor, 0.45)
+
         term_df: dict[str, int] = {}
         for chunk in scored:
             for term in set(chunk.metadata.get("shared_terms", [])):
                 term_df[term] = term_df.get(term, 0) + 1
-        discriminative_cap = max(2, int(0.3 * len(scored)))
+        discriminative_cap = max(2, int(0.2 * len(scored)))
 
         def _relevant(chunk: EvidenceChunk) -> bool:
             shared = chunk.metadata.get("shared_tokens", 0)
             sim = chunk.metadata.get("query_similarity", 0.0)
+            terms = chunk.metadata.get("shared_terms", [])
+            has_discriminative = shared >= 1 and any(
+                term_df[t] <= discriminative_cap for t in terms
+            )
             if shared >= min_shared_tokens:
                 return True
             if sim >= similarity_floor:
                 return True  # strong semantic match (meaningful with real embeddings)
-            if shared >= 1 and sim >= weak_similarity_floor:
+            # Weak lexical match: only keep if the shared word is rare across
+            # the candidate set (e.g. "escroquerie"), otherwise generic words
+            # like "droits" let unrelated Constitution articles through.
+            if shared >= 1 and sim >= weak_similarity_floor and has_discriminative:
                 return True
-            return shared >= 1 and any(
-                term_df[t] <= discriminative_cap
-                for t in chunk.metadata.get("shared_terms", [])
-            )
+            return has_discriminative
 
         reranked = [chunk for chunk in scored if _relevant(chunk)][:max_top_k]
 
         try:
             await self.ctx.cache.set(
-                key, [chunk.model_dump(mode="json") for chunk in reranked]
+                key,
+                [chunk.model_dump(mode="json") for chunk in reranked],
+                ttl=settings.retrieval_cache_ttl_seconds,
             )
         except Exception:
             pass

@@ -28,3 +28,17 @@ def test_scenario_date_extracted():
 
     plan_iso = heuristic_plan("Situation juridique au 2021-11-30 svp.")
     assert plan_iso.scenario_date == date(2021, 11, 30)
+
+
+def test_heuristic_plan_does_not_decompose():
+    """Decomposition is LLM-only: the heuristic fallback plans direct searches."""
+    plan = heuristic_plan("Quels sont les droits d'un salarié licencié au Burkina Faso ?")
+    assert plan.sub_questions == ["Quels sont les droits d'un salarié licencié au Burkina Faso ?"]
+    queries = [t.query for t in plan.tasks]
+    assert all("préavis" not in q or q == plan.sub_questions[0] for q in queries)
+    assert plan.legal_domains == ["labor_code"]
+
+
+def test_specific_question_not_expanded():
+    plan = heuristic_plan("Quel tribunal est compétent pour un litige de voisinage ?")
+    assert plan.sub_questions == ["Quel tribunal est compétent pour un litige de voisinage ?"]

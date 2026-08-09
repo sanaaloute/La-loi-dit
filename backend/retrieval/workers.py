@@ -56,9 +56,23 @@ class VectorWorker(BaseWorker):
             return []
         vector = await self._embed_query(task.query)
         top_k = max(task.top_k, self._fetch_k())
-        return await self.ctx.vector_store.search(
-            vector, top_k=top_k, filters=task.filters or None
+        filters = dict(task.filters or {})
+        # By default, retrieve child chunks so the parent-expansion step can
+        # later pull the surrounding context.  A caller may override by passing
+        # an explicit role filter.
+        if filters.get("role") is None and "metadata.role" not in filters:
+            filters["role"] = "child"
+        results = await self.ctx.vector_store.search(
+            vector, top_k=top_k, filters=filters or None
         )
+        # Fallback: if no child chunks exist (legacy / test data), search without
+        # the role filter rather than returning empty results.
+        if not results and filters.get("role") == "child":
+            filters.pop("role", None)
+            results = await self.ctx.vector_store.search(
+                vector, top_k=top_k, filters=filters or None
+            )
+        return results
 
 
 class KeywordWorker(BaseWorker):
@@ -129,8 +143,14 @@ class UploadedWorker(BaseWorker):
         vector = await self._embed_query(task.query)
         filters = dict(task.filters or {})
         filters["source_kind"] = SearchKind.UPLOADED.value
+        if filters.get("role") is None and "metadata.role" not in filters:
+            filters["role"] = "child"
         top_k = max(task.top_k, self._fetch_k())
-        return await self.ctx.vector_store.search(vector, top_k=top_k, filters=filters)
+        results = await self.ctx.vector_store.search(vector, top_k=top_k, filters=filters)
+        if not results and filters.get("role") == "child":
+            filters.pop("role", None)
+            results = await self.ctx.vector_store.search(vector, top_k=top_k, filters=filters)
+        return results
 
 
 WORKER_REGISTRY: dict[SearchKind, type[BaseWorker]] = {

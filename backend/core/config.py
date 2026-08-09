@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 60.0
     openrouter_api_key: str = ""  # falls back to llm_api_key when empty
     tokenfree_api_key: str = ""  # falls back to llm_api_key when empty
+    # Comma-separated providers tried (in order) when the primary LLM fails or
+    # returns an empty completion. Providers without a configured API key are
+    # skipped silently, so the chain is inert in key-less/offline setups.
+    llm_fallback_providers: str = "openrouter,tokenfree"
     # JSON replacing the whole built-in tier catalog (see backend/core/catalog.py)
     tier_catalog_json: str = ""
     # --- token metering / quotas / answer cache / cheap routing ---
@@ -64,6 +68,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     redis_enabled: bool = False
     cache_ttl_seconds: int = 3600
+    retrieval_cache_ttl_seconds: int = 300  # short TTL so re-indexing is visible quickly
 
     # --- PostgreSQL (defaults to local SQLite for development) ---
     database_url: str = "sqlite+aiosqlite:///./data/legal_ai.db"
@@ -80,7 +85,7 @@ class Settings(BaseSettings):
     # --- auth / security ---
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60
-    rate_limit_per_minute: int = 30  # anonymous/IP default; tiers override via catalog
+    rate_limit_per_minute: int = 10_000  # dev: effectively unlimited; tighten at deployment
 
     # --- scalability / high availability ---
     # None => resolved as (env == "production"); set explicitly to override.
@@ -113,8 +118,9 @@ class Settings(BaseSettings):
     # retrieval / ranking
     default_top_k: int = 8
     retrieval_fetch_k: int = 20  # candidates fetched per worker before fusion/rerank
+    rerank_llm_enabled: bool = True  # LLM rescore blended into rerank (one extra call per retrieval branch)
     rrf_k: int = 60  # reciprocal-rank-fusion constant
-    retrieval_similarity_floor: float = 0.7  # strong semantic match floor
+    retrieval_similarity_floor: float = 0.45  # strong semantic match floor
     retrieval_weak_similarity_floor: float = 0.25
     retrieval_min_shared_tokens: int = 2
     retrieval_cache_namespace: str = "retrieval:"
@@ -138,15 +144,18 @@ class Settings(BaseSettings):
     answer_max_bullets: int = 6  # evidence bullets in the template answer
     answer_max_evidence: int = 10  # evidence chunks attached to the FinalAnswer
     input_max_chars: int = 8000  # user queries longer than this is truncated
+    # --- chat streaming / run bounds ---
+    chat_heartbeat_seconds: float = 10.0  # SSE keepalive frame interval
+    chat_run_timeout_seconds: float = 280.0  # hard cap per run (below nginx's 300s proxy_read_timeout)
     # tools
     sandbox_timeout_seconds: float = 5.0
     currency_tool_timeout_seconds: float = 5.0
 
     # --- chunking / ingestion ---
-    chunk_parent_size: int = 1200
-    chunk_child_size: int = 350
-    chunk_overlap: int = 60
-    chunk_max_size: int = 1200
+    chunk_parent_size: int = 2000
+    chunk_child_size: int = 500
+    chunk_overlap: int = 100
+    chunk_max_size: int = 2000
     text_cleaning_min_pages_for_header: int = 3
     text_cleaning_header_min_frequency: float = 0.6
     ingestion_html_timeout_seconds: float = 30.0

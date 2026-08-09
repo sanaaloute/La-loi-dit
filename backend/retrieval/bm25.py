@@ -64,6 +64,10 @@ class BM25Retriever:
         self._backend = "tfidf"
 
     def _rebuild(self) -> None:
+        if not self._chunks:
+            self._scorer = None
+            self._backend = "empty"
+            return
         corpus = [tokenize(chunk.content) for chunk in self._chunks]
         try:
             from rank_bm25 import BM25Okapi
@@ -78,6 +82,24 @@ class BM25Retriever:
         """Add chunks to the corpus and rebuild the index."""
         self._chunks.extend(chunks)
         self._rebuild()
+
+    def delete_documents(self, chunk_ids: list[str]) -> int:
+        """Remove chunks by id and rebuild the index. Returns removed count."""
+        removed = 0
+        kept: list[EvidenceChunk] = []
+        for chunk in self._chunks:
+            if chunk.chunk_id in chunk_ids:
+                removed += 1
+            else:
+                kept.append(chunk)
+        self._chunks = kept
+        self._rebuild()
+        return removed
+
+    def clear(self) -> None:
+        """Empty the keyword corpus."""
+        self._chunks = []
+        self._scorer = None
 
     @property
     def size(self) -> int:

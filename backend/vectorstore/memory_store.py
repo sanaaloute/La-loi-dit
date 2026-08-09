@@ -57,8 +57,9 @@ def matches_filters(chunk: EvidenceChunk, filters: Optional[dict[str, Any]]) -> 
     for key, expected in filters.items():
         if key == "legal_domains":
             chunk_value = chunk.metadata.get("legal_domains")
-            if chunk_value is None:
-                continue  # unclassified chunk: not excluded by the domain filter
+            # Empty list means "not classified" just like None; keep the chunk.
+            if not chunk_value:
+                continue
         else:
             chunk_value = chunk.metadata.get(key, getattr(chunk, key, None))
         if not _values_match(chunk_value, expected):
@@ -121,6 +122,22 @@ class InMemoryVectorStore:
             results.append(chunk)
         return results
 
+    async def get_by_ids(self, chunk_ids: list[str]) -> list[EvidenceChunk]:
+        """Return chunks by chunk_id, preserving input order when possible."""
+        if not chunk_ids:
+            return []
+        ids = set(chunk_ids)
+        async with self._lock:
+            items = [self._items.get(cid) for cid in chunk_ids if cid in self._items]
+        return [chunk for chunk, _ in items if chunk is not None]
+
+    async def get_by_document_id(self, document_id: str) -> list[EvidenceChunk]:
+        """Fetch all chunks belonging to a logical document."""
+        async with self._lock:
+            return [
+                chunk for chunk, _ in self._items.values() if chunk.document_id == document_id
+            ]
+
     async def delete(self, chunk_ids: list[str]) -> None:
         """Remove chunks by id; unknown ids are ignored."""
         async with self._lock:
@@ -131,3 +148,15 @@ class InMemoryVectorStore:
         """Number of stored chunks."""
         async with self._lock:
             return len(self._items)
+
+    async def delete_by_document_id(self, document_id: str) -> int:
+        """Delete all chunks belonging to a logical document. Returns rows deleted."""
+        async with self._lock:
+            ids = [
+                chunk.chunk_id
+                for chunk, _ in self._items.values()
+                if chunk.document_id == document_id
+            ]
+            for chunk_id in ids:
+                self._items.pop(chunk_id, None)
+        return len(ids)

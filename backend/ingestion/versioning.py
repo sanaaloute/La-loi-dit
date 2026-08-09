@@ -61,7 +61,18 @@ class VersionStore:
         state[document_id] = {"hash": content_hash, "version": version}
         self._save(state)
 
-    def get_version(self, document_id: str, content_hash: str) -> tuple[int, bool]:
+    def list_document_ids(self) -> list[str]:
+        """Return all known document ids."""
+        return list(self._load().keys())
+
+    def remove(self, document_id: str) -> bool:
+        """Remove a document entry from the version store. Returns True if removed."""
+        state = self._load()
+        if document_id not in state:
+            return False
+        del state[document_id]
+        self._save(state)
+        return True
         """Return ``(version, is_new_or_changed)`` for a document.
 
         - first ingest of a document -> ``(1, True)``

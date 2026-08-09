@@ -19,16 +19,17 @@ flowchart TB
         ig -->|blocked| ref[refusal]
         pl --> ca[context_agent]
         ca --> ma[memory_agent]
-        ma --> rc[retrieval_coordinator]
-        rc --> cr[conflict_resolver]
+        ma --> fan{{"fan-out: one retrieval_branch per sub-question (parallel Send)"}}
+        fan --> rm[retrieval_merge]
+        rm --> cr[conflict_resolver]
         cr --> er[evidence_ranking]
         er --> ra[reasoning_agent]
-        ra -->|needs evidence<br/>max 1 retry| rc
+        ra -->|needs evidence<br/>max 1 retry| fan
         ra --> rf[reflection]
-        rf -->|retry retrieval<br/>max 1 iteration| rc
-        rf --> cv[citation_verification]
-        cv --> rg[response_generator]
-        rg --> og[output_guardrail]
+        rf -->|retry retrieval<br/>max 1 iteration| fan
+        rf --> rg[response_generator]
+        rg --> cv[citation_verification]
+        cv --> og[output_guardrail]
     end
 
     api --> graph
@@ -44,7 +45,7 @@ flowchart TB
         coord --> web
     end
 
-    rc --> coord
+    fan --> coord
     ma --> memstore
     ca --> memstore
 

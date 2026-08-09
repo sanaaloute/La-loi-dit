@@ -217,10 +217,10 @@ def test_different_model_separate_cache_entries(tmp_path, monkeypatch):
         query = "Quel est le préavis de licenciement ?"
         _chat(client, query, model="ollama/gpt-oss:20b")
         # A different model must not hit the first entry.
-        other = _chat(client, query, model="ollama/qwen3:32b")
+        other = _chat(client, query, model="ollama/gemma4:31b")
         assert other["answer"]["metadata"].get("cache_hit") is not True
         # Repeating the same model does hit.
-        repeat = _chat(client, query, model="ollama/qwen3:32b")
+        repeat = _chat(client, query, model="ollama/gemma4:31b")
         assert repeat["answer"]["metadata"].get("cache_hit") is True
 
 
@@ -243,15 +243,15 @@ def test_usage_me_shape_and_remaining_math(client):
     _, token = _register(client)
     usage = client.get("/api/v1/usage/me", headers=_headers(token)).json()
     assert usage["tier"] == "gratuit"
-    assert usage["daily_budget"] == 20_000
+    assert usage["daily_budget"] == 100_000_000  # dev mode: effectively unlimited
     assert usage["today"] == {"tokens_in": 0, "tokens_out": 0, "requests": 0}
-    assert usage["remaining_tokens"] == 20_000
+    assert usage["remaining_tokens"] == 100_000_000
     assert usage["history"] == []
 
     _chat(client, "Quel est le préavis de licenciement au Burkina Faso ?", token)
     usage = client.get("/api/v1/usage/me", headers=_headers(token)).json()
     consumed = usage["today"]["tokens_in"] + usage["today"]["tokens_out"]
-    assert usage["remaining_tokens"] == 20_000 - consumed
+    assert usage["remaining_tokens"] == 100_000_000 - consumed
     assert usage["history"][0]["requests"] == 1
 
 
@@ -278,15 +278,15 @@ def test_complex_query_routes_to_tier_default():
     ctx = _ctx(Settings(llm_provider="openai"))
     complex_query = "Explique et analyse les clauses du contrat de travail en détail."
     client = resolve_llm(ctx, _user("gratuit"), query=complex_query)
-    assert client.model == "ollama/qwen3:32b"  # gratuit default = mid option
+    assert client.model == "openai/kimi-k2.5"  # LiteLLM openai/ prefix for tokenfree  # dev mode: shared default = mid option
 
 
 def test_explicit_model_always_wins():
     ctx = _ctx(Settings(llm_provider="openai"))
-    client = resolve_llm(ctx, _user("gratuit"), "ollama/qwen3:32b", query="Préavis ?")
-    assert client.model == "ollama/qwen3:32b"
+    client = resolve_llm(ctx, _user("gratuit"), "ollama/gemma4:31b", query="Préavis ?")
+    assert client.model == "ollama/gemma4:31b"
     with pytest.raises(AuthorizationError):
-        resolve_llm(ctx, _user("gratuit"), "openrouter/openai/gpt-4o", query="Préavis ?")
+        resolve_llm(ctx, _user("gratuit"), "openrouter/openai/gpt-99", query="Préavis ?")
 
 
 def test_is_simple_query_heuristic():

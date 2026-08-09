@@ -2,11 +2,16 @@
 
 `total=False` so every node returns only the keys it updates. Retry counters
 are explicit to enforce the "max retry = 1" policy inside the graph.
+
+Parallel retrieval fan-out: each `retrieval_branch` Send writes its own
+`branch_evidence` / `branch_trace`, merged across branches with an additive
+reducer; `retrieval_merge` then folds the branches into `evidence`.
 """
 
 from __future__ import annotations
 
-from typing import Any, Optional, TypedDict
+import operator
+from typing import Annotated, Any, Optional, TypedDict
 
 from backend.core.models import (
     Citation,
@@ -18,6 +23,20 @@ from backend.core.models import (
     RetrievalPlan,
     SearchTask,
 )
+
+
+def merge_branch_chunks(
+    old: list[EvidenceChunk] | None, new: list[EvidenceChunk]
+) -> list[EvidenceChunk]:
+    """Reducer for the parallel retrieval branches: dedup by chunk_id.
+
+    Deduping (rather than plain concatenation) also keeps retry fan-outs from
+    double-counting chunks already found in the first pass.
+    """
+    merged = {c.chunk_id: c for c in (old or [])}
+    for chunk in new:
+        merged[chunk.chunk_id] = chunk
+    return list(merged.values())
 
 
 class GraphState(TypedDict, total=False):
@@ -45,6 +64,12 @@ class GraphState(TypedDict, total=False):
     verified_citations: list[Citation]
     citation_accuracy: float
     final_answer: FinalAnswer
+
+    # --- parallel retrieval fan-out (additive reducers) ---
+    branch_query: str  # set per-Send: the sub-question this branch searches
+    branch_index: int  # set per-Send: 0-based branch number
+    branch_evidence: Annotated[list[EvidenceChunk], merge_branch_chunks]
+    branch_trace: Annotated[list[str], operator.add]
 
     # --- control / bookkeeping ---
     planning_retries: int

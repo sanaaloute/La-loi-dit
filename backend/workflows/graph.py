@@ -3,13 +3,18 @@
 Pipeline (see docs/architecture.md for the Mermaid diagram):
 
     user -> input_guardrail -> planner -> context_agent -> memory_agent
-         -> retrieval_coordinator -> conflict_resolver -> evidence_ranking
-         -> reasoning_agent -> reflection_agent -> citation_verification
-         -> response_generator -> output_guardrail -> final answer
+         -> [fan-out: one retrieval_branch per sub-question, in parallel]
+         -> retrieval_merge -> conflict_resolver -> evidence_ranking
+         -> reasoning_agent -> reflection_agent -> response_generator
+         -> citation_verification -> output_guardrail -> final answer
 
 Bounded loops (max retry = 1 each):
-    reasoning -> retrieval_coordinator  (missing evidence, one retry)
-    reflection -> retrieval_coordinator (self-critique, one iteration)
+    reasoning -> retrieval fan-out  (missing evidence, one retry)
+    reflection -> retrieval fan-out (self-critique, one iteration)
+
+Post-synthesis review: citation_verification runs AFTER response_generator
+so the judge actually sees the drafted answer (it used to run before it and
+always verified an empty draft).
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ from dataclasses import replace
 from typing import Any, AsyncIterator, Optional
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Send
 
 from backend.agents import (
     citation_verification,
@@ -29,6 +35,7 @@ from backend.agents import (
     input_guardrail,
     memory_agent,
     output_guardrail,
+    parent_expansion,
     reasoning_agent,
     reflection_agent,
     refusal,
@@ -68,12 +75,29 @@ def build_graph(ctx: AppContext):
         guardrail = state.get("guardrail")
         return "refusal" if guardrail and not guardrail.allowed else "planner"
 
-    def _route_after_reasoning(state: GraphState) -> str:
+    def _fanout_retrieval(state: GraphState) -> list[Send]:
+        """Fan out one parallel retrieval branch per decomposed sub-question.
+
+        Each branch gets its own vector+keyword search for its sub-question;
+        the merge node fuses all branch results before conflict resolution.
+        Falls back to a single branch on the raw query when the plan has no
+        decomposition.
+        """
+        plan = state.get("plan")
+        sub_questions = [q for q in (plan.sub_questions if plan else []) if q.strip()]
+        if not sub_questions:
+            sub_questions = [state["query"]]
+        return [
+            Send("retrieval_branch", {**state, "branch_query": q, "branch_index": i})
+            for i, q in enumerate(sub_questions)
+        ]
+
+    def _route_after_reasoning(state: GraphState):
         if state.get("needs_more_retrieval") and state.get("retrieval_retries", 0) < max_retrieval_retries:
-            return "retrieval_coordinator"
+            return _fanout_retrieval(state)
         return "reflection_agent"
 
-    def _route_after_reflection(state: GraphState) -> str:
+    def _route_after_reflection(state: GraphState):
         reflection = state.get("reflection")
         if (
             reflection
@@ -81,8 +105,8 @@ def build_graph(ctx: AppContext):
             and state.get("reflection_count", 0) <= max_reflection_iterations
             and state.get("retrieval_retries", 0) < max_retrieval_retries
         ):
-            return "retrieval_coordinator"
-        return "citation_verification"
+            return _fanout_retrieval(state)
+        return "response_generator"
 
     g = StateGraph(GraphState)
     g.add_node("input_guardrail", bind(input_guardrail.input_guardrail_node))
@@ -90,9 +114,11 @@ def build_graph(ctx: AppContext):
     g.add_node("planner", bind(planner_node))
     g.add_node("context_agent", bind(context_agent.context_agent_node))
     g.add_node("memory_agent", bind(memory_agent.memory_agent_node))
-    g.add_node("retrieval_coordinator", bind(retrieval_node.retrieval_coordinator_node))
+    g.add_node("retrieval_branch", bind(retrieval_node.retrieval_branch_node))
+    g.add_node("retrieval_merge", bind(retrieval_node.retrieval_merge_node))
     g.add_node("conflict_resolver", bind(conflict_resolver.conflict_resolver_node))
     g.add_node("evidence_ranking", bind(evidence_ranking.evidence_ranking_node))
+    g.add_node("parent_expansion", bind(parent_expansion.parent_expansion_node))
     g.add_node("reasoning_agent", bind(reasoning_agent.reasoning_agent_node))
     g.add_node("reflection_agent", bind(reflection_agent.reflection_agent_node))
     g.add_node("citation_verification", bind(citation_verification.citation_verification_node))
@@ -104,14 +130,16 @@ def build_graph(ctx: AppContext):
     g.add_edge("refusal", END)
     g.add_edge("planner", "context_agent")
     g.add_edge("context_agent", "memory_agent")
-    g.add_edge("memory_agent", "retrieval_coordinator")
-    g.add_edge("retrieval_coordinator", "conflict_resolver")
-    g.add_edge("conflict_resolver", "evidence_ranking")
+    g.add_conditional_edges("memory_agent", _fanout_retrieval)
+    g.add_edge("retrieval_branch", "retrieval_merge")
+    g.add_edge("retrieval_merge", "conflict_resolver")
+    g.add_edge("conflict_resolver", "parent_expansion")
+    g.add_edge("parent_expansion", "evidence_ranking")
     g.add_edge("evidence_ranking", "reasoning_agent")
     g.add_conditional_edges("reasoning_agent", _route_after_reasoning)
     g.add_conditional_edges("reflection_agent", _route_after_reflection)
-    g.add_edge("citation_verification", "response_generator")
-    g.add_edge("response_generator", "output_guardrail")
+    g.add_edge("response_generator", "citation_verification")
+    g.add_edge("citation_verification", "output_guardrail")
     g.add_edge("output_guardrail", END)
     return g.compile()
 

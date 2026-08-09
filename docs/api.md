@@ -69,20 +69,38 @@ Runs the full agentic workflow for one query (`ChatRequest`):
 
 ### GET /api/v1/chat/stream (SSE)
 
-Query parameters: `query` (required), `session_id`, `language`. Emits one
-`data:` frame per pipeline node, then a final frame with the whole
-`ChatResponse`:
+Query parameters: `query` (required), `session_id`, `language`, `model`.
+Emits one `data:` frame per pipeline node (including one per parallel
+`retrieval_branch`), then a final frame with the whole `ChatResponse`:
 
 ```
+data: {"type": "node_start", "node": "planner"}
+
 data: {"type": "update", "node": "planner", "update": {…}}
 
-data: {"type": "update", "node": "retrieval_coordinator", "update": {…}}
+data: {"type": "update", "node": "retrieval_branch", "update": {…}}
 
 data: {"type": "final", "response": {"session_id": "…", "answer": {…}, "latency_ms": …}}
 ```
 
-Failures surface as `{"type": "error", "detail": "…"}` frames. Responses
-carry `Cache-Control: no-cache` and `X-Accel-Buffering: no`.
+`node_start` fires when a node BEGINS (real-time "running" indicator);
+`update` fires when it completes. Idle periods are kept alive with `: hb`
+heartbeat comment frames (every `LEGAL_AI_CHAT_HEARTBEAT_SECONDS`, 10s by
+default), and a run is hard-capped at `LEGAL_AI_CHAT_RUN_TIMEOUT_SECONDS`
+(280s, below nginx's 300s `proxy_read_timeout`) — on timeout the pump task is
+cancelled and an error frame is emitted instead of hanging forever.
+
+Failures surface as `{"type": "error", "detail": "…"}` frames; a user stop
+surfaces as `{"type": "cancelled"}`. Responses carry `Cache-Control: no-cache`
+and `X-Accel-Buffering: no`.
+
+### POST /api/v1/chat/cancel
+
+Stops an in-flight run: body `{"session_id": "…"}`. Cancelling raises
+`CancelledError` inside the LangGraph execution, so the workflow (including
+parallel retrieval branches and in-flight LLM calls) really stops in the
+backend. Returns `{"cancelled": true|false}` (`false` when no run is active
+for that session). Aborted runs persist nothing and are not metered.
 
 ### WS /api/v1/ws/chat
 

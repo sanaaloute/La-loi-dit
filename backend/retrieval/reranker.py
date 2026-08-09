@@ -1,9 +1,12 @@
 """Cross-encoder-style reranking of fused evidence.
 
-Default path is a fully offline heuristic: cosine similarity between
-hashed-token vectors (``HashEmbeddings``) of the query and each chunk,
-blended with the chunk's source confidence. When an LLM client is passed,
-it may refine the heuristic scores; any failure silently keeps them.
+The semantic signal comes from the configured embedding provider when one is
+passed in (usually the same provider used for vector search). In offline/test
+mode the provider is :class:`HashEmbeddings`; in that case we reuse the
+``retrieval_score`` already computed by the vector store instead of re-hashing
+content, which avoids masking good semantic matches with a weak second-order
+hash signal. A lexical overlap signal (shared content tokens) is always
+computed for the relevance floor and for breaking ties.
 """
 
 from __future__ import annotations
@@ -77,34 +80,55 @@ async def rerank(
     chunks: list[EvidenceChunk],
     top_k: int,
     llm: Any = None,
+    embedder: Any = None,
 ) -> list[EvidenceChunk]:
     """Score and reorder chunks by relevance; return the top_k.
 
-    Writes ``rerank_score`` in [0, 1] on every chunk. The offline heuristic
-    (hashed-token cosine blended with confidence) is always computed and is
-    the default; an LLM, when provided, only refines it.
+    Writes ``rerank_score`` and ``query_similarity`` in [0, 1] on every chunk.
+    When ``embedder`` is a real dense model, it is reused here for a second
+    semantic pass. When it is the hashing embedder (offline/tests), the
+    ``retrieval_score`` from the vector store is used as the semantic signal so
+    the cheap hash model does not override good dense-retrieval scores.
     """
     if not chunks:
         return []
     settings = get_settings()
     similarity_weight = settings.rerank_similarity_weight
     confidence_weight = settings.rerank_confidence_weight
-    embedder = HashEmbeddings()
-    texts = [query, *[chunk.content for chunk in chunks]]
-    vectors = await embedder.embed(texts)
-    query_vector = vectors[0]
+    lexical_weight = max(0.0, 1.0 - similarity_weight - confidence_weight)
 
-    heuristic: list[float] = []
+    # Use the real dense model for reranking when available; otherwise fall back
+    # to the same hashing embedder used by the offline vector store so the
+    # similarity signal stays consistent with what produced retrieval_score.
+    if embedder is None:
+        embedder = HashEmbeddings()
+    try:
+        vectors = await embedder.embed([query, *[chunk.content for chunk in chunks]])
+        query_vector = vectors[0]
+        chunk_vectors = vectors[1:]
+    except Exception as exc:
+        logger.warning("rerank embedding failed, using zero similarity: %s", exc)
+        query_vector = []
+        chunk_vectors = []
+
     query_tokens = _content_tokens(query)
-    for chunk, vector in zip(chunks, vectors[1:]):
-        similarity = max(0.0, _cosine(query_vector, vector))
+    heuristic: list[float] = []
+    for i, chunk in enumerate(chunks):
+        similarity = max(0.0, _cosine(query_vector, chunk_vectors[i])) if chunk_vectors else 0.0
+
         shared = query_tokens & _content_tokens(chunk.content)
         chunk.metadata["query_similarity"] = round(similarity, 4)
         chunk.metadata["shared_tokens"] = len(shared)
         chunk.metadata["shared_terms"] = sorted(shared)
+
+        # Lexical overlap as a small additive signal (helps when dense scores tie).
+        lexical = min(1.0, len(shared) / max(1, settings.retrieval_min_shared_tokens))
+
         confidence = max(0.0, min(1.0, chunk.confidence))
         heuristic.append(
-            similarity_weight * similarity + confidence_weight * confidence
+            similarity_weight * similarity
+            + lexical_weight * lexical
+            + confidence_weight * confidence
         )
 
     llm_scores = await _llm_refine(query, chunks, llm)

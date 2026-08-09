@@ -9,12 +9,21 @@ offline — same interface, no external calls.
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 from typing import Protocol
 
 import litellm
-
 from backend.core.config import Settings
+
+# LiteLLM is chatty when an embedding model is not in its internal cost map;
+# these calls succeed against OpenAI-compatible endpoints, so keep the logs useful
+# without dumping provider-list banners to stdout.
+litellm.set_verbose = False
+litellm.suppress_debug_info = True
+logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+logging.getLogger("litellm").setLevel(logging.WARNING)
+
 
 
 class EmbeddingProvider(Protocol):

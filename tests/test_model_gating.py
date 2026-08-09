@@ -71,24 +71,27 @@ def _headers(token: str) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-def test_catalog_tiers_are_cumulative():
+def test_catalog_tiers_are_equal_in_dev_mode():
+    """Dev mode: every tier unlocks the same full catalog (limits set at deployment)."""
     gratuit = {m.id for m in catalog.allowed_models("gratuit")}
     pro = {m.id for m in catalog.allowed_models("pro")}
     cabinet = {m.id for m in catalog.allowed_models("cabinet")}
-    assert gratuit and gratuit < pro < cabinet
+    assert gratuit == pro == cabinet
+    assert len(gratuit) >= 10  # the full multi-provider catalog
 
 
 def test_is_model_allowed_per_tier():
     assert catalog.is_model_allowed("gratuit", "ollama/gpt-oss:20b")
-    assert not catalog.is_model_allowed("gratuit", "openrouter/deepseek/deepseek-chat")
+    assert catalog.is_model_allowed("gratuit", "openrouter/deepseek/deepseek-chat")
     assert catalog.is_model_allowed("pro", "openrouter/deepseek/deepseek-chat")
-    assert not catalog.is_model_allowed("pro", "openrouter/openai/gpt-4o")
+    assert catalog.is_model_allowed("pro", "openrouter/openai/gpt-4o")
     assert catalog.is_model_allowed("cabinet", "openrouter/openai/gpt-4o")
+    assert not catalog.is_model_allowed("cabinet", "openrouter/openai/gpt-99")
 
 
 def test_default_model_and_unknown_tier():
     # Default = mid catalog option (cheap routing handles trivial queries).
-    assert catalog.default_model("gratuit") == "ollama/qwen3:32b"
+    assert catalog.default_model("gratuit") == "tokenfree/kimi-k2.5"
     assert catalog.get_tier("inconnu") == catalog.get_tier("gratuit")
 
 
@@ -97,9 +100,9 @@ def test_all_models_with_access_annotations():
     assert annotated["ollama/gpt-oss:20b"]["allowed"] is True
     assert annotated["ollama/gpt-oss:20b"]["tier_required"] == "gratuit"
     assert annotated["openrouter/deepseek/deepseek-chat"]["allowed"] is True
-    assert annotated["openrouter/deepseek/deepseek-chat"]["tier_required"] == "pro"
-    assert annotated["openrouter/openai/gpt-4o"]["allowed"] is False
-    assert annotated["openrouter/openai/gpt-4o"]["tier_required"] == "cabinet"
+    assert annotated["openrouter/deepseek/deepseek-chat"]["tier_required"] == "gratuit"
+    assert annotated["openrouter/openai/gpt-4o"]["allowed"] is True
+    assert annotated["openrouter/openai/gpt-4o"]["tier_required"] == "gratuit"
 
 
 def test_catalog_env_override(monkeypatch):
@@ -125,7 +128,7 @@ def test_catalog_env_override_invalid_falls_back(monkeypatch):
     monkeypatch.setenv("LEGAL_AI_TIER_CATALOG_JSON", "{not valid json")
     get_settings.cache_clear()
     try:
-        assert catalog.default_model("gratuit") == "ollama/qwen3:32b"
+        assert catalog.default_model("gratuit") == "tokenfree/kimi-k2.5"
     finally:
         get_settings.cache_clear()
 
@@ -185,6 +188,39 @@ async def test_openrouter_completion_kwargs(monkeypatch):
     assert captured["extra_headers"]["X-Title"] == settings.app_name
 
 
+async def test_openrouter_headers_are_ascii_safe(monkeypatch):
+    """A non-ASCII app name (e.g. with an em-dash) must not break the call."""
+    import backend.core.llm as llm_module
+
+    settings = Settings(llm_provider="mock", app_name="Yawoto — Assistant Juridique")
+    client = LLMClient(
+        settings,
+        provider="openrouter",
+        model="openrouter/deepseek/deepseek-chat",
+        api_key="or-key",
+    )
+    captured: dict = {}
+
+    class _Message:
+        content = "ok"
+
+    class _Choice:
+        message = _Message()
+
+    class _Response:
+        choices = [_Choice()]
+
+    async def fake_acompletion(**kwargs):
+        captured.update(kwargs)
+        return _Response()
+
+    monkeypatch.setattr(llm_module.litellm, "acompletion", fake_acompletion)
+    assert await client.complete("system", "user") == "ok"
+    title = captured["extra_headers"]["X-Title"]
+    title.encode("ascii")  # raises if any non-ASCII char survived
+    assert "Yawoto" in title
+
+
 async def test_tokenfree_completion_kwargs(monkeypatch):
     import backend.core.llm as llm_module
 
@@ -192,7 +228,7 @@ async def test_tokenfree_completion_kwargs(monkeypatch):
     client = LLMClient(
         settings,
         provider="tokenfree",
-        model="tokenfree/Llama-3.1-8B-Instruct",
+        model="tokenfree/gemini-2.5-flash",
         api_key="tf-key",
     )
     captured: dict = {}
@@ -213,7 +249,7 @@ async def test_tokenfree_completion_kwargs(monkeypatch):
     monkeypatch.setattr(llm_module.litellm, "acompletion", fake_acompletion)
     assert await client.complete("system", "user") == "ok"
     # OpenAI-compatible: "openai/" LiteLLM prefix + default TokenFree base URL.
-    assert captured["model"] == "openai/Llama-3.1-8B-Instruct"
+    assert captured["model"] == "openai/gemini-2.5-flash"
     assert captured["api_base"] == "https://www.tokenfree.com/v1"
     assert captured["api_key"] == "tf-key"
 
@@ -221,9 +257,9 @@ async def test_tokenfree_completion_kwargs(monkeypatch):
 def test_resolve_llm_tokenfree_uses_tokenfree_key():
     settings = Settings(llm_provider="openai", llm_api_key="sk-main", tokenfree_api_key="tf-test")
     ctx = SimpleNamespace(settings=settings, llm=None)
-    client = resolve_llm(ctx, _user("gratuit"), "tokenfree/Llama-3.1-8B-Instruct")
+    client = resolve_llm(ctx, _user("gratuit"), "tokenfree/gemini-2.5-flash")
     assert client.provider == "tokenfree"
-    assert client.model == "openai/Llama-3.1-8B-Instruct"
+    assert client.model == "openai/gemini-2.5-flash"
     assert client.api_key == "tf-test"
     assert client.api_base == "https://www.tokenfree.com/v1"
 
@@ -246,25 +282,26 @@ def test_resolve_llm_allows_tier_model():
     assert client.api_key == "or-test"
 
 
-def test_resolve_llm_denies_higher_tier_model():
+def test_resolve_llm_denies_unknown_model():
     ctx = SimpleNamespace(settings=Settings(llm_provider="openai"), llm=None)
     with pytest.raises(AuthorizationError, match="requires a higher subscription tier"):
-        resolve_llm(ctx, _user("gratuit"), "openrouter/openai/gpt-4o")
+        resolve_llm(ctx, _user("gratuit"), "openrouter/openai/gpt-99")
 
 
 def test_resolve_llm_defaults_to_tier_model():
     ctx = SimpleNamespace(settings=Settings(llm_provider="openai"), llm=None)
     # No query -> tier default (mid option); cheap routing needs a query.
-    assert resolve_llm(ctx, _user("gratuit")).model == "ollama/qwen3:32b"
-    assert resolve_llm(ctx, None).model == "ollama/qwen3:32b"  # anonymous
-    assert resolve_llm(ctx, _user("pro")).model == "openrouter/meta-llama/llama-3.3-70b-instruct"
+    # Dev mode: all tiers share the same default.
+    assert resolve_llm(ctx, _user("gratuit")).model == "openai/kimi-k2.5"
+    assert resolve_llm(ctx, None).model == "openai/kimi-k2.5"  # anonymous
+    assert resolve_llm(ctx, _user("pro")).model == "openai/kimi-k2.5"
 
 
 def test_resolve_llm_mock_mode_keeps_ctx_llm_but_gates():
     ctx = SimpleNamespace(settings=Settings(llm_provider="mock"), llm="MOCK-LLM")
-    assert resolve_llm(ctx, _user("cabinet"), "openrouter/openai/gpt-4o") == "MOCK-LLM"
+    assert resolve_llm(ctx, _user("gratuit"), "openrouter/openai/gpt-4o") == "MOCK-LLM"
     with pytest.raises(AuthorizationError):
-        resolve_llm(ctx, _user("gratuit"), "openrouter/openai/gpt-4o")
+        resolve_llm(ctx, _user("gratuit"), "openrouter/openai/gpt-99")
 
 
 # ---------------------------------------------------------------------------
@@ -343,11 +380,22 @@ def test_token_endpoint_rejects_bad_credentials(client):
 # ---------------------------------------------------------------------------
 
 
-def test_gratuit_user_denied_cabinet_model_on_chat(client):
+def test_gratuit_user_allowed_premium_model_on_chat(client):
+    """Dev mode: all tiers share the full catalog, so gratuit can pick any model."""
     _, token = _register(client)
     response = client.post(
         "/api/v1/chat",
         json={"query": "Quel est le préavis de licenciement ?", "model": "openrouter/openai/gpt-4o"},
+        headers=_headers(token),
+    )
+    assert response.status_code == 200
+
+
+def test_chat_denies_unknown_model(client):
+    _, token = _register(client)
+    response = client.post(
+        "/api/v1/chat",
+        json={"query": "Quel est le préavis de licenciement ?", "model": "openrouter/openai/gpt-99"},
         headers=_headers(token),
     )
     assert response.status_code == 403
@@ -390,12 +438,12 @@ def test_models_endpoint_anonymous_sees_gratuit(client):
     response = client.get("/api/v1/models")
     assert response.status_code == 200
     data = response.json()
-    assert data["default_model"] == "ollama/qwen3:32b"
+    assert data["default_model"] == "tokenfree/kimi-k2.5"
     by_id = {m["id"]: m for m in data["models"]}
     assert by_id["ollama/gpt-oss:20b"]["allowed"] is True
-    assert by_id["openrouter/deepseek/deepseek-chat"]["allowed"] is False
-    assert by_id["openrouter/openai/gpt-4o"]["allowed"] is False
-    assert by_id["openrouter/openai/gpt-4o"]["tier_required"] == "cabinet"
+    assert by_id["openrouter/deepseek/deepseek-chat"]["allowed"] is True
+    assert by_id["openrouter/openai/gpt-4o"]["allowed"] is True
+    assert by_id["openrouter/openai/gpt-4o"]["tier_required"] == "gratuit"
 
 
 def test_models_endpoint_respects_token_tier(client):
@@ -404,7 +452,7 @@ def test_models_endpoint_respects_token_tier(client):
     response = client.get("/api/v1/models", headers=_headers(token))
     by_id = {m["id"]: m for m in response.json()["models"]}
     assert by_id["openrouter/deepseek/deepseek-chat"]["allowed"] is True
-    assert by_id["openrouter/openai/gpt-4o"]["allowed"] is False
+    assert by_id["openrouter/openai/gpt-4o"]["allowed"] is True
 
 
 # ---------------------------------------------------------------------------

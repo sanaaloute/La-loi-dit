@@ -14,16 +14,17 @@ flowchart LR
     ig -->|blocked| ref[refusal]
     pl --> ca[context_agent]
     ca --> ma[memory_agent]
-    ma --> rc[retrieval_coordinator]
-    rc --> cr[conflict_resolver]
+    ma --> fan{{"fan-out: parallel retrieval_branch per sub-question"}}
+    fan --> rm[retrieval_merge]
+    rm --> cr[conflict_resolver]
     cr --> er[evidence_ranking]
     er --> ra[reasoning_agent]
     ra --> rf[reflection]
-    ra -.->|needs_more_retrieval, retry ≤ 1| rc
-    rf -.->|should_retry_retrieval, iteration ≤ 1| rc
-    rf --> cv[citation_verification]
-    cv --> rg[response_generator]
-    rg --> og[output_guardrail]
+    ra -.->|needs_more_retrieval, retry ≤ 1| fan
+    rf -.->|should_retry_retrieval, iteration ≤ 1| fan
+    rf --> rg[response_generator]
+    rg --> cv[citation_verification]
+    cv --> og[output_guardrail]
     og --> a[Final answer]
     ref --> a
 ```
@@ -62,12 +63,18 @@ summaries (`ctx.memory.recall(user_id, query)`) plus the user's preferences
 (`get_preferences`). These shape retrieval and the tone/language of the
 answer.
 
-## retrieval_coordinator (`backend/agents/retrieval_node.py`)
+## retrieval_branch / retrieval_merge (`backend/agents/retrieval_node.py`)
 
-Executes all plan tasks **in parallel** through `ctx.retriever`
-(`RetrievalCoordinator`) and merges results with evidence already in state
-(retry passes accumulate evidence, deduplicated by `chunk_id`). Increments
-`retrieval_retries` when it is running as a bounded retry pass.
+Retrieval is fanned out with LangGraph `Send`: **one `retrieval_branch` node
+per decomposed sub-question**, all running in parallel. Each branch runs its
+own vector + keyword search (plus any planned auxiliary task for its
+sub-question) through `ctx.retriever` (`RetrievalCoordinator`) and writes to
+the additive `branch_evidence` / `branch_trace` channels (plain state channels
+cannot be written concurrently). `retrieval_merge` then fuses all branches,
+deduplicates by `chunk_id`, merges with evidence already in state (retry
+passes accumulate), and increments `retrieval_retries` on bounded retry
+passes. The legacy single-node `retrieval_coordinator` agent remains
+available in the same module.
 
 ## conflict_resolver (`backend/agents/conflict_resolver.py`)
 
@@ -105,9 +112,11 @@ without an LLM.
 
 ## citation_verification (`backend/agents/citation_verification.py`)
 
-Parses `[n]` citations from the draft and resolves each against the actual
-evidence list. Verified citations are kept; fabricated or unresolvable ones
-are removed from the answer and recorded as warnings — never silently kept.
+Post-synthesis judge: runs AFTER `response_generator`. Parses `[n]` citations
+from the draft and resolves each against the actual evidence list. Verified
+citations are kept; fabricated or unresolvable ones are removed from the
+answer and recorded as warnings — never silently kept. Its verdict is synced
+into the `FinalAnswer` (text cleanup, confidence scaled by citation accuracy).
 
 ## response_generator (`backend/agents/response_generator.py`)
 

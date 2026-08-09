@@ -38,78 +38,58 @@ class ModelEntry(BaseModel):
     label: str = ""
 
 
+# DEVELOPMENT MODE: every tier currently unlocks the full model catalog with
+# effectively unlimited token budgets and rate limits — usage is NOT metered
+# down per tier while the system is being built. Before production deployment,
+# re-introduce per-tier model lists, budgets and rate limits here.
+_ALL_PROVIDERS = ["ollama", "tokenfree", "openrouter", "openai", "anthropic"]
+
+_ALL_MODELS: list[dict[str, str]] = [
+    # Ollama Cloud models verified against the account's plan
+    # (https://ollama.com/cloud). nemotron-3-nano:30b and minimax-m3
+    # also work; glm/kimi/deepseek/mistral/qwen3.5 need a paid upgrade.
+    {"id": "ollama/gpt-oss:20b", "provider": "ollama", "label": "GPT-OSS 20B (Ollama Cloud)"},
+    {"id": "ollama/gpt-oss:120b", "provider": "ollama", "label": "GPT-OSS 120B (Ollama Cloud)"},
+    {"id": "ollama/gemma4:31b", "provider": "ollama", "label": "Gemma 4 31B (Ollama Cloud)"},
+    # TokenFree chat model ids verified against the account's /v1/models
+    # list (https://www.tokenfree.com); the claude-* ids currently return
+    # 500 from the TokenFree gateway.
+    {"id": "tokenfree/gemini-2.5-flash", "provider": "tokenfree", "label": "Gemini 2.5 Flash (TokenFree)"},
+    {"id": "tokenfree/gpt-5.4-mini", "provider": "tokenfree", "label": "GPT-5.4 Mini (TokenFree)"},
+    {"id": "tokenfree/qwen-max", "provider": "tokenfree", "label": "Qwen Max (TokenFree)"},
+    {"id": "tokenfree/kimi-k2.5", "provider": "tokenfree", "label": "Kimi K2.5 (TokenFree)"},
+    # OpenRouter models.
+    {"id": "openrouter/deepseek/deepseek-chat", "provider": "openrouter", "label": "DeepSeek Chat"},
+    {
+        "id": "openrouter/meta-llama/llama-3.3-70b-instruct",
+        "provider": "openrouter",
+        "label": "Llama 3.3 70B Instruct",
+    },
+    {
+        "id": "openrouter/google/gemini-2.0-flash-001",
+        "provider": "openrouter",
+        "label": "Gemini 2.0 Flash",
+    },
+    {"id": "openrouter/openai/gpt-4o", "provider": "openrouter", "label": "GPT-4o"},
+    {
+        "id": "openrouter/anthropic/claude-sonnet-4",
+        "provider": "openrouter",
+        "label": "Claude Sonnet 4",
+    },
+]
+
+_DEV_DAILY_TOKEN_BUDGET = 100_000_000  # dev: effectively unlimited
+_DEV_RATE_LIMIT_PER_MINUTE = 10_000  # dev: effectively unlimited
+
 TIER_CATALOG: dict[str, dict[str, Any]] = {
-    "gratuit": {
-        "providers": ["ollama", "tokenfree"],
-        "models": [
-            # Ollama Cloud models (https://ollama.com/cloud) — adjust to the
-            # models enabled on your Ollama Cloud account.
-            {"id": "ollama/gpt-oss:20b", "provider": "ollama", "label": "GPT-OSS 20B (Ollama Cloud)"},
-            {"id": "ollama/llama3.3", "provider": "ollama", "label": "Llama 3.3 (Ollama Cloud)"},
-            {"id": "ollama/qwen3:32b", "provider": "ollama", "label": "Qwen 3 32B (Ollama Cloud)"},
-            # TokenFree model ids are placeholders — adjust to the ids shown
-            # in your TokenFree dashboard (https://www.tokenfree.com).
-            {"id": "tokenfree/Llama-3.1-8B-Instruct", "provider": "tokenfree", "label": "Llama 3.1 8B (TokenFree)"},
-            {"id": "tokenfree/Qwen2.5-72B-Instruct", "provider": "tokenfree", "label": "Qwen 2.5 72B (TokenFree)"},
-        ],
-        "features": {"export": ["md"], "drafting": False},
-        "daily_token_budget": 20_000,
-        "rate_limit_per_minute": 30,
-    },
-    "pro": {
-        "providers": ["ollama", "tokenfree", "openrouter"],
-        "models": [
-            {"id": "ollama/gpt-oss:20b", "provider": "ollama", "label": "GPT-OSS 20B (Ollama Cloud)"},
-            {"id": "ollama/llama3.3", "provider": "ollama", "label": "Llama 3.3 (Ollama Cloud)"},
-            {"id": "ollama/qwen3:32b", "provider": "ollama", "label": "Qwen 3 32B (Ollama Cloud)"},
-            {"id": "openrouter/deepseek/deepseek-chat", "provider": "openrouter", "label": "DeepSeek Chat"},
-            {
-                "id": "openrouter/meta-llama/llama-3.3-70b-instruct",
-                "provider": "openrouter",
-                "label": "Llama 3.3 70B Instruct",
-            },
-            {
-                "id": "openrouter/google/gemini-2.0-flash-001",
-                "provider": "openrouter",
-                "label": "Gemini 2.0 Flash",
-            },
-            {"id": "tokenfree/Llama-3.1-8B-Instruct", "provider": "tokenfree", "label": "Llama 3.1 8B (TokenFree)"},
-            {"id": "tokenfree/Qwen2.5-72B-Instruct", "provider": "tokenfree", "label": "Qwen 2.5 72B (TokenFree)"},
-        ],
-        "features": {"export": ["md", "pdf", "word"], "drafting": True},
-        "daily_token_budget": 200_000,
-        "rate_limit_per_minute": 120,
-    },
-    "cabinet": {
-        "providers": ["ollama", "tokenfree", "openrouter", "openai", "anthropic"],
-        "models": [
-            {"id": "ollama/gpt-oss:20b", "provider": "ollama", "label": "GPT-OSS 20B (Ollama Cloud)"},
-            {"id": "ollama/llama3.3", "provider": "ollama", "label": "Llama 3.3 (Ollama Cloud)"},
-            {"id": "ollama/qwen3:32b", "provider": "ollama", "label": "Qwen 3 32B (Ollama Cloud)"},
-            {"id": "openrouter/deepseek/deepseek-chat", "provider": "openrouter", "label": "DeepSeek Chat"},
-            {
-                "id": "openrouter/meta-llama/llama-3.3-70b-instruct",
-                "provider": "openrouter",
-                "label": "Llama 3.3 70B Instruct",
-            },
-            {
-                "id": "openrouter/google/gemini-2.0-flash-001",
-                "provider": "openrouter",
-                "label": "Gemini 2.0 Flash",
-            },
-            {"id": "openrouter/openai/gpt-4o", "provider": "openrouter", "label": "GPT-4o"},
-            {
-                "id": "openrouter/anthropic/claude-sonnet-4",
-                "provider": "openrouter",
-                "label": "Claude Sonnet 4",
-            },
-            {"id": "tokenfree/Llama-3.1-8B-Instruct", "provider": "tokenfree", "label": "Llama 3.1 8B (TokenFree)"},
-            {"id": "tokenfree/Qwen2.5-72B-Instruct", "provider": "tokenfree", "label": "Qwen 2.5 72B (TokenFree)"},
-        ],
+    tier: {
+        "providers": _ALL_PROVIDERS,
+        "models": _ALL_MODELS,
         "features": {"export": ["md", "pdf", "word", "csv"], "drafting": True, "priority": True},
-        "daily_token_budget": 2_000_000,
-        "rate_limit_per_minute": 600,
-    },
+        "daily_token_budget": _DEV_DAILY_TOKEN_BUDGET,
+        "rate_limit_per_minute": _DEV_RATE_LIMIT_PER_MINUTE,
+    }
+    for tier in TIER_ORDER
 }
 
 
