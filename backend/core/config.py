@@ -19,6 +19,10 @@ class Settings(BaseSettings):
 
     # --- application ---
     env: str = "development"
+    # When true, index data/legal_docs in the background at every boot.
+    # Idempotent (content-hash versioning skips unchanged docs) and guarded
+    # against multi-worker double-runs via a lock file in the data dir.
+    ingest_on_startup: bool = False
     app_name: str = "Burkina Faso Legal AI"
     app_version: str = "0.1.0"
     secret_key: str = "change-me-in-production"
@@ -86,6 +90,10 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60
     rate_limit_per_minute: int = 10_000  # dev: effectively unlimited; tighten at deployment
+    # Comma-separated browser origins allowed to call the API directly (CORS).
+    # Needed for real-time SSE: bypassing the Next.js /backend-api proxy with
+    # NEXT_PUBLIC_API_URL requires the API to accept cross-origin requests.
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     # --- scalability / high availability ---
     # None => resolved as (env == "production"); set explicitly to override.

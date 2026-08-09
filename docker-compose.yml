@@ -13,7 +13,6 @@ volumes:
   temporal-data:
   prometheus-data:
   grafana-data:
-  app-data:
 
 services:
   api:
@@ -39,7 +38,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - app-data:/app/data
+      - ./data:/app/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -75,7 +74,7 @@ services:
     environment:
       LEGAL_AI_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     volumes:
-      - app-data:/app/data
+      - ./data:/app/data
     depends_on:
       - api
       - redis

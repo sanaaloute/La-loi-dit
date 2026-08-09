@@ -1,7 +1,10 @@
 # syntax=docker/dockerfile:1
 
 # --- deps ---
-FROM node:22-alpine AS deps
+# Base image overridable at build time for slow/filtered networks:
+#   docker compose build --build-arg NODE_IMAGE=docker.m.daocloud.io/library/node:22-bookworm-slim frontend
+ARG NODE_IMAGE=node:22-bookworm-slim
+FROM ${NODE_IMAGE} AS deps
 # npm registry is overridable at build time (slow/filtered networks can point
 # to a mirror, e.g. https://registry.npmmirror.com) — compose passes
 # NPM_REGISTRY from .env; default is the official registry.
@@ -19,7 +22,7 @@ RUN --mount=type=cache,target=/root/.npm \
      (echo "npm ci failed again, retrying in 5s..." && sleep 5 && npm ci --no-audit --no-fund))
 
 # --- build ---
-FROM node:22-alpine AS build
+FROM ${NODE_IMAGE} AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -28,10 +31,14 @@ ARG NEXT_PUBLIC_API_URL=""
 ARG API_PROXY_TARGET="http://api:8000"
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV API_PROXY_TARGET=$API_PROXY_TARGET
+# The musl/Alpine V8 build can crash (SIGTRAP) on some server CPUs, and
+# next build needs a large heap: use glibc images and raise the limit.
+ENV NODE_OPTIONS=--max-old-space-size=3072
+ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
 # --- runner (standalone output) ---
-FROM node:22-alpine AS runner
+FROM ${NODE_IMAGE} AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
@@ -40,7 +47,8 @@ ENV HOSTNAME=0.0.0.0
 # service over the internal compose network). Only used when
 # NEXT_PUBLIC_API_URL was left empty at build time.
 ENV API_PROXY_TARGET="http://api:8000"
-RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
+# Debian syntax (glibc image); the Alpine/BusyBox -S/-G flags do not exist here.
+RUN groupadd --system nodejs && useradd --system --gid nodejs --home /app nextjs
 COPY --from=build /app/public ./public
 COPY --from=build --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static

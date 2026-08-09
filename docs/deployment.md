@@ -19,8 +19,22 @@
 | langfuse | langfuse/langfuse:2 | 3000 | LLM traces (schema `langfuse` in postgres) |
 
 Named volumes: `postgres-data`, `redis-data`, `etcd-data`, `minio-data`,
-`milvus-data`, `temporal-data`, `prometheus-data`, `grafana-data`,
-`app-data`.
+`milvus-data`, `temporal-data`, `prometheus-data`, `grafana-data`.
+The host folder `./data` is bind-mounted to `/app/data` in `api` and
+`celery-worker`, so document edits under `./data/legal_docs` are immediately
+visible inside the containers.
+
+## Deploy scripts
+
+| Script | Purpose |
+|---|---|
+| `scripts/deploy.sh` | First-time / full redeploy: wipes containers, images and volumes (fresh Milvus index and DBs), rebuilds with `--no-cache`, starts the stack, indexes `./data/legal_docs`. `-y` skips the confirmation. |
+| `scripts/update.sh` | Code update: `git pull --ff-only`, rebuild (cached), restart. Index untouched. `--no-pull` skips the pull. |
+| `scripts/reindex.sh` | Incremental index update: new/edited documents are indexed, deleted documents purged (content-hash diff). `--full-reindex` wipes the index first. |
+
+Set `LEGAL_AI_INGEST_ON_STARTUP=true` to have the API index
+`data/legal_docs` in the background on every boot (idempotent, lock-guarded
+against multi-worker double runs).
 
 ## Environment variables
 

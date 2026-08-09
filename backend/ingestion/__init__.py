@@ -18,9 +18,13 @@ from backend.ingestion.loaders import (
 from backend.ingestion.text_cleaning import clean_document, clean_text
 from backend.ingestion.chunking import parent_child_chunk, semantic_chunk
 from backend.ingestion.versioning import VersionStore, get_version
-from backend.ingestion.pipeline import IngestionPipeline
 from backend.ingestion.freshness import FreshnessMonitor, ChangeEvent, DEFAULT_REGISTRY
 from backend.ingestion.crawler import crawl
+
+# NOTE: IngestionPipeline is intentionally NOT re-exported here — importing
+# backend.ingestion.pipeline at package import time breaks `python -m
+# backend.ingestion.pipeline` (runpy double-import warning). Import it from
+# backend.ingestion.pipeline directly, like every consumer does.
 
 __all__ = [
     "ExtractedDocument",
@@ -36,7 +40,6 @@ __all__ = [
     "semantic_chunk",
     "VersionStore",
     "get_version",
-    "IngestionPipeline",
     "FreshnessMonitor",
     "ChangeEvent",
     "DEFAULT_REGISTRY",

@@ -1,4 +1,4 @@
-.PHONY: install dev test lint run docker-up docker-down eval ingest
+.PHONY: install dev test lint run docker-up docker-down eval ingest reindex reindex-local
 
 install:
 	pip install -r requirements.txt
@@ -27,3 +27,13 @@ eval:
 
 ingest:
 	python -m backend.ingestion.pipeline --help
+
+# Re-index after adding/editing/deleting documents in ./data/legal_docs.
+# The pipeline diffs content hashes: changed files are re-indexed, unchanged
+# ones skipped, deleted files dropped from the index (GC). --full-reindex
+# wipes and rebuilds the whole index.
+reindex:
+	docker compose exec api python -m backend.ingestion.pipeline /app/data/legal_docs
+
+reindex-local:
+	python -m backend.ingestion.pipeline data/legal_docs

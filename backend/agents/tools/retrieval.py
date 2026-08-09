@@ -37,10 +37,6 @@ class FetchParentChunksArgs(BaseModel):
     parent_chunk_ids: list[str]
 
 
-class EmbedQueryArgs(BaseModel):
-    query: str
-
-
 @tool("vector_search_children", "Dense semantic search over child chunks in the local vector index.")
 async def vector_search_children(ctx: Any, state: Any, args: VectorSearchArgs) -> list[Any]:
     """Return child chunks most similar to the query."""
@@ -89,29 +85,7 @@ async def fetch_parent_chunks(ctx: Any, state: Any, args: FetchParentChunksArgs)
     return await ctx.vector_store.get_by_ids(list(args.parent_chunk_ids))
 
 
-@tool("embed_query", "Embed a query string for downstream retrieval or comparison.")
-async def embed_query(ctx: Any, state: Any, args: EmbedQueryArgs) -> list[float]:
-    """Return the embedding vector for the query."""
-    return (await ctx.embedder.embed([args.query]))[0]
-
-
 register_tool(vector_search_children)
 register_tool(keyword_search)
 register_tool(official_source_search)
 register_tool(fetch_parent_chunks)
-class ExecuteRetrievalPlanArgs(BaseModel):
-    tasks: list[dict[str, Any]]
-
-
-@tool("execute_retrieval_plan", "Execute all search tasks in parallel, deduplicate, fuse and rerank the results.")
-async def execute_retrieval_plan(ctx: Any, state: Any, args: ExecuteRetrievalPlanArgs) -> list[Any]:
-    """Run the retrieval coordinator over a list of SearchTask dicts."""
-    from backend.core.models import SearchTask
-
-    if ctx.retriever is None:
-        raise RuntimeError("retriever is not available")
-    tasks = [SearchTask.model_validate(t) for t in args.tasks]
-    return await ctx.retriever.retrieve(tasks)
-
-
-register_tool(execute_retrieval_plan)

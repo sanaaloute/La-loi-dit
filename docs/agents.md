@@ -73,8 +73,7 @@ the additive `branch_evidence` / `branch_trace` channels (plain state channels
 cannot be written concurrently). `retrieval_merge` then fuses all branches,
 deduplicates by `chunk_id`, merges with evidence already in state (retry
 passes accumulate), and increments `retrieval_retries` on bounded retry
-passes. The legacy single-node `retrieval_coordinator` agent remains
-available in the same module.
+passes.
 
 ## conflict_resolver (`backend/agents/conflict_resolver.py`)
 

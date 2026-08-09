@@ -1,14 +1,9 @@
-"""Retrieval Agent.
+"""Retrieval agents: parallel fan-out + merge.
 
-Runs the retrieval plan in parallel through the coordinator, merges results
-with any existing evidence, and updates the retry counter.  Uses the
-``execute_retrieval_plan`` tool.
-
-Parallel fan-out variant (LangGraph ``Send``): one ``retrieval_branch`` node
-per decomposed sub-question runs concurrently; ``retrieval_merge`` fuses the
-branches. Branch results travel on additive state channels
-(``branch_evidence`` / ``branch_trace``) because plain channels cannot be
-written by concurrent nodes.
+One ``retrieval_branch`` node per decomposed sub-question runs concurrently
+(LangGraph ``Send``); ``retrieval_merge`` fuses the branches. Branch results
+travel on additive state channels (``branch_evidence`` / ``branch_trace``)
+because plain channels cannot be written by concurrent nodes.
 """
 
 from __future__ import annotations
@@ -16,56 +11,9 @@ from __future__ import annotations
 from typing import Any
 
 from backend.agents.agent import Agent
-from backend.agents.tools import TOOL_REGISTRY, ToolCall, execute_tool_calls
 from backend.core.context import AppContext
 from backend.core.models import EvidenceChunk, SearchKind, SearchTask
 from backend.core.state import GraphState
-
-
-class RetrievalAgent(Agent):
-    """Executes all search tasks from the plan and accumulates evidence."""
-
-    name = "retrieval_coordinator"
-    system_prompt = (
-        "You are the retrieval agent. Execute every planned search task in parallel, "
-        "deduplicate and merge the results, and return the unified evidence list."
-    )
-
-    async def run(self, state: GraphState, ctx: AppContext) -> dict[str, Any]:
-        tasks = list(state.get("tasks", []))
-        existing = list(state.get("evidence", []))
-        errors = list(state.get("errors", []))
-        new_chunks: list[Any] = []
-        if ctx.retriever is not None and tasks:
-            task_dicts = [t.model_dump(mode="json") for t in tasks]
-            call = ToolCall(name="execute_retrieval_plan", arguments={"tasks": task_dicts})
-            results = await execute_tool_calls(TOOL_REGISTRY, [call], ctx, state)
-            result = results[0]
-            if result.error:
-                errors.append(f"retrieval_error: {result.error}")
-            else:
-                new_chunks = list(result.output or [])
-
-        merged = {c.chunk_id: c for c in [*existing, *new_chunks]}
-        retries = state.get("retrieval_retries", 0)
-        if state.get("needs_more_retrieval") or (
-            state.get("reflection") and state["reflection"].should_retry_retrieval
-        ):
-            retries += 1
-
-        return {
-            "evidence": list(merged.values()),
-            "retrieval_retries": retries,
-            "needs_more_retrieval": False,
-            "errors": errors,
-            "trace": [
-                *state.get("trace", []),
-                f"retrieval_coordinator: {len(tasks)} tasks -> {len(new_chunks)} chunks ({len(merged)} total after merge)",
-            ],
-        }
-
-
-retrieval_coordinator_node = RetrievalAgent().run
 
 
 # ---------------------------------------------------------------------------

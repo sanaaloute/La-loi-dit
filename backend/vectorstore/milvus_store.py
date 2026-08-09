@@ -6,12 +6,18 @@ method raises a clean ``RetrievalError`` on connection/operation failure —
 callers (the factory, the coordinator) catch it and fall back gracefully.
 
 Each EvidenceChunk is serialized to JSON in a VARCHAR field; the primary key
-is ``chunk_id`` and the vector field uses an HNSW index with COSINE metric.
+is ``chunk_id``, ``document_id`` is a scalar field so documents can be listed
+and deleted per logical document, and the vector field uses an HNSW index
+with COSINE metric.  On connect, a collection whose schema predates the
+``document_id`` field is dropped and recreated (log a warning): such a
+collection breaks every document-level operation, so re-ingestion is required
+anyway.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from typing import Any, Optional
 
@@ -21,6 +27,11 @@ from backend.core.config import Settings
 from backend.core.exceptions import RetrievalError
 from backend.core.models import EvidenceChunk
 from backend.vectorstore.memory_store import matches_filters
+
+logger = logging.getLogger(__name__)
+
+# Scalar fields every collection must carry (besides chunk_id/vector/chunk_json).
+_REQUIRED_FIELDS = {"chunk_id", "vector", "chunk_json", "document_id"}
 
 
 def _import_pymilvus():
@@ -68,6 +79,23 @@ class MilvusVectorStore:
             exists = await asyncio.to_thread(
                 self._client.has_collection, self._collection
             )
+            if exists:
+                # Self-heal an outdated schema: a collection without
+                # document_id breaks every document-level operation, so it
+                # must be recreated (re-ingestion is required afterwards).
+                desc = await asyncio.to_thread(
+                    self._client.describe_collection, self._collection
+                )
+                fields = {f.get("name") for f in desc.get("fields", [])}
+                if not _REQUIRED_FIELDS <= fields:
+                    logger.warning(
+                        "Milvus collection %r has an outdated schema (%s); "
+                        "dropping and recreating it — re-ingest documents afterwards",
+                        self._collection,
+                        sorted(f for f in fields if f),
+                    )
+                    await asyncio.to_thread(self._client.drop_collection, self._collection)
+                    exists = False
             if not exists:
                 schema = MilvusClient.create_schema(
                     auto_id=False, enable_dynamic_field=False
@@ -75,6 +103,7 @@ class MilvusVectorStore:
                 schema.add_field(
                     "chunk_id", DataType.VARCHAR, is_primary=True, max_length=64
                 )
+                schema.add_field("document_id", DataType.VARCHAR, max_length=64)
                 schema.add_field("vector", DataType.FLOAT_VECTOR, dim=self._dim)
                 schema.add_field("chunk_json", DataType.VARCHAR, max_length=65535)
                 index_params = self._client.prepare_index_params()
@@ -115,6 +144,7 @@ class MilvusVectorStore:
         rows = [
             {
                 "chunk_id": chunk.chunk_id,
+                "document_id": chunk.document_id,
                 "vector": list(vector),
                 "chunk_json": chunk.model_dump_json(),
             }

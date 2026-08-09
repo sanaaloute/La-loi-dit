@@ -11,6 +11,7 @@ Run directly with:  python -m backend.api.main
 from __future__ import annotations
 
 import logging
+import asyncio
 from collections import deque
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
@@ -53,10 +54,50 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.langfuse = get_langfuse(ctx.settings)
     except Exception:
         pass
+    if ctx.settings.ingest_on_startup:
+        # Background, single-run-guarded: safe with multiple uvicorn workers.
+        asyncio.create_task(_auto_ingest_on_startup(app, ctx.settings))
     logger.info("application started", extra={"env": ctx.settings.env})
     yield
     app.state.graph = None
     app.state.ctx = None
+
+
+async def _auto_ingest_on_startup(app: FastAPI, settings: Any) -> None:
+    """Index ``data/legal_docs`` on boot when LEGAL_AI_INGEST_ON_STARTUP=true.
+
+    Idempotent by design: the pipeline's content-hash versioning skips
+    unchanged documents, so a boot with no document changes costs one scan.
+    A lock file in the data dir guards against concurrent runs when uvicorn
+    spawns several workers (only the first worker ingests).
+    """
+    import os
+    from pathlib import Path
+
+    lock = Path(settings.data_dir) / ".ingest-on-startup.lock"
+    try:
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+    except FileExistsError:
+        logger.info("startup ingestion: skipped (another worker holds the lock)")
+        return
+    try:
+        target = Path(settings.data_dir) / "legal_docs"
+        if not target.exists():
+            logger.info("startup ingestion: %s not found, nothing to index", target)
+            return
+        from backend.ingestion.pipeline import IngestionPipeline
+
+        pipeline = IngestionPipeline(app.state.ctx)
+        results = await pipeline.reindex_directory(target)
+        summary: dict[str, int] = {}
+        for r in results:
+            summary[r.status] = summary.get(r.status, 0) + 1
+        logger.info("startup ingestion done: %s", summary)
+    except Exception:
+        logger.exception("startup ingestion failed")
+    finally:
+        lock.unlink(missing_ok=True)
 
 
 def _error_handler(status_code: int):
@@ -87,8 +128,20 @@ def create_app() -> FastAPI:
     setup_tracing(app, settings)
 
     # --- middleware (outermost added last) ---
+    from fastapi.middleware.cors import CORSMiddleware
+
     from backend.api.middleware import AuditLogMiddleware, RateLimitMiddleware
 
+    # CORS: lets the browser call the API directly (NEXT_PUBLIC_API_URL), which
+    # is REQUIRED for real-time SSE — the Next.js /backend-api rewrite proxy
+    # buffers the stream and delivers all frames at once at the end.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(AuditLogMiddleware)
 
