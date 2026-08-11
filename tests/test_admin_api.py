@@ -367,3 +367,420 @@ def test_chat_trace_hidden_from_anonymous_dev_caller(client):
     )
     assert response.status_code == 200, response.text
     assert response.json()["trace"] == []
+
+
+# ---------------------------------------------------------------------------
+# Admin dashboard endpoints: role gating
+# ---------------------------------------------------------------------------
+
+NEW_ADMIN_ROUTES = [
+    ("get", "/api/v1/admin/users"),
+    ("get", "/api/v1/admin/usage"),
+    ("get", "/api/v1/admin/providers"),
+    ("get", "/api/v1/admin/documents/folders"),
+    ("post", "/api/v1/admin/documents/folders"),
+    ("post", "/api/v1/admin/documents/metadata-suggestion"),
+    ("post", "/api/v1/admin/documents/upload"),
+    ("patch", "/api/v1/admin/users/some-user-id"),
+    ("delete", "/api/v1/admin/documents/some-doc-id"),
+]
+
+
+def _route_kwargs(method: str, path: str) -> dict:
+    """Minimal valid bodies so role gating (not validation) decides."""
+    if path.endswith(("metadata-suggestion", "upload")):
+        return {"files": {"file": ("note.txt", b"bonjour le monde", "text/plain")}}
+    if method == "post" and path.endswith("/folders"):
+        return {"json": {"name": "travail"}}
+    if method == "patch":
+        return {"json": {"tier": "pro"}}
+    return {}
+
+
+def test_dashboard_endpoints_reject_non_admin_roles(client):
+    for method, path in NEW_ADMIN_ROUTES:
+        kwargs = _route_kwargs(method, path)
+        # Dev-mode anonymous callers map to Role.USER: below ADMIN.
+        assert client.request(method, path, **kwargs).status_code == 403, (method, path)
+        for role in (Role.USER, Role.VIEWER, Role.LEGAL_EXPERT):
+            response = client.request(method, path, headers=_headers(role), **kwargs)
+            assert response.status_code == 403, (method, path, role)
+
+
+# ---------------------------------------------------------------------------
+# GET/PATCH /api/v1/admin/users
+# ---------------------------------------------------------------------------
+
+
+def _create_db_user(client, email: str = "jurist@example.com"):
+    ctx = client.app.state.ctx
+    return asyncio.run(ctx.user_store.create_user(email, "password123", "Jurist"))
+
+
+def test_admin_users_list_includes_db_users(client):
+    record = _create_db_user(client)
+    response = client.get("/api/v1/admin/users", headers=_headers(Role.ADMIN))
+    assert response.status_code == 200, response.text
+    entry = next(u for u in response.json()["users"] if u["id"] == record.id)
+    assert entry["email"] == "jurist@example.com"
+    assert entry["name"] == "Jurist"
+    assert entry["role"] == "user"
+    assert entry["tier"] == "gratuit"
+    assert entry["created_at"]
+    assert entry["today_tokens_in"] == 0
+    assert entry["today_tokens_out"] == 0
+    assert entry["today_requests"] == 0
+
+
+def test_admin_users_patch_updates_tier_and_role(client):
+    record = _create_db_user(client)
+    response = client.patch(
+        f"/api/v1/admin/users/{record.id}",
+        json={"tier": "pro", "role": "legal_expert"},
+        headers=_headers(Role.ADMIN),
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["tier"] == "pro"
+    assert response.json()["role"] == "legal_expert"
+
+
+def test_admin_users_patch_rejects_invalid_values(client):
+    record = _create_db_user(client)
+    headers = _headers(Role.ADMIN)
+    assert client.patch(
+        f"/api/v1/admin/users/{record.id}", json={"tier": "gold"}, headers=headers
+    ).status_code == 400
+    assert client.patch(
+        f"/api/v1/admin/users/{record.id}", json={"role": "superadmin"}, headers=headers
+    ).status_code == 400
+    assert client.patch(
+        f"/api/v1/admin/users/{record.id}", json={}, headers=headers
+    ).status_code == 400
+    assert client.patch(
+        "/api/v1/admin/users/unknown-id", json={"tier": "pro"}, headers=headers
+    ).status_code == 404
+
+
+def test_admin_users_patch_rejects_self_change(client):
+    # The test admin token's subject is "test-admin" (no DB user_id claim).
+    response = client.patch(
+        "/api/v1/admin/users/test-admin",
+        json={"role": "viewer"},
+        headers=_headers(Role.ADMIN),
+    )
+    assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/admin/usage
+# ---------------------------------------------------------------------------
+
+
+def test_admin_usage_aggregates_window(client):
+    ctx = client.app.state.ctx
+    record = _create_db_user(client, "usage@example.com")
+    asyncio.run(ctx.user_store.record_usage(record.id, 100, 50))
+    asyncio.run(ctx.user_store.record_usage(record.id, 20, 10))
+
+    response = client.get("/api/v1/admin/usage?days=30", headers=_headers(Role.ADMIN))
+    assert response.status_code == 200, response.text
+    data = response.json()
+    row = next(r for r in data["per_user"] if r["user_id"] == record.id)
+    assert row["email"] == "usage@example.com"
+    assert row["tokens_in"] == 120
+    assert row["tokens_out"] == 60
+    assert row["requests"] == 2
+    assert data["totals"]["tokens_in"] >= 120
+    assert data["totals"]["tokens_out"] >= 60
+    assert data["totals"]["requests"] >= 2
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/admin/providers
+# ---------------------------------------------------------------------------
+
+
+def test_admin_providers_masks_api_keys(tmp_path, monkeypatch):
+    monkeypatch.setenv("LEGAL_AI_LLM_API_KEY", "sk-supersecretkey1234")
+    with _make_client(tmp_path, monkeypatch) as client:
+        response = client.get("/api/v1/admin/providers", headers=_headers(Role.ADMIN))
+        assert response.status_code == 200, response.text
+        assert "sk-supersecretkey1234" not in response.text
+        data = response.json()
+        keyed = [p for p in data["providers"] if p["key_suffix"] is not None]
+        assert keyed, "a configured key should be reported masked"
+        for entry in keyed:
+            assert entry["configured"] is True
+            assert entry["key_suffix"] == "…1234"
+        assert set(data["defaults"]) == {"gratuit", "pro", "cabinet"}
+        assert all(data["defaults"].values())
+        assert "infra" in data
+
+
+def test_admin_providers_without_keys_report_unconfigured(client):
+    response = client.get("/api/v1/admin/providers", headers=_headers(Role.ADMIN))
+    assert response.status_code == 200, response.text
+    data = response.json()
+    names = [p["provider"] for p in data["providers"]]
+    assert {"ollama", "tokenfree", "openrouter"} <= set(names)
+    assert "openai" not in names
+    assert "anthropic" not in names
+    for entry in data["providers"]:
+        assert entry["key_suffix"] is None or entry["key_suffix"].startswith("…")
+        assert len(entry["key_suffix"] or "") <= 5
+
+
+def test_admin_providers_ollama_inherits_main_key(tmp_path, monkeypatch):
+    """ollama falls back to llm_api_key (documented single-key setup)."""
+    monkeypatch.setenv("LEGAL_AI_LLM_API_KEY", "sk-ollama-cloud-key-4321")
+    with _make_client(tmp_path, monkeypatch) as client:
+        response = client.get("/api/v1/admin/providers", headers=_headers(Role.ADMIN))
+        assert response.status_code == 200, response.text
+        assert "sk-ollama-cloud-key-4321" not in response.text
+        by_name = {p["provider"]: p for p in response.json()["providers"]}
+        assert by_name["ollama"]["configured"] is True
+        assert by_name["ollama"]["key_suffix"] == "…4321"
+        assert by_name["ollama"]["api_base"] == "https://ollama.com"
+        assert by_name["openrouter"]["configured"] is True
+        assert by_name["tokenfree"]["configured"] is True
+
+
+def test_admin_providers_models_grouped_per_provider(client):
+    response = client.get("/api/v1/admin/providers", headers=_headers(Role.ADMIN))
+    assert response.status_code == 200, response.text
+    by_name = {p["provider"]: p for p in response.json()["providers"]}
+    ollama_models = [m["id"] for m in by_name["ollama"]["models"]]
+    openrouter_models = [m["id"] for m in by_name["openrouter"]["models"]]
+    assert any(mid.startswith("ollama/") for mid in ollama_models)
+    assert any(mid.startswith("openrouter/") for mid in openrouter_models)
+    assert not any(mid.startswith("openrouter/") for mid in ollama_models)
+    assert not any(mid.startswith("ollama/") for mid in openrouter_models)
+    # Every grouped model carries its lowest unlocking tier.
+    for provider in by_name.values():
+        for model in provider["models"]:
+            assert model["tier_required"] in {"gratuit", "pro", "cabinet"}
+    # Per-provider default API bases, not one shared base.
+    assert by_name["openrouter"]["api_base"] == "https://openrouter.ai/api/v1"
+    assert by_name["tokenfree"]["api_base"] == "https://www.tokenfree.com/v1"
+    assert by_name["ollama"]["api_base"] == "https://ollama.com"
+
+
+# ---------------------------------------------------------------------------
+# Legal-docs folder management
+# ---------------------------------------------------------------------------
+
+
+def test_admin_folders_create_and_list(client):
+    headers = _headers(Role.ADMIN)
+    response = client.post(
+        "/api/v1/admin/documents/folders", json={"name": "Droit du Travail"}, headers=headers
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == {"name": "droit_du_travail", "created": True}
+
+    # Idempotent: an existing folder is reported, not an error.
+    again = client.post(
+        "/api/v1/admin/documents/folders", json={"name": "Droit du Travail"}, headers=headers
+    )
+    assert again.json() == {"name": "droit_du_travail", "created": False}
+
+    # Only supported extensions count towards the file total.
+    data_dir = client.app.state.ctx.settings.data_dir
+    folder = data_dir / "legal_docs" / "droit_du_travail"
+    (folder / "code-travail.txt").write_text("Article 1: ...", encoding="utf-8")
+    (folder / "notes.xls").write_text("ignored", encoding="utf-8")
+
+    response = client.get("/api/v1/admin/documents/folders", headers=headers)
+    assert response.status_code == 200, response.text
+    entry = next(f for f in response.json()["folders"] if f["name"] == "droit_du_travail")
+    assert entry["files"] == 1
+
+
+def test_admin_folders_reject_unsafe_names(client):
+    headers = _headers(Role.ADMIN)
+    for bad in ("", "   ", "..", "../etc", "a/b"):
+        response = client.post(
+            "/api/v1/admin/documents/folders", json={"name": bad}, headers=headers
+        )
+        assert response.status_code == 400, bad
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/admin/documents/upload
+# ---------------------------------------------------------------------------
+
+
+def test_admin_upload_writes_file_and_ingests(client):
+    headers = _headers(Role.ADMIN)
+    client.post("/api/v1/admin/documents/folders", json={"name": "travail"}, headers=headers)
+
+    response = client.post(
+        "/api/v1/admin/documents/upload",
+        files={
+            "file": (
+                "code-upload-test.txt",
+                "Article 1: Tout travailleur a droit à un salaire équitable.\n\n"
+                "Article 2: Le salaire est fixé par convention collective.",
+                "text/plain",
+            )
+        },
+        data={
+            "folder": "travail",
+            "metadata": json.dumps({"url": "https://example.com/loi", "authority": "law"}),
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["status"] == "indexed"
+    assert result["chunks_created"] > 0
+
+    data_dir = client.app.state.ctx.settings.data_dir
+    dest = data_dir / "legal_docs" / "travail" / "code-upload-test.txt"
+    assert dest.exists()
+
+
+def test_admin_upload_rejects_unknown_or_unsafe_folder(client):
+    headers = _headers(Role.ADMIN)
+    for folder in ("inconnu", "..", "../data"):
+        response = client.post(
+            "/api/v1/admin/documents/upload",
+            files={"file": ("doc.txt", "Article 1: texte.", "text/plain")},
+            data={"folder": folder},
+            headers=headers,
+        )
+        assert response.status_code == 400, folder
+
+
+def test_admin_upload_rejects_invalid_metadata_json(client):
+    response = client.post(
+        "/api/v1/admin/documents/upload",
+        files={"file": ("doc.txt", "Article 1: texte.", "text/plain")},
+        data={"metadata": "{not json"},
+        headers=_headers(Role.ADMIN),
+    )
+    assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/admin/documents/metadata-suggestion
+# ---------------------------------------------------------------------------
+
+#: Neutral name/text that match no heuristic keyword (authority, domain, type).
+_NEUTRAL_NAME = "note-horaires-xyz.txt"
+_NEUTRAL_TEXT = (
+    "Note d information relative aux horaires d ouverture des bureaux "
+    "pendant la periode estivale."
+)
+
+
+class _FakeLLM:
+    """Minimal async LLM stand-in with a non-mock provider."""
+
+    provider = "openai"
+
+    def __init__(self, response: str = "", exc: Exception | None = None):
+        self.response = response
+        self.exc = exc
+
+    async def complete(self, system: str, user: str, **kwargs) -> str:
+        if self.exc is not None:
+            raise self.exc
+        return self.response
+
+
+def _post_suggestion(client, name: str = _NEUTRAL_NAME, text: str = _NEUTRAL_TEXT):
+    return client.post(
+        "/api/v1/admin/documents/metadata-suggestion",
+        files={"file": (name, text, "text/plain")},
+        headers=_headers(Role.ADMIN),
+    )
+
+
+def _assert_nothing_ingested(client):
+    from backend.ingestion.versioning import VersionStore
+
+    data_dir = client.app.state.ctx.settings.data_dir
+    assert VersionStore(data_dir)._load() == {}
+
+
+def test_metadata_suggestion_merges_llm_classification(client):
+    ctx = client.app.state.ctx
+    ctx.llm = _FakeLLM(
+        response=json.dumps(
+            {
+                "document_title": "Note de service XYZ",
+                "authority": "order",
+                "document_type": "decision",
+                "legal_domains": ["labor_code", "not_a_domain"],
+            }
+        )
+    )
+    response = _post_suggestion(client)
+    assert response.status_code == 200, response.text
+    data = response.json()
+    suggestion = data["suggestion"]
+    assert suggestion["document_name"] == "Note de service XYZ"
+    assert suggestion["authority"] == "order"
+    assert suggestion["document_type"] == "decision"
+    # Domains are filtered to the known taxonomy.
+    assert suggestion["legal_domains"] == ["labor_code"]
+    assert "labor_code" in data["available_domains"]
+    _assert_nothing_ingested(client)
+
+
+def test_metadata_suggestion_llm_failure_falls_back_to_heuristics(client):
+    ctx = client.app.state.ctx
+    ctx.llm = _FakeLLM(exc=RuntimeError("provider down"))
+    response = _post_suggestion(client)
+    assert response.status_code == 200, response.text  # not an error
+    suggestion = response.json()["suggestion"]
+    # Neutral document: the heuristics found nothing either.
+    assert suggestion["document_name"] == _NEUTRAL_NAME
+    assert suggestion["authority"] == ""
+    assert suggestion["legal_domains"] == []
+    _assert_nothing_ingested(client)
+
+
+def test_metadata_suggestion_heuristics_only_with_mock_llm(client):
+    response = _post_suggestion(
+        client,
+        name="Loi 028-2008 portant code du travail.txt",
+        text="Article 1: Tout travailleur a droit à un salaire équitable.",
+    )
+    assert response.status_code == 200, response.text
+    suggestion = response.json()["suggestion"]
+    assert suggestion["authority"] == "law"
+    assert suggestion["document_type"] == "code"
+    assert suggestion["law_number"] == "028-2008"
+    assert "labor_code" in suggestion["legal_domains"]
+    _assert_nothing_ingested(client)
+
+
+# ---------------------------------------------------------------------------
+# DELETE /api/v1/admin/documents/{document_id}
+# ---------------------------------------------------------------------------
+
+
+def test_admin_delete_document_forwards_to_pipeline(client):
+    from backend.ingestion.pipeline import IngestionPipeline
+
+    ctx = client.app.state.ctx
+    pipeline = IngestionPipeline(ctx)
+    result = asyncio.run(
+        pipeline.ingest_text(
+            "doc-a-supprimer.txt",
+            "Article 1: Tout travailleur a droit à un salaire équitable.",
+        )
+    )
+    assert result.status == "indexed"
+
+    response = client.delete(
+        f"/api/v1/admin/documents/{result.document_id}", headers=_headers(Role.ADMIN)
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "deleted"
+    assert response.json()["document_id"] == result.document_id
+
+    # The document is gone from the registry and the store.
+    assert client.get(f"/api/v1/documents/{result.document_id}").status_code == 404

@@ -1,7 +1,10 @@
 """Chunking strategies producing :class:`EvidenceChunk` objects.
 
-- :func:`parent_child_chunk` — large parent chunks for LLM context, small
-  child chunks (linked via ``parent_chunk_id``) for dense retrieval.
+- :func:`legal_parent_child_chunk` — parents follow legal boundaries (a whole
+  article or section, kept intact); children are split on alinéa boundaries
+  and linked via ``parent_chunk_id`` for dense retrieval.
+- :func:`parent_child_chunk` — size-based parents/children for unstructured
+  text (fallback when no legal structure is detected).
 - :func:`semantic_chunk` — splits on legal structure boundaries
   (``Article N``, ``Art. N``, ``Section``, ``Chapitre``, ``Titre``,
   ``Partie``, ``Livre``, ``Annexe``) and stamps ``article``/``section``
@@ -228,6 +231,57 @@ def _split_sized(text: str, size: int, overlap: int) -> list[tuple[int, str]]:
     return chunks
 
 
+def _split_alineas(text: str, size: int, overlap: int) -> list[tuple[int, str]]:
+    """Split text on alinéa (line) boundaries, packing whole lines up to ``size``.
+
+    French legal texts separate alinéas with single newlines, so every line is
+    a boundary candidate: lines are never broken mid-way, and an article whose
+    lines fit within ``size`` stays a single chunk.  Only an individual line
+    longer than ``size`` is hard-sliced, with ``overlap`` characters of
+    context carry-over.
+
+    Returns ``(start_offset, chunk_text)`` pairs.
+    """
+    text = text.strip()
+    if not text:
+        return []
+    if len(text) <= size:
+        return [(0, text)]
+
+    lines = [ln for ln in re.split(r"\n+", text) if ln.strip()]
+    chunks: list[tuple[int, str]] = []
+    current: list[str] = []
+    current_start = 0
+    cursor = 0  # approximate offset tracking (split removes separators)
+
+    def flush() -> None:
+        nonlocal current, current_start
+        if current:
+            chunks.append((current_start, "\n".join(current).strip()))
+            current = []
+
+    for line in lines:
+        idx = text.find(line, cursor)
+        start = idx if idx >= 0 else cursor
+        cursor = start + len(line)
+        if len(line) > size:  # overlong alinéa: slice it
+            flush()
+            step = max(1, size - overlap)
+            for i in range(0, len(line), step):
+                piece = line[i : i + size].strip()
+                if piece:
+                    chunks.append((start + i, piece))
+            continue
+        if sum(len(p) for p in current) + len(line) + 1 > size and current:
+            flush()
+            current_start = start
+        elif not current:
+            current_start = start
+        current.append(line.strip())
+    flush()
+    return chunks
+
+
 # --- strategies ---------------------------------------------------------------
 
 
@@ -297,19 +351,19 @@ def legal_parent_child_chunk(
     url: Optional[str] = None,
     legal_domains: Optional[Sequence[str]] = None,
     version: int = 1,
-    parent_size: Optional[int] = None,
     child_size: Optional[int] = None,
     child_overlap: Optional[int] = None,
 ) -> list[EvidenceChunk]:
     """Parent-child chunking where parents follow legal article/section boundaries.
 
     Parents are created at legal headings (Article N, Section, Chapitre, Titre,
-    Partie, Livre).  Each parent is then split into child chunks for dense
-    retrieval.  This gives the RAG layer meaningful context (whole article or
-    section) while keeping the retrieval units small and precise.
+    Partie, Livre) and always keep the whole article/section intact.  Children
+    are split on alinéa boundaries (never mid-line), so a short article yields
+    a single child and ``child_size`` only caps oversized articles.  This
+    gives the RAG layer meaningful context (whole article or section) while
+    keeping the retrieval units small and precise.
     """
     cfg = _settings()
-    parent_size = parent_size if parent_size is not None else cfg.chunk_parent_size
     child_size = child_size if child_size is not None else cfg.chunk_child_size
     child_overlap = child_overlap if child_overlap is not None else cfg.chunk_overlap
     prov = _provenance(
@@ -332,7 +386,6 @@ def legal_parent_child_chunk(
             url=url,
             legal_domains=legal_domains,
             version=version,
-            parent_size=parent_size,
             child_size=child_size,
             child_overlap=child_overlap,
         )
@@ -342,8 +395,7 @@ def legal_parent_child_chunk(
     chunks: list[EvidenceChunk] = []
     for start, body, article, section, hierarchy in segments:
         # Legal parents follow article/section boundaries. Keep the whole segment
-        # as one parent so the LLM always sees the complete article/section context,
-        # even when it exceeds the configured parent_size.
+        # as one parent so the LLM always sees the complete article/section context.
         piece_text = body
         piece_offset = 0
         parent = EvidenceChunk(
@@ -355,7 +407,7 @@ def legal_parent_child_chunk(
             **{**prov, "metadata": {**prov["metadata"], "role": "parent"}},
         )
         chunks.append(parent)
-        for child_offset, child_text in _split_sized(piece_text, child_size, child_overlap):
+        for child_offset, child_text in _split_alineas(piece_text, child_size, child_overlap):
             chunks.append(
                 EvidenceChunk(
                     content=child_text,

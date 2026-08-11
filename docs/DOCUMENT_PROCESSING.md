@@ -43,11 +43,11 @@ with `chunk_strategy` (`auto` default → `legal_parent_child` when
 
 - **`legal_parent_child`** — parents follow legal boundaries (`Article N`,
   `Art. N`, `Section`, `Chapitre`, `Titre`, `Partie`, `Livre`, `Annexe`), so a
-  parent is a whole article or section (kept intact even beyond
-  `chunk_parent_size`); each parent is split into child chunks
-  (`chunk_child_size` / `chunk_overlap`) for dense retrieval. Children carry
-  `parent_chunk_id`; retrieval searches children, the parent-expansion node
-  restores full context.
+  parent is a whole article or section, always kept intact; children are split
+  on alinéa boundaries (never mid-line), so short articles yield a single
+  child and `chunk_child_size` / `chunk_overlap` only cap oversized articles.
+  Children carry `parent_chunk_id`; retrieval searches children, the
+  parent-expansion node restores full context.
 - **`parent_child`** — size-based parents/children for unstructured text.
 - **`semantic`** — flat split on the same legal boundaries with size fallback
   for oversized articles.

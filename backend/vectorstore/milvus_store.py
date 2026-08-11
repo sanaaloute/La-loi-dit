@@ -42,6 +42,7 @@ _REQUIRED_FIELDS = {
     "article",
     "status",
     "document_type",
+    "legal_domains",
 }
 
 # Filter keys promoted to native Milvus ``expr`` filtering; all other filter
@@ -69,10 +70,11 @@ def build_native_filter_expr(
     """Split filters into a native Milvus expr and client-side remainder.
 
     Returns ``(expr, native_keys)``: ``expr`` covers the promoted scalar
-    fields (``document_id``/``article``/``status``/``document_type``) or is
-    None, and ``native_keys`` lists the filter keys it covers so the caller
-    can post-filter only the rest.  Values containing a double quote are left
-    to the client-side path (keeps expr escaping trivially safe).
+    fields (``document_id``/``article``/``status``/``document_type``) plus the
+    ``legal_domains`` ARRAY field, or is None, and ``native_keys`` lists the
+    filter keys it covers so the caller can post-filter only the rest.
+    Values containing a double quote are left to the client-side path (keeps
+    expr escaping trivially safe).
     """
     if not filters:
         return None, set()
@@ -93,6 +95,23 @@ def build_native_filter_expr(
         quoted = ", ".join(f'"{v}"' for v in normalized)
         parts.append(f"{key} in [{quoted}]")
         native_keys.add(key)
+    if "legal_domains" in filters:
+        expected = filters["legal_domains"]
+        values = (
+            list(expected)
+            if isinstance(expected, (list, tuple, set))
+            else [expected]
+        )
+        normalized = [_norm_filter_value(v) for v in values]
+        if normalized and not any('"' in v for v in normalized):
+            quoted = ", ".join(f'"{v}"' for v in normalized)
+            # ARRAY_CONTAINS_ANY narrows; the array_length == 0 branch keeps
+            # unclassified chunks, mirroring matches_filters semantics.
+            parts.append(
+                f"(array_contains_any(legal_domains, [{quoted}]) "
+                f"or array_length(legal_domains) == 0)"
+            )
+            native_keys.add("legal_domains")
     return (" and ".join(parts) if parts else None), native_keys
 
 
@@ -100,8 +119,8 @@ def _import_pymilvus():
     """Import pymilvus without its ``load_dotenv()`` side effect.
 
     pymilvus loads the project ``.env`` into ``os.environ`` at import time;
-    those values then shadow the ``.env.dev`` overrides pydantic applies when
-    building Settings (e.g. MILVUS_HOST=localhost), breaking local runs.
+    those raw values would then shadow the ones pydantic-settings parses
+    when building Settings (e.g. MILVUS_HOST=localhost), breaking local runs.
     """
     before = dict(os.environ)
     try:
@@ -171,6 +190,16 @@ class MilvusVectorStore:
                 schema.add_field("article", DataType.VARCHAR, max_length=128)
                 schema.add_field("status", DataType.VARCHAR, max_length=32)
                 schema.add_field("document_type", DataType.VARCHAR, max_length=32)
+                # Domain tags as a native ARRAY field: the retrieval domain
+                # filter runs inside Milvus (array_contains_any) instead of a
+                # client-side post-filter.
+                schema.add_field(
+                    "legal_domains",
+                    DataType.ARRAY,
+                    element_type=DataType.VARCHAR,
+                    max_capacity=16,
+                    max_length=64,
+                )
                 schema.add_field("vector", DataType.FLOAT_VECTOR, dim=self._dim)
                 schema.add_field("chunk_json", DataType.VARCHAR, max_length=65535)
                 index_params = self._client.prepare_index_params()
@@ -215,6 +244,7 @@ class MilvusVectorStore:
                 "article": _scalar(chunk, "article"),
                 "status": _scalar(chunk, "status"),
                 "document_type": _scalar(chunk, "document_type"),
+                "legal_domains": list((chunk.metadata or {}).get("legal_domains") or []),
                 "vector": list(vector),
                 "chunk_json": chunk.model_dump_json(),
             }

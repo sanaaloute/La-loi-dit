@@ -20,13 +20,16 @@ from typing import Any, Optional, Sequence, Union
 
 from backend.core.embeddings import HashEmbeddings
 from backend.core.exceptions import IngestionError
+from backend.core.constants import AUTHORITY_WEIGHTS
 from backend.core.models import AuthorityLevel, DocumentIngestResult, DocumentType, EvidenceChunk
 from backend.ingestion.chunking import legal_parent_child_chunk, looks_like_legal, parent_child_chunk, semantic_chunk
 from backend.ingestion.classification import (
+    domain_slug,
     extract_law_number,
     infer_authority,
     infer_document_type,
     infer_legal_domains,
+    load_domain_keywords,
 )
 from backend.ingestion.loaders import SUPPORTED_EXTENSIONS, ExtractedDocument, load_any
 from backend.ingestion.text_cleaning import clean_document
@@ -131,6 +134,24 @@ def _coerce_date(value: Any) -> Optional[date]:
         return None
 
 
+def _as_list(value: Any) -> list[str]:
+    """Normalize a metadata value to a list of strings (str, iterable or empty)."""
+    if not value:
+        return []
+    if isinstance(value, str):
+        return [value]
+    return [str(v) for v in value]
+
+
+def _parse_llm_json(raw: Any) -> Any:
+    """Parse an LLM JSON reply, tolerating a surrounding markdown fence."""
+    text = str(raw).strip()
+    if text.startswith("```"):
+        lines = [line for line in text.splitlines() if not line.strip().startswith("```")]
+        text = "\n".join(lines).strip()
+    return json.loads(text)
+
+
 #: Bundled legal-sources file shipped with the repository.
 _DEFAULT_SOURCES_PATH = Path(__file__).resolve().parents[2] / "data" / "legal_sources.json"
 
@@ -195,6 +216,60 @@ def load_document_titles(path: Optional[Union[str, Path]] = None) -> dict[str, s
     return _TITLE_CACHE[key]
 
 
+#: Metadata keys accepted from the document_metadata manifest / sidecar files.
+_EXTERNAL_METADATA_KEYS = (
+    "document_name",
+    "authority",
+    "document_type",
+    "law_number",
+    "legal_domains",
+    "publication_date",
+    "effective_date",
+    "government_body",
+    "url",
+    "issuing_authority",
+)
+
+_METADATA_CACHE: dict[str, dict[str, dict[str, Any]]] = {}
+
+
+def load_document_metadata(path: Optional[Union[str, Path]] = None) -> dict[str, dict[str, Any]]:
+    """Resolve the per-document metadata manifest (jurisdiction-configurable).
+
+    Reads the ``document_metadata`` section (``{filename: {key: value}}``, keys
+    from :data:`_EXTERNAL_METADATA_KEYS`) of the legal-sources file
+    (``settings.legal_sources_path`` or the bundled
+    ``data/legal_sources.json``).  A missing/corrupt section falls back to an
+    empty manifest with a structured warning — never raises.  Results are
+    cached per resolved path.
+    """
+    try:
+        from backend.core.config import get_settings
+
+        settings = get_settings()
+    except Exception:  # settings unavailable: stay on the bundled default
+        settings = None
+
+    sources_path = path or getattr(settings, "legal_sources_path", None) or _DEFAULT_SOURCES_PATH
+    key = f"{sources_path}#document_metadata"
+    if key not in _METADATA_CACHE:
+        try:
+            data = json.loads(Path(sources_path).read_text(encoding="utf-8"))
+            raw = data.get("document_metadata") if isinstance(data, dict) else None
+            if not isinstance(raw, dict):
+                raise ValueError("document_metadata section unavailable")
+            _METADATA_CACHE[key] = {
+                str(k): dict(v) for k, v in raw.items() if isinstance(v, dict)
+            }
+        except Exception as exc:
+            logger.warning(
+                "document_metadata_load_failed",
+                extra={"path": str(sources_path), "error": str(exc), "fallback": "empty_manifest"},
+            )
+            _METADATA_CACHE[key] = {}
+    return _METADATA_CACHE[key]
+
+
 class IngestionPipeline:
     """Orchestrates document ingestion against an :class:`AppContext`.
 
@@ -237,10 +312,56 @@ class IngestionPipeline:
             )
             self._record_result(result, path=p)
             return result
+        # Manifest/sidecar values are DEFAULTS: keys passed explicitly by the
+        # caller always win.  When a default document_name (display title)
+        # applies, pin the document id to the raw filename first so the
+        # registry/GC ids stay stable (they key on p.name, not the title).
+        defaults = self._external_metadata_defaults(p)
+        if "document_name" in defaults and "document_name" not in metadata and "document_id" not in metadata:
+            metadata["document_id"] = self._document_id(None, p.name)
+        for key, value in defaults.items():
+            metadata.setdefault(key, value)
         metadata.setdefault("document_name", doc.name)
         doc_meta = dict(doc.metadata)
         doc_meta.update(metadata.pop("extra_metadata", {}) or {})
         return await self._ingest_document(doc, metadata, source_meta=doc_meta)
+
+    @staticmethod
+    def _external_metadata_defaults(p: Path) -> dict[str, Any]:
+        """Manifest + sidecar metadata defaults for one file (sidecar wins).
+
+        Merges the ``document_metadata`` manifest entry for the filename with
+        a ``<filename>.meta.json`` sidecar sitting next to the file, keeping
+        only :data:`_EXTERNAL_METADATA_KEYS` and coercing dates/authority.
+        Never raises.
+        """
+        merged: dict[str, Any] = dict(load_document_metadata().get(p.name.lower()) or {})
+        sidecar = p.with_name(p.name + ".meta.json")
+        try:
+            raw = json.loads(sidecar.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                merged.update(raw)
+        except FileNotFoundError:
+            pass
+        except Exception as exc:
+            logger.warning(
+                "document_sidecar_load_failed",
+                extra={"path": str(sidecar), "error": str(exc), "fallback": "manifest_only"},
+            )
+        defaults: dict[str, Any] = {}
+        for key in _EXTERNAL_METADATA_KEYS:
+            if key not in merged:
+                continue
+            value = merged[key]
+            if key in ("publication_date", "effective_date"):
+                value = _coerce_date(value)
+            elif key == "authority":
+                value = _coerce_authority(value)
+                if value is AuthorityLevel.UNKNOWN:
+                    continue  # unparseable authority: let heuristics/LLM decide
+            if value is not None and value != "":
+                defaults[key] = value
+        return defaults
 
     async def ingest_text(self, name: str, text: str, **metadata: Any) -> DocumentIngestResult:
         """Ingest raw text under a logical document name."""
@@ -295,8 +416,20 @@ class IngestionPipeline:
         text_sample = doc.text[:2000] if doc.text else ""
         if not metadata.get("authority"):
             metadata = {**metadata, "authority": infer_authority(name)}
-        if not metadata.get("legal_domains"):
-            metadata = {**metadata, "legal_domains": infer_legal_domains(name, text_sample)}
+        # legal_domains: curated values (caller/manifest/sidecar) are
+        # authoritative — keyword inference only runs when nothing was
+        # curated, so a manifest entry is not diluted by noisy guesses.
+        # Folder-derived domains ("folder_domains", see reindex_directory)
+        # always union in; empty stays empty (never blocks indexing).
+        folder_domains = metadata.pop("folder_domains", None)
+        domains: list[str] = []
+        curated = _as_list(metadata.get("legal_domains"))
+        sources = (curated, folder_domains) if curated else (folder_domains, infer_legal_domains(name, text_sample))
+        for source in sources:
+            for domain in _as_list(source):
+                if domain not in domains:
+                    domains.append(domain)
+        metadata = {**metadata, "legal_domains": domains}
         metadata["document_name"] = IngestionPipeline._display_name(name)
         display_name = metadata["document_name"]
         if not metadata.get("document_type"):
@@ -311,6 +444,75 @@ class IngestionPipeline:
         if not metadata.get("status") and effective and effective > date.today():
             metadata["status"] = "future"
         return metadata
+
+    async def _llm_classify_metadata(
+        self, metadata: dict[str, Any], doc: ExtractedDocument
+    ) -> dict[str, Any]:
+        """Last-resort LLM classification for unrecognized documents.
+
+        Runs ONE completion, only when the heuristics found nothing at all
+        (no legal domains AND unknown authority), the
+        ``ingestion_llm_classification_enabled`` flag is on and a real
+        (non-mock) LLM is configured — so the happy path for known documents
+        never pays for it.  The output is strictly validated and fills ONLY
+        still-empty/unknown fields; any exception or invalid output keeps the
+        heuristic metadata (logged at debug).
+        """
+        if metadata.get("legal_domains"):
+            return metadata
+        if _coerce_authority(metadata.get("authority")) is not AuthorityLevel.UNKNOWN:
+            return metadata
+        settings = getattr(self.ctx, "settings", None)
+        if not getattr(settings, "ingestion_llm_classification_enabled", True):
+            return metadata
+        llm = getattr(self.ctx, "llm", None)
+        if llm is None or getattr(llm, "provider", "mock") == "mock" or not hasattr(llm, "complete"):
+            return metadata
+        try:
+            from backend.core.prompts import get_prompt
+
+            raw = await llm.complete(get_prompt("INGEST_CLASSIFY"), (doc.text or "")[:2000])
+            data = _parse_llm_json(raw)
+            if not isinstance(data, dict):
+                raise ValueError("classification output is not a JSON object")
+            enriched = dict(metadata)
+            title = data.get("document_title")
+            if not enriched.get("document_name") and isinstance(title, str) and title.strip():
+                enriched["document_name"] = title.strip()
+            authority = _coerce_authority(data.get("authority"))
+            if authority is not AuthorityLevel.UNKNOWN:
+                enriched["authority"] = authority
+            raw_type = data.get("document_type")
+            if not enriched.get("document_type") and raw_type is not None:
+                try:
+                    enriched["document_type"] = DocumentType(str(raw_type))
+                except ValueError:
+                    pass  # unknown type: leave unset rather than guess
+            if isinstance(data.get("legal_domains"), list):
+                known = load_domain_keywords()
+                domains = [d for d in _as_list(data["legal_domains"]) if d in known]
+                if domains:
+                    enriched["legal_domains"] = domains
+            return enriched
+        except Exception as exc:
+            logger.debug(
+                "llm_ingest_classification_failed",
+                extra={"document": doc.name, "error": str(exc)},
+            )
+            return metadata
+
+    async def _missing_from_store(self, document_id: str) -> bool:
+        """True when the registry knows the document but the store has no chunks."""
+        store = getattr(self.ctx, "vector_store", None)
+        if store is None or not hasattr(store, "get_by_document_id"):
+            return False
+        try:
+            chunks = store.get_by_document_id(document_id)
+            if inspect.isawaitable(chunks):
+                chunks = await chunks
+            return not chunks
+        except Exception:
+            return False  # unreachable store: keep the registry's verdict
 
     async def _delete_document_chunks(self, document_id: str) -> int:
         """Remove all vector and keyword chunks for a logical document.
@@ -361,11 +563,19 @@ class IngestionPipeline:
                 raise IngestionError(f"No extractable text in {name}")
 
             metadata = self._enrich_metadata(metadata, cleaned)
+            # Last-resort classification for documents the heuristics could not
+            # place at all; no-op for known documents and offline setups.
+            metadata = await self._llm_classify_metadata(metadata, cleaned)
             # _enrich_metadata may map the raw filename to a human-readable title.
             display_name = metadata.get("document_name") or name
 
             content_hash = _content_hash(cleaned.text)
             version, changed = self._versions.check_version(document_id, content_hash)
+            if not changed and await self._missing_from_store(document_id):
+                # The registry says "ingested" but the vector store lost the
+                # chunks (e.g. Milvus volume reset): re-ingest instead of
+                # skipping, so the index cannot stay silently empty.
+                changed = True
             if not changed:
                 result = DocumentIngestResult(
                     document_id=document_id,
@@ -379,7 +589,10 @@ class IngestionPipeline:
                 return result
 
             # Remove previous version chunks so the index never keeps stale data.
-            if version > 1:
+            # Also when the registry was lost (version resets to 1) but the store
+            # still holds chunks for this document: without the delete, a
+            # re-ingest would silently duplicate the whole document.
+            if version > 1 or not await self._missing_from_store(document_id):
                 await self._delete_document_chunks(document_id)
 
             chunks = self._chunk(cleaned, document_id, version, metadata)
@@ -482,6 +695,18 @@ class IngestionPipeline:
         results: list[DocumentIngestResult] = []
         for file_path in files:
             per_file = dict(base_meta) if len(files) == 1 else {k: v for k, v in base_meta.items() if k != "document_name"}
+            # Folder = domain: when the file sits in a subdirectory of the scan
+            # root, the first relative path segment becomes an extra legal
+            # domain, so a new folder of documents needs zero configuration.
+            if target.is_dir() and "folder_domains" not in per_file:
+                try:
+                    rel_parent = file_path.parent.relative_to(target)
+                except ValueError:
+                    rel_parent = Path(".")
+                if rel_parent.parts:
+                    slug = domain_slug(rel_parent.parts[0])
+                    if slug:
+                        per_file["folder_domains"] = [slug]
             results.append(await self.ingest_path(file_path, **per_file))
 
         if gc:
@@ -493,7 +718,10 @@ class IngestionPipeline:
                 elif len(files) == 1 and base_meta.get("document_name"):
                     expected_ids.add(self._document_id(None, base_meta["document_name"]))
                 else:
-                    expected_ids.add(self._document_id(None, self._display_name(f.name)))
+                    # Must mirror ingest_path, which derives the id from the RAW
+                    # filename — applying _display_name here would hash the mapped
+                    # title instead and GC every freshly ingested document.
+                    expected_ids.add(self._document_id(None, f.name))
             for stale_id in self._versions.list_document_ids():
                 if stale_id not in expected_ids:
                     logger.info("Removing stale document from index: %s", stale_id)
@@ -537,7 +765,6 @@ class IngestionPipeline:
             kwargs.pop("max_chunk_size", None)
             kwargs.pop("overlap", None)
             if settings is not None:
-                kwargs.setdefault("parent_size", settings.chunk_parent_size)
                 kwargs.setdefault("child_size", settings.chunk_child_size)
                 kwargs.setdefault("child_overlap", settings.chunk_overlap)
             return legal_parent_child_chunk(doc, document_id, **kwargs)
@@ -547,11 +774,19 @@ class IngestionPipeline:
 
     @staticmethod
     def _dedupe(chunks: Sequence[EvidenceChunk]) -> list[EvidenceChunk]:
-        """Drop chunks with identical content within this batch."""
+        """Drop chunks with identical content within this batch.
+
+        The dedup key includes the chunk role: a short article produces a
+        child byte-identical to its parent (single alinéa), and that child is
+        NOT a duplicate — the dense-retrieval worker searches role="child"
+        first, so dropping it makes the whole article invisible to vector
+        search. Only same-role content collisions are true duplicates.
+        """
         seen: set[str] = set()
         unique: list[EvidenceChunk] = []
         for chunk in chunks:
-            digest = _content_hash(chunk.content)
+            role = (chunk.metadata or {}).get("role", "")
+            digest = f"{role}:{_content_hash(chunk.content)}"
             if digest in seen:
                 continue
             seen.add(digest)
@@ -584,6 +819,13 @@ class IngestionPipeline:
             for field, value in fields.items():
                 if value is not None:
                     setattr(chunk, field, value)
+            if chunk.confidence == 0.0:
+                # Source confidence from the authority table (spec §9): the
+                # reranker's confidence weight and the evidence UI read this
+                # field — leaving it at 0.0 makes every card show "0.00".
+                chunk.confidence = AUTHORITY_WEIGHTS.get(
+                    chunk.authority, AUTHORITY_WEIGHTS[AuthorityLevel.UNKNOWN]
+                )
 
     def _embedding_model_name(self) -> Optional[str]:
         """Name of the embedder in use, stamped on chunks at upsert time."""

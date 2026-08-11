@@ -223,3 +223,25 @@ async def test_node_without_final_answer_only_traces():
     assert update["claims"] == []
     assert "final_answer" not in update
     assert update["trace"][-1].startswith("claim_verification: 0 claims")
+
+
+async def test_node_skips_claim_extraction_when_no_evidence():
+    """The insufficient-evidence message must not generate noise warnings.
+
+    Regression: with zero ranked evidence the answer IS the insufficiency
+    declaration itself; extracting claims from it (e.g. the sentence pointing
+    to a "professionnel du droit") produced a spurious "could not be
+    verified" warning on top of the honest refusal.
+    """
+    state = _state(
+        "Je n'ai pas trouvé de preuves vérifiables dans les sources officielles "
+        "indexées pour répondre à cette question. Veuillez consulter le Journal "
+        "Officiel du Burkina Faso ou un professionnel du droit agréé."
+    )
+    state["ranked_evidence"] = []
+    update = await claim_verification_node(state, ctx=None)
+    final = update["final_answer"]
+    assert final.claims == []
+    assert final.warnings == []
+    assert not final.requires_human_review
+    assert update["trace"][-1].startswith("claim_verification: 0 claims")

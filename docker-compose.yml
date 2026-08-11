@@ -3,6 +3,12 @@ name: legal-ai-burkina
 networks:
   legal-net:
     driver: bridge
+    # Pinned subnet: the ollama-relay service binds the gateway address
+    # (172.18.0.1), so it must stay deterministic across recreations.
+    ipam:
+      config:
+        - subnet: 172.18.0.0/16
+          gateway: 172.18.0.1
 
 volumes:
   postgres-data:
@@ -47,6 +53,8 @@ services:
       milvus:
         condition: service_started
       temporal:
+        condition: service_started
+      ollama-relay:
         condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -203,6 +211,29 @@ services:
       - minio
     restart: unless-stopped
     networks: [legal-net]
+
+  # --- Ollama relay: exposes the WSL-local Ollama to containers ---
+  # Ollama serves on the WSL VM's loopback (127.0.0.1:11434), unreachable from
+  # bridge networks. Host networking puts this relay in the WSL VM namespace,
+  # where it binds the legal-net gateway and forwards to Ollama. The api
+  # reaches it via LEGAL_AI_EMBEDDING_API_BASE=http://172.18.0.1:11434.
+  ollama-relay:
+    image: legal-ai-burkina:latest
+    network_mode: host
+    command: python /app/docker/ollama_relay.py
+    environment:
+      OLLAMA_RELAY_BIND: 172.18.0.1
+      OLLAMA_RELAY_PORT: "11434"
+    volumes:
+      # The backend image does not ship docker/; mount the relay script in.
+      - ./docker/ollama_relay.py:/app/docker/ollama_relay.py:ro
+    # The image's default healthcheck targets the API port; probe the relay instead.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('172.18.0.1', 11434), 3).close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
 
   # --- Temporal (durable conversation workflows) ---
   temporal:

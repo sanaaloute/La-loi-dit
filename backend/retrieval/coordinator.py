@@ -29,6 +29,30 @@ from backend.retrieval.workers import worker_for
 logger = logging.getLogger(__name__)
 
 
+def apply_domain_filter(
+    chunks: list[EvidenceChunk], query_domains: list[str]
+) -> tuple[list[EvidenceChunk], bool]:
+    """Keep chunks whose ``legal_domains`` intersect ``query_domains``.
+
+    Untagged chunks are kept (unclassifiable is not off-topic). Returns
+    ``(filtered, applied)``; when no chunk matches the target domains the
+    original list comes back with ``applied=False`` — a domain guess must
+    never empty the evidence set.
+    """
+    if not query_domains:
+        return chunks, False
+    target = set(query_domains)
+    if not any(target & set(c.metadata.get("legal_domains") or []) for c in chunks):
+        return chunks, False
+    filtered = [
+        c
+        for c in chunks
+        if not c.metadata.get("legal_domains")
+        or target & set(c.metadata.get("legal_domains") or [])
+    ]
+    return filtered, True
+
+
 def _cache_key(
     tasks: list[SearchTask],
     namespace: str,
@@ -109,6 +133,30 @@ class RetrievalCoordinator:
             except Exception:
                 pass  # corrupt cache entry: recompute
 
+        # Query domain inference (spec §18): attach the inferred domains as a
+        # native search filter so Milvus narrows the candidate set itself
+        # (array_contains_any on the legal_domains ARRAY field) — on-domain
+        # chunks can no longer be crowded out of fetch_k by off-domain ones.
+        # The post-rerank apply_domain_filter below stays as the final check,
+        # and the vector worker retries without the filter if it empties.
+        query_domains: list[str] = []
+        if settings.retrieval_domain_filter_enabled:
+            from backend.ingestion.classification import infer_legal_domains
+
+            query_domains = infer_legal_domains(tasks[0].query)
+            if query_domains:
+                tasks = [
+                    task.model_copy(
+                        update={
+                            "filters": {
+                                **(task.filters or {}),
+                                "legal_domains": query_domains,
+                            }
+                        }
+                    )
+                    for task in tasks
+                ]
+
         results = await asyncio.gather(
             *(self._run_task(task) for task in tasks),
             return_exceptions=True,
@@ -156,6 +204,21 @@ class RetrievalCoordinator:
         # matches ranked just below the cut. The LLM rescore hook (when
         # enabled) blends a 0-1 relevance judgment into the heuristic score.
         scored = await self.reranker.rerank(tasks[0].query, fused)
+        # Domain filter (spec §18): a query that clearly maps to legal domains
+        # ("licenciement" -> labor_code) must not be answered from off-domain
+        # sources — e.g. an OHADA commercial-contract préavis article cited as
+        # employment law. Chunks without domain tags are always kept; if no
+        # chunk matches, the unfiltered list stands (fallback). query_domains
+        # was computed before the workers ran (native filter); the worker
+        # fallback may have broadened the set, so re-check here.
+        if settings.retrieval_domain_filter_enabled:
+            scored, domain_applied = apply_domain_filter(scored, query_domains)
+            if domain_applied:
+                logger.info(
+                    "domain filter (%s): kept %d candidates",
+                    ",".join(query_domains),
+                    len(scored),
+                )
         # Relevance floor: a chunk must share real content tokens with the
         # query — otherwise irrelevant queries would still return
         # high-confidence but off-topic chunks. A single shared token is

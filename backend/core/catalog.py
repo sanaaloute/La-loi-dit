@@ -42,7 +42,7 @@ class ModelEntry(BaseModel):
 # effectively unlimited token budgets and rate limits — usage is NOT metered
 # down per tier while the system is being built. Before production deployment,
 # re-introduce per-tier model lists, budgets and rate limits here.
-_ALL_PROVIDERS = ["ollama", "tokenfree", "openrouter", "openai", "anthropic"]
+_ALL_PROVIDERS = ["ollama", "tokenfree", "openrouter"]
 
 _ALL_MODELS: list[dict[str, str]] = [
     # Ollama Cloud models verified against the account's plan

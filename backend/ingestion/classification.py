@@ -8,11 +8,15 @@ leave values empty/unknown rather than guess wrongly.
 
 from __future__ import annotations
 
+import json
+import logging
 import re
-from typing import Optional
+from pathlib import Path
+from typing import Optional, Union
 
-from backend.core.constants import LEGAL_DOMAINS
 from backend.core.models import AuthorityLevel, DocumentType
+
+logger = logging.getLogger(__name__)
 
 # Authority rules: each rule is (groups, authority). A group matches when any
 # of its keywords is present; the rule matches when every group matches.
@@ -36,7 +40,10 @@ _DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
     "criminal_law": ("pénal", "penal", "infraction", "crime", "délit", "criminal"),
     "civil_law": ("civil", "contrat", "responsabilité civile", "droit commercial général"),
     "family_code": ("famille", "mariage", "divorce", "filiation"),
-    "labor_code": ("travail", "licenciement", "salaire", "employeur"),
+    # Stems ("licenci", "salari", "preavis") cover inflected forms
+    # (licencié/licenciement, salarié/salarial); the haystack is accent-folded,
+    # so keywords must be unaccented to match.
+    "labor_code": ("travail", "licenci", "salaire", "salari", "employeur", "preavis"),
     "tax_law": ("impôt", "impots", "fiscal", "taxe", "tva"),
     "commercial_law": ("commercial", "société", "commerce", "ohada", "sarl", "sa ", "sociétés commerciales"),
     "ohada_law": ("ohada", "acte uniforme"),
@@ -74,6 +81,57 @@ def _normalize(text: str) -> str:
     return text
 
 
+def domain_slug(name: str) -> str:
+    """Folder/display name -> domain slug ("Code de la route" -> "code_de_la_route")."""
+    return re.sub(r"[^a-z0-9]+", "_", _normalize(name)).strip("_")
+
+
+#: Bundled domain-taxonomy file shipped with the repository.
+_DEFAULT_DOMAINS_PATH = Path(__file__).resolve().parents[2] / "data" / "legal_domains.json"
+
+_DOMAINS_CACHE: dict[str, dict[str, list[str]]] = {}
+
+
+def load_domain_keywords(path: Optional[Union[str, Path]] = None) -> dict[str, list[str]]:
+    """Resolve the domain-keyword taxonomy (jurisdiction-configurable).
+
+    Resolution order: explicit ``path`` → ``settings.legal_domains_path`` →
+    the bundled ``data/legal_domains.json``.  The file shape is
+    ``{"version": 1, "domains": {"<domain_slug>": ["unaccented stem", ...]}}``;
+    stems must be UNACCENTED because they are matched against an accent-folded
+    haystack (see :func:`_normalize`).  A missing/corrupt file falls back to
+    the embedded :data:`_DOMAIN_KEYWORDS` with a structured warning — never
+    raises.  Results are cached per resolved path.
+    """
+    resolved = path
+    if resolved is None:
+        try:
+            from backend.core.config import get_settings
+
+            resolved = getattr(get_settings(), "legal_domains_path", None)
+        except Exception:  # settings unavailable: stay on the bundled default
+            resolved = None
+    resolved = resolved or _DEFAULT_DOMAINS_PATH
+    key = f"{resolved}#domain_keywords"
+    if key not in _DOMAINS_CACHE:
+        try:
+            data = json.loads(Path(resolved).read_text(encoding="utf-8"))
+            raw = data.get("domains") if isinstance(data, dict) else None
+            if not isinstance(raw, dict):
+                raise ValueError("domain keywords file must hold a 'domains' object")
+            _DOMAINS_CACHE[key] = {
+                str(domain): [str(kw) for kw in (keywords or [])]
+                for domain, keywords in raw.items()
+            }
+        except Exception as exc:
+            logger.warning(
+                "domain_keywords_load_failed",
+                extra={"path": str(resolved), "error": str(exc), "fallback": "embedded_domain_keywords"},
+            )
+            _DOMAINS_CACHE[key] = {d: list(kws) for d, kws in _DOMAIN_KEYWORDS.items()}
+    return _DOMAINS_CACHE[key]
+
+
 def _matches_rule(haystack: str, groups: list[tuple[str, ...]]) -> bool:
     """True when every keyword group has at least one keyword in haystack."""
     for group in groups:
@@ -92,15 +150,20 @@ def infer_authority(name: str) -> AuthorityLevel:
 
 
 def infer_legal_domains(name: str, text_sample: str = "") -> list[str]:
-    """Return legal-domain labels matched in the document name or a sample."""
+    """Return legal-domain labels matched in the document name or a sample.
+
+    Iterates the taxonomy resolved by :func:`load_domain_keywords` (not a
+    hardcoded list) so domains added to ``data/legal_domains.json`` are
+    recognized with zero code changes.
+    """
     haystack = _normalize(name)
     if text_sample:
         haystack += " " + _normalize(text_sample[:2000])
-    domains: list[str] = []
-    for domain in LEGAL_DOMAINS:
-        if domain in _DOMAIN_KEYWORDS and any(kw in haystack for kw in _DOMAIN_KEYWORDS[domain]):
-            domains.append(domain)
-    return domains
+    return [
+        domain
+        for domain, keywords in load_domain_keywords().items()
+        if any(kw in haystack for kw in keywords)
+    ]
 
 
 # Document-type rules: (keywords, type). Order matters — more specific

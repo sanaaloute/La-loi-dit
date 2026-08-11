@@ -1,0 +1,38 @@
+- generic [ref=f2e1]:
+  - generic [ref=f2e2]:
+    - banner [ref=f2e3]:
+      - generic [ref=f2e4]:
+        - link "Yawoto. Assistant juridique — Afrique de l'Ouest" [ref=f2e5] [cursor=pointer]:
+          - /url: /
+          - generic [ref=f2e11]:
+            - generic [ref=f2e12]: Yawoto.
+            - generic [ref=f2e13]: Assistant juridique — Afrique de l'Ouest
+        - navigation [ref=f2e14]:
+          - link "Assistant" [ref=f2e15] [cursor=pointer]:
+            - /url: /
+          - link "Rédaction" [ref=f2e18] [cursor=pointer]:
+            - /url: /redaction
+          - link "Tarifs" [ref=f2e23] [cursor=pointer]:
+            - /url: /tarifs
+          - link "Compte" [ref=f2e27] [cursor=pointer]:
+            - /url: /compte
+          - link "Admin" [ref=f2e31] [cursor=pointer]:
+            - /url: /admin
+      - button "Compte et connexion" [ref=f2e37] [cursor=pointer]
+    - main [ref=f2e41]:
+      - generic [ref=f2e42]:
+        - generic [ref=f2e43]:
+          - button "Aperçu" [ref=f2e44] [cursor=pointer]
+          - button "Documents" [ref=f2e50] [cursor=pointer]
+          - button "Utilisateurs" [active] [ref=f2e54] [cursor=pointer]
+          - button "Fournisseurs" [ref=f2e60] [cursor=pointer]
+        - generic [ref=f2e483]:
+          - generic [ref=f2e484]:
+            - heading "Comptes utilisateurs (0)" [level=2] [ref=f2e486]
+            - paragraph [ref=f2e489]: Aucun utilisateur enregistré.
+          - generic [ref=f2e490]:
+            - heading "Consommation par utilisateur (30 jours)" [level=2] [ref=f2e492]
+            - paragraph [ref=f2e495]: Aucune consommation enregistrée sur les 30 derniers jours.
+    - contentinfo [ref=f2e67]:
+      - paragraph [ref=f2e68]: Administration — les actions effectuées ici (ingestion, suppression, rôles) sont immédiates.
+  - alert [ref=f2e69]

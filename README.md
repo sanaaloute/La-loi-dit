@@ -82,15 +82,17 @@ The default configuration uses the deterministic `mock` LLM provider, an
 in-memory vector store, an in-process cache and SQLite — nothing external is
 required.
 
-Copy the development template and start the server:
+Start the server — the defaults use the deterministic `mock` LLM provider, an
+in-memory vector store, an in-process cache and SQLite, so nothing external is
+required:
 
 ```bash
-cp .env.dev.example .env.dev
 uvicorn backend.api.main:app --host 0.0.0.0 --port 8000
 ```
 
-`.env.dev` is loaded after `.env` and overrides production defaults while you
-are developing locally. It is gitignored and should never be committed.
+To override configuration locally, copy `.env.example` to `.env` and edit it.
+`.env` is the single configuration file; it is gitignored and should never be
+committed.
 
 ### 3. Full stack with Docker Compose on Ubuntu
 
@@ -288,19 +290,15 @@ Post-upgrade (agentic platform) documentation:
 ## Configuration
 
 Everything is configured via environment variables prefixed `LEGAL_AI_` (see
-`.env.example` for production/Docker and `.env.dev.example` for local
-development, plus [deployment docs](docs/deployment.md)).
+`.env.example` for the full, commented template, plus
+[deployment docs](docs/deployment.md)).
 
 | File | Purpose | Gitignored? |
 |---|---|---|
-| `.env` | Production values used by Docker Compose | yes |
-| `.env.dev` | Local development overrides (mock LLM, SQLite, localhost services) | yes |
-| `.env.example` | Production/Docker template | no |
-| `.env.dev.example` | Local development template | no |
+| `.env` | The single configuration file, loaded by `backend/core/config.py` | yes |
+| `.env.example` | Documented template covering every setting | no |
 
-`backend/core/config.py` loads `.env` first, then `.env.dev`, so local
-settings override production defaults when both files are present. Keep
-`.env.dev` empty/absent on production machines.
+`backend/core/config.py` loads `.env` only — there is no second override file.
 
 ## Development
 

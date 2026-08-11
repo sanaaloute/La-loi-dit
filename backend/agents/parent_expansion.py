@@ -71,6 +71,25 @@ async def parent_expansion_node(state: GraphState, ctx: AppContext) -> dict[str,
         if parent not in expanded:
             expanded.append(parent)
 
+    # Score propagation: expanded parents never went through vector search or
+    # reranking themselves, so their raw scores read 0.00 in the UI although
+    # they are displayed BECAUSE a child scored well.  Surface the best
+    # attached child's scores (never lowering the parent's own) and mark the
+    # expansion origin so the UI can badge these as context, not noise.
+    for parent in expanded:
+        if not parent.child_chunks:
+            continue
+        parent.retrieval_score = max(
+            [parent.retrieval_score] + [c.retrieval_score for c in parent.child_chunks]
+        )
+        parent.rerank_score = max(
+            [parent.rerank_score] + [c.rerank_score for c in parent.child_chunks]
+        )
+        parent.confidence = max(
+            [parent.confidence] + [c.confidence for c in parent.child_chunks]
+        )
+        parent.metadata = {**parent.metadata, "expansion": "parent"}
+
     return {
         "evidence": expanded,
         "trace": [

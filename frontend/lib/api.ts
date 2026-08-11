@@ -53,6 +53,8 @@ export interface EvidenceChunk {
   retrieval_score: number;
   rerank_score: number;
   metadata: Record<string, unknown>;
+  /** Child excerpts grouped under an expanded parent chunk (when present). */
+  child_chunks?: EvidenceChunk[];
 }
 
 export interface ConflictReport {
@@ -680,6 +682,236 @@ export async function exportDraft(
   };
   return format === "md" ? exportMarkdown(payload, token) : exportAnswer(format, payload, token);
 }
+
+// ---------------------------------------------------------------------------
+// Admin dashboard (backend/api/routers/admin.py — ADMIN role required)
+// ---------------------------------------------------------------------------
+
+/** Readiness probe: lives at the server ROOT ("/ready"), not under "/api/v1". */
+export interface ReadyResponse {
+  status: string; // "ready" | "degraded" | "not_ready"
+  checks: Record<string, unknown>;
+}
+
+export type AdminRole = "viewer" | "user" | "legal_expert" | "admin";
+
+export interface AdminUserEntry {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  tier: string;
+  created_at: string;
+  today_tokens_in: number;
+  today_tokens_out: number;
+  today_requests: number;
+}
+
+export interface AdminUsersResponse {
+  users: AdminUserEntry[];
+}
+
+export interface AdminUserPatch {
+  tier?: Tier;
+  role?: AdminRole;
+}
+
+export interface AdminUsageRow {
+  user_id: string;
+  email: string;
+  tokens_in: number;
+  tokens_out: number;
+  requests: number;
+}
+
+export interface AdminUsageResponse {
+  per_user: AdminUsageRow[];
+  totals: Record<string, number>;
+}
+
+export interface ProviderModelInfo {
+  id: string;
+  label: string;
+  tier_required: Tier; // lowest tier unlocking this model
+}
+
+export interface ProviderInfo {
+  provider: string;
+  configured: boolean;
+  api_base: string; // per-provider base URL
+  key_suffix: string | null; // "…" + last 4 chars, never the full key
+  model: string;
+  models: ProviderModelInfo[]; // this provider's catalog models
+}
+
+export interface ProvidersResponse {
+  providers: ProviderInfo[];
+  defaults: Record<string, string>; // tier -> default catalog model id
+  infra: Record<string, unknown>;
+}
+
+export interface FolderInfo {
+  name: string;
+  files: number;
+}
+
+export interface FoldersResponse {
+  folders: FolderInfo[];
+}
+
+export interface FolderCreateResponse {
+  name: string; // domain slug actually created
+  created: boolean;
+}
+
+export interface MetadataSuggestion {
+  document_name: string;
+  authority: string;
+  document_type: string;
+  law_number: string;
+  legal_domains: string[];
+  publication_date: string;
+  effective_date: string;
+  government_body: string;
+  url: string;
+}
+
+export interface MetadataSuggestionResponse {
+  suggestion: MetadataSuggestion;
+  available_domains: string[];
+}
+
+/** Editable ingestion metadata sent with the upload (empty fields omitted). */
+export type DocumentMetadata = Record<string, string | string[]>;
+
+export interface IngestionDocumentStatus {
+  document_id: string;
+  version: number;
+  content_hash: string;
+  article_count: number;
+}
+
+export interface IngestionStatusResponse {
+  documents: IngestionDocumentStatus[];
+  total_documents: number;
+  store_updated_at?: string | null;
+  failed_documents: Record<string, unknown>[];
+  note?: string;
+}
+
+export interface EvaluationLatestResponse {
+  path: string;
+  generated_at?: string | null;
+  dataset?: string | null;
+  total_cases?: number | null;
+  pass_rate?: number | null;
+  report: Record<string, unknown>;
+}
+
+export interface EndpointStats {
+  path: string;
+  requests: number;
+  errors: number;
+  avg_latency_ms: number;
+}
+
+export interface UserRequestStats {
+  user: string;
+  requests: number;
+}
+
+export interface RetrievalAnalyticsResponse {
+  total_requests: number;
+  by_path: EndpointStats[];
+  by_user: UserRequestStats[];
+  note?: string;
+}
+
+export interface DocumentIngestResult {
+  document_id: string;
+  document_name: string;
+  chunks_created: number;
+  version: number;
+  status: "indexed" | "failed" | "skipped_duplicate" | "deleted";
+  detail: string;
+}
+
+export async function ready(): Promise<ReadyResponse> {
+  // Root-level probe: apiBase() already points at the server root (either the
+  // direct API URL or the "/backend-api" rewrite, both without "/api/v1").
+  const res = await fetch(`${apiBase()}/ready`);
+  let body: unknown = null;
+  try {
+    body = await res.json();
+  } catch {
+    // not JSON
+  }
+  // /ready answers 200 with {status, checks} even when degraded (503 only in
+  // strict infra mode, with the same body), so accept any parseable payload.
+  if (body && typeof body === "object" && "checks" in body) {
+    return body as ReadyResponse;
+  }
+  throw new ApiError(`Sonde de disponibilité indisponible (${res.status})`, res.status);
+}
+
+async function adminRequest<T>(
+  path: string,
+  init?: { method?: string; json?: unknown; form?: FormData },
+): Promise<T> {
+  const headers: Record<string, string> = { ...authHeaders() };
+  let body: BodyInit | undefined;
+  if (init?.json !== undefined) {
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify(init.json);
+  } else if (init?.form) {
+    // Let the browser set the multipart boundary.
+    body = init.form;
+  }
+  const res = await fetch(apiUrl(`/admin${path}`), {
+    method: init?.method ?? "GET",
+    headers,
+    body,
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Requête admin échouée (${res.status})`, res.status);
+  }
+  return (await res.json()) as T;
+}
+
+export const adminApi = {
+  users: () => adminRequest<AdminUsersResponse>("/users"),
+  patchUser: (id: string, body: AdminUserPatch) =>
+    adminRequest<AdminUserEntry>(`/users/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      json: body,
+    }),
+  usage: (days = 30) => adminRequest<AdminUsageResponse>(`/usage?days=${days}`),
+  providers: () => adminRequest<ProvidersResponse>("/providers"),
+  folders: () => adminRequest<FoldersResponse>("/documents/folders"),
+  createFolder: (name: string) =>
+    adminRequest<FolderCreateResponse>("/documents/folders", { method: "POST", json: { name } }),
+  suggestMetadata: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return adminRequest<MetadataSuggestionResponse>("/documents/metadata-suggestion", {
+      method: "POST",
+      form,
+    });
+  },
+  uploadDocument: (file: File, folder: string, metadata: DocumentMetadata) => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("folder", folder);
+    form.append("metadata", Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : "");
+    return adminRequest<DocumentIngestResult>("/documents/upload", { method: "POST", form });
+  },
+  deleteDocument: (id: string) =>
+    adminRequest<DocumentIngestResult>(`/documents/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  ingestionStatus: () => adminRequest<IngestionStatusResponse>("/ingestion/status"),
+  retrievalAnalytics: () => adminRequest<RetrievalAnalyticsResponse>("/retrieval/analytics"),
+  evaluationLatest: () => adminRequest<EvaluationLatestResponse>("/evaluation/latest"),
+};
 
 export function downloadBlob(blob: Blob, filename: string) {
   const url = window.URL.createObjectURL(blob);

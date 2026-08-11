@@ -29,12 +29,16 @@ REFUSAL_REASON_NO_EVIDENCE = (
 )
 
 # "article 542" / "articles L123-4" mentions in the answer prose.
-_ARTICLE_REF = re.compile(r"\barticles?\s+([A-Za-z]?\d[\w.\-]*)", re.I)
+# Includes Unicode dashes (U+2010–U+2015): LLMs often emit the non-breaking
+# hyphen "853‑23", which must match the ASCII "853-23" in chunk metadata.
+_ARTICLE_REF = re.compile(r"\barticles?\s+([A-Za-z]?\d[\w.\-‐‑‒–—―]*)", re.I)
 
 
 def _normalize_article(ref: str) -> str:
     """Canonical form for comparing article numbers ("art. 542" -> "542")."""
     ref = re.sub(r"^(article|art)\.?\s*", "", ref.strip().lower())
+    for dash in "‐‑‒–—―":
+        ref = ref.replace(dash, "-")
     return ref.rstrip(".,;:)")
 
 

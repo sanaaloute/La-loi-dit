@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, FileText } from "lucide-react";
+import { ChevronDown, FileText, Layers } from "lucide-react";
 import type { EvidenceChunk } from "@/lib/api";
 
 interface EvidenceViewerProps {
@@ -36,11 +36,13 @@ function AuthorityBadge({ authority }: { authority: string }) {
   );
 }
 
-function Score({ label, value }: { label: string; value: number }) {
+function Score({ label, value, dash }: { label: string; value: number; dash?: boolean }) {
   return (
     <div className="flex flex-col">
       <span className="text-[10px] uppercase tracking-wide text-slate-500">{label}</span>
-      <span className="text-xs font-medium text-slate-200">{value.toFixed(2)}</span>
+      <span className={`text-xs font-medium ${dash ? "text-slate-500" : "text-slate-200"}`}>
+        {dash ? "—" : value.toFixed(2)}
+      </span>
     </div>
   );
 }
@@ -58,6 +60,12 @@ function MetaRow({ label, value }: { label: string; value?: string | number | nu
 function EvidenceCard({ chunk, index }: { chunk: EvidenceChunk; index: number }) {
   const [open, setOpen] = useState(false);
   const title = chunk.document_name || "Document inconnu";
+  // Backend stamps metadata.expansion = "parent" on chunks expanded to their
+  // parent context around a retrieved excerpt.
+  const expandedParent = chunk.metadata?.expansion === "parent";
+  // Defensive: a displayed chunk whose three scores are all 0 shows "—".
+  const allScoresZero =
+    chunk.confidence === 0 && chunk.retrieval_score === 0 && chunk.rerank_score === 0;
 
   return (
     <li className="rounded-xl border border-slate-700/40 bg-surface-elevated">
@@ -69,10 +77,19 @@ function EvidenceCard({ chunk, index }: { chunk: EvidenceChunk; index: number })
       >
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <FileText className="h-3.5 w-3.5 text-slate-500" />
+            <FileText className="h-3.5 w-3.5 shrink-0 text-slate-500" />
             <p className="truncate text-sm font-medium text-slate-200">
               {index + 1}. {title}
             </p>
+            {expandedParent && (
+              <span
+                className="inline-flex shrink-0 items-center gap-1 rounded-full border border-law-purple/40 bg-law-purple/10 px-2 py-0.5 text-[10px] font-medium text-law-purple"
+                title="Contexte élargi autour d'un extrait pertinent"
+              >
+                <Layers className="h-3 w-3" />
+                Contexte élargi
+              </span>
+            )}
           </div>
           {chunk.article && <p className="mt-0.5 pl-5 text-xs text-slate-400">Article {chunk.article}</p>}
         </div>
@@ -98,9 +115,9 @@ function EvidenceCard({ chunk, index }: { chunk: EvidenceChunk; index: number })
             <MetaRow label="Organe" value={chunk.government_body} />
             <MetaRow label="Type de source" value={chunk.source_kind} />
             <MetaRow label="Version" value={chunk.version} />
-            <Score label="Confiance" value={chunk.confidence} />
-            <Score label="Score recherche" value={chunk.retrieval_score} />
-            <Score label="Score reclassement" value={chunk.rerank_score} />
+            <Score label="Confiance" value={chunk.confidence} dash={allScoresZero} />
+            <Score label="Score recherche" value={chunk.retrieval_score} dash={allScoresZero} />
+            <Score label="Score reclassement" value={chunk.rerank_score} dash={allScoresZero} />
           </div>
           {chunk.url && (
             <a
@@ -118,20 +135,35 @@ function EvidenceCard({ chunk, index }: { chunk: EvidenceChunk; index: number })
   );
 }
 
+function hasNonZeroScore(chunk: EvidenceChunk): boolean {
+  return chunk.confidence !== 0 || chunk.retrieval_score !== 0 || chunk.rerank_score !== 0;
+}
+
+/**
+ * Pure-noise entries: all three scores at 0 AND no child chunk carries a
+ * non-zero score either. These are expanded parents the backend could not
+ * backfill with a best-child score — hiding them keeps the list meaningful.
+ */
+function isNoise(chunk: EvidenceChunk): boolean {
+  if (hasNonZeroScore(chunk)) return false;
+  return !(chunk.child_chunks ?? []).some(hasNonZeroScore);
+}
+
 export default function EvidenceViewer({ evidence }: EvidenceViewerProps) {
+  const visible = evidence.filter((chunk) => !isNoise(chunk));
   return (
     <div className="p-4">
       <h3 className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
         <span className="h-1.5 w-1.5 rounded-full bg-law-purple" />
-        Preuves ({evidence.length})
+        Preuves ({visible.length})
       </h3>
-      {evidence.length === 0 ? (
+      {visible.length === 0 ? (
         <div className="rounded-xl border border-slate-700/40 bg-slate-800/30 p-4 text-center">
           <p className="text-xs text-slate-400">Aucune preuve pour cette réponse.</p>
         </div>
       ) : (
         <ul className="space-y-2">
-          {evidence.map((chunk, i) => (
+          {visible.map((chunk, i) => (
             <EvidenceCard key={chunk.chunk_id || i} chunk={chunk} index={i} />
           ))}
         </ul>

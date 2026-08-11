@@ -1,0 +1,198 @@
+- generic [active] [ref=f2e1]:
+  - generic [ref=f2e2]:
+    - banner [ref=f2e3]:
+      - generic [ref=f2e4]:
+        - link "Yawoto. Assistant juridique — Afrique de l'Ouest" [ref=f2e5] [cursor=pointer]:
+          - /url: /
+          - generic [ref=f2e11]:
+            - generic [ref=f2e12]: Yawoto.
+            - generic [ref=f2e13]: Assistant juridique — Afrique de l'Ouest
+        - navigation [ref=f2e14]:
+          - link "Assistant" [ref=f2e15] [cursor=pointer]:
+            - /url: /
+          - link "Rédaction" [ref=f2e18] [cursor=pointer]:
+            - /url: /redaction
+          - link "Tarifs" [ref=f2e23] [cursor=pointer]:
+            - /url: /tarifs
+          - link "Compte" [ref=f2e27] [cursor=pointer]:
+            - /url: /compte
+          - link "Admin" [ref=f2e31] [cursor=pointer]:
+            - /url: /admin
+      - button "Compte et connexion" [ref=f2e37] [cursor=pointer]
+    - main [ref=f2e41]:
+      - generic [ref=f2e42]:
+        - generic [ref=f2e43]:
+          - button "Aperçu" [ref=f2e44] [cursor=pointer]
+          - button "Documents" [ref=f2e50] [cursor=pointer]
+          - button "Utilisateurs" [ref=f2e54] [cursor=pointer]
+          - button "Fournisseurs" [ref=f2e60] [cursor=pointer]
+        - generic [ref=f2e284]:
+          - generic [ref=f2e285]:
+            - heading "Téléverser un document" [level=2] [ref=f2e287]
+            - generic [ref=f2e289]:
+              - generic [ref=f2e290]:
+                - generic [ref=f2e291] [cursor=pointer]: Choisir un fichier
+                - generic [ref=f2e295]: code-de-la-route-test.txt
+              - generic [ref=f2e296]:
+                - generic [ref=f2e297]:
+                  - generic [ref=f2e298]: Dossier de destination
+                  - combobox "Dossier de destination" [ref=f2e299]:
+                    - option "Racine"
+                    - option "code_de_la_route (0 fichier)" [selected]
+                - generic [ref=f2e300]:
+                  - generic [ref=f2e301]:
+                    - generic [ref=f2e302]: Nouveau dossier
+                    - textbox "Nouveau dossier" [ref=f2e303]:
+                      - /placeholder: ex. droit-du-travail
+                  - button "Créer" [disabled] [ref=f2e304]
+              - generic [ref=f2e307]:
+                - button "Suggérer les métadonnées (LLM)" [ref=f2e308] [cursor=pointer]
+                - button "Ingérer" [ref=f2e312] [cursor=pointer]
+          - generic [ref=f2e407]:
+            - heading "Métadonnées du document" [level=2] [ref=f2e409]
+            - generic [ref=f2e411]:
+              - generic [ref=f2e412]:
+                - generic [ref=f2e413]: Nom du document
+                - textbox "Nom du document" [ref=f2e414]: Réglementation de la circulation routière du Burkina Faso (Décret 2024-0102)
+              - generic [ref=f2e415]:
+                - generic [ref=f2e416]: Autorité
+                - combobox "Autorité" [ref=f2e417]:
+                  - option "—"
+                  - option "Constitution"
+                  - option "Traité OHADA"
+                  - option "Loi" [selected]
+                  - option "Décret"
+                  - option "Arrêté"
+                  - option "Circulaire ministérielle"
+                  - option "Journal officiel"
+                  - option "Jurisprudence"
+                  - option "Communiqué officiel"
+                  - option "Inconnu"
+              - generic [ref=f2e418]:
+                - generic [ref=f2e419]: Type de document
+                - combobox "Type de document" [ref=f2e420]:
+                  - option "—"
+                  - option "Traité"
+                  - option "Code" [selected]
+                  - option "Ordonnance"
+                  - option "Décret"
+                  - option "Décision"
+                  - option "Jurisprudence"
+                  - option "Loi"
+                  - option "Autre"
+              - generic [ref=f2e421]:
+                - generic [ref=f2e422]: Numéro de loi
+                - textbox "Numéro de loi" [ref=f2e423]: 2024-0102
+              - generic [ref=f2e424]:
+                - generic [ref=f2e425]: Organisme
+                - textbox "Organisme" [ref=f2e426]: Ministère des Transports
+              - generic [ref=f2e427]:
+                - generic [ref=f2e428]: Date de publication
+                - textbox "Date de publication" [ref=f2e429]
+              - generic [ref=f2e430]:
+                - generic [ref=f2e431]: Date d'entrée en vigueur
+                - textbox "Date d'entrée en vigueur" [ref=f2e432]
+              - generic [ref=f2e433]:
+                - generic [ref=f2e434]: URL source
+                - textbox "URL source" [ref=f2e435]:
+                  - /placeholder: https://…
+              - generic [ref=f2e436]:
+                - generic [ref=f2e437]: Domaines juridiques
+                - generic [ref=f2e438]:
+                  - button "administrative_law" [ref=f2e439] [cursor=pointer]
+                  - button "civil_law" [ref=f2e440] [cursor=pointer]
+                  - button "commercial_law" [ref=f2e441] [cursor=pointer]
+                  - button "constitution" [ref=f2e442] [cursor=pointer]
+                  - button "criminal_law" [ref=f2e443] [cursor=pointer]
+                  - button "education_regulations" [ref=f2e444] [cursor=pointer]
+                  - button "elections" [ref=f2e445] [cursor=pointer]
+                  - button "environmental_law" [ref=f2e446] [cursor=pointer]
+                  - button "family_code" [ref=f2e447] [cursor=pointer]
+                  - button "government_procedures" [ref=f2e448] [cursor=pointer]
+                  - button "health_regulations" [ref=f2e449] [cursor=pointer]
+                  - button "immigration" [ref=f2e450] [cursor=pointer]
+                  - button "labor_code" [ref=f2e451] [cursor=pointer]
+                  - button "land_law" [ref=f2e452] [cursor=pointer]
+                  - button "ohada_law" [ref=f2e453] [cursor=pointer]
+                  - button "procurement_law" [ref=f2e454] [cursor=pointer]
+                  - button "public_service" [ref=f2e455] [cursor=pointer]
+                  - button "tax_law" [ref=f2e456] [cursor=pointer]
+                  - button "traffic_law" [pressed] [ref=f2e457] [cursor=pointer]
+          - generic [ref=f2e464]:
+            - heading "Résultat de l'ingestion" [level=2] [ref=f2e466]
+            - generic [ref=f2e468]:
+              - generic [ref=f2e469]: indexed
+              - generic [ref=f2e470]: Réglementation de la circulation routière du Burkina Faso (Décret 2024-0102) — 8 chunks créés, version 1
+            - paragraph [ref=f2e471]: "{\"article_diff\": {\"added_articles\": [\"1\", \"2\", \"3\", \"4\", \"5\", \"__no_article__\", \"section:Titre I\", \"section:Titre II\"], \"modified_articles\": [], \"deleted_articles\": []}, \"source\": {\"loader\": \"txt\", \"path\": \"/app/data/legal_docs/code_de_la_route/code-de-la-route-test.txt\"}}"
+          - generic [ref=f2e317]:
+            - generic [ref=f2e318]:
+              - heading "Documents ingérés (8)" [level=2] [ref=f2e472]
+              - generic [ref=f2e321]: Registre mis à jour le 11 août 2026, 19:03
+            - table [ref=f2e323]:
+              - rowgroup [ref=f2e324]:
+                - row [ref=f2e325]:
+                  - columnheader "Document" [ref=f2e326]
+                  - columnheader "Version" [ref=f2e327]
+                  - columnheader "Hachage" [ref=f2e328]
+                  - columnheader "Articles" [ref=f2e329]
+                  - columnheader [ref=f2e330]
+              - rowgroup [ref=f2e331]:
+                - row [ref=f2e332]:
+                  - cell "0634f3576572d435" [ref=f2e333]
+                  - cell "1" [ref=f2e334]
+                  - cell "366fb8736178…" [ref=f2e335]
+                  - cell "73" [ref=f2e336]
+                  - cell [ref=f2e337]:
+                    - button "Supprimer 0634f3576572d435" [ref=f2e338] [cursor=pointer]
+                - row [ref=f2e473]:
+                  - cell "2746026085a7532d" [ref=f2e474]
+                  - cell "1" [ref=f2e475]
+                  - cell "ee2b6433f9b6…" [ref=f2e476]
+                  - cell "8" [ref=f2e477]
+                  - cell [ref=f2e478]:
+                    - button "Supprimer 2746026085a7532d" [ref=f2e479] [cursor=pointer]
+                - row [ref=f2e342]:
+                  - cell "3fcb23ebe1762307" [ref=f2e343]
+                  - cell "1" [ref=f2e344]
+                  - cell "41c09e737859…" [ref=f2e345]
+                  - cell "461" [ref=f2e346]
+                  - cell [ref=f2e347]:
+                    - button "Supprimer 3fcb23ebe1762307" [ref=f2e348] [cursor=pointer]
+                - row [ref=f2e352]:
+                  - cell "5bb9684e8ecfd1ca" [ref=f2e353]
+                  - cell "1" [ref=f2e354]
+                  - cell "f4eed3e8f29f…" [ref=f2e355]
+                  - cell "194" [ref=f2e356]
+                  - cell [ref=f2e357]:
+                    - button "Supprimer 5bb9684e8ecfd1ca" [ref=f2e358] [cursor=pointer]
+                - row [ref=f2e362]:
+                  - cell "aa31ed17cd9ece9d" [ref=f2e363]
+                  - cell "1" [ref=f2e364]
+                  - cell "b0d1945dcd9e…" [ref=f2e365]
+                  - cell "198" [ref=f2e366]
+                  - cell [ref=f2e367]:
+                    - button "Supprimer aa31ed17cd9ece9d" [ref=f2e368] [cursor=pointer]
+                - row [ref=f2e372]:
+                  - cell "be2e5f6fc64ff43f" [ref=f2e373]
+                  - cell "1" [ref=f2e374]
+                  - cell "43aa1b948776…" [ref=f2e375]
+                  - cell "335" [ref=f2e376]
+                  - cell [ref=f2e377]:
+                    - button "Supprimer be2e5f6fc64ff43f" [ref=f2e378] [cursor=pointer]
+                - row [ref=f2e382]:
+                  - cell "c107df4001860f29" [ref=f2e383]
+                  - cell "1" [ref=f2e384]
+                  - cell "5fc9d62dd863…" [ref=f2e385]
+                  - cell "1 148" [ref=f2e386]
+                  - cell [ref=f2e387]:
+                    - button "Supprimer c107df4001860f29" [ref=f2e388] [cursor=pointer]
+                - row [ref=f2e392]:
+                  - cell "deb9cbecfde29428" [ref=f2e393]
+                  - cell "1" [ref=f2e394]
+                  - cell "0adef3bb0c68…" [ref=f2e395]
+                  - cell "246" [ref=f2e396]
+                  - cell [ref=f2e397]:
+                    - button "Supprimer deb9cbecfde29428" [ref=f2e398] [cursor=pointer]
+    - contentinfo [ref=f2e67]:
+      - paragraph [ref=f2e68]: Administration — les actions effectuées ici (ingestion, suppression, rôles) sont immédiates.
+  - alert [ref=f2e69]

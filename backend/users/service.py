@@ -251,6 +251,25 @@ class UserStore:
             row = (await session.execute(select(t).where(t.c.id == user_id))).first()
         return self._row_to_record(row) if row else None
 
+    async def list_users(self, limit: int = 500) -> list[UserRecord]:
+        """All accounts, newest first.
+
+        Degraded dev-user-only mode returns just the dev admin record so the
+        admin dashboard still shows the one usable account.
+        """
+        if not await self._ensure_db():
+            return [
+                UserRecord(id="admin", email="admin", name="admin", role=Role.ADMIN, tier="cabinet")
+            ]
+        from sqlalchemy import select
+
+        t = TABLES["users"]
+        async with self._session_factory() as session:
+            rows = (
+                await session.execute(select(t).order_by(t.c.created_at.desc()).limit(limit))
+            ).all()
+        return [self._row_to_record(row) for row in rows]
+
     async def get_workspace_name(self, workspace_id: str) -> str:
         """Workspace display name ("" when missing or DB down)."""
         if not workspace_id or not await self._ensure_db():
@@ -272,6 +291,22 @@ class UserStore:
         async with self._session_factory() as session:
             await session.execute(update(t).where(t.c.id == user_id).values(tier=tier))
             await session.commit()
+
+    async def set_role(self, user_id: str, role: str) -> bool:
+        """Update a user's role; False on unknown role, missing user or DB down."""
+        try:
+            role_value = Role(role).value
+        except ValueError:
+            return False
+        if not await self._ensure_db():
+            return False
+        from sqlalchemy import update
+
+        t = TABLES["users"]
+        async with self._session_factory() as session:
+            result = await session.execute(update(t).where(t.c.id == user_id).values(role=role_value))
+            await session.commit()
+        return bool(result.rowcount)
 
     async def set_billing_state(
         self,
@@ -393,6 +428,51 @@ class UserStore:
             return []
         return [
             {
+                "day": r.day.isoformat() if r.day else "",
+                "tokens_in": r.tokens_in or 0,
+                "tokens_out": r.tokens_out or 0,
+                "requests": r.requests or 0,
+            }
+            for r in rows
+        ]
+
+    async def list_usage(self, days: int = 30) -> list[dict[str, Any]]:
+        """Usage rows joined with user emails over the last `days` days.
+
+        Most recent first; ``[]`` in degraded dev-user-only mode.
+        """
+        if not await self._ensure_db():
+            return []
+        from datetime import date, timedelta
+
+        from sqlalchemy import select
+
+        usage_t = TABLES["usage"]
+        users_t = TABLES["users"]
+        since = date.today() - timedelta(days=max(0, days - 1))
+        stmt = (
+            select(
+                usage_t.c.user_id,
+                users_t.c.email,
+                usage_t.c.day,
+                usage_t.c.tokens_in,
+                usage_t.c.tokens_out,
+                usage_t.c.requests,
+            )
+            .select_from(usage_t.join(users_t, usage_t.c.user_id == users_t.c.id))
+            .where(usage_t.c.day >= since)
+            .order_by(usage_t.c.day.desc())
+        )
+        try:
+            async with self._session_factory() as session:
+                rows = (await session.execute(stmt)).all()
+        except Exception:
+            logger.warning("list_usage failed", exc_info=True)
+            return []
+        return [
+            {
+                "user_id": r.user_id,
+                "email": r.email or "",
                 "day": r.day.isoformat() if r.day else "",
                 "tokens_in": r.tokens_in or 0,
                 "tokens_out": r.tokens_out or 0,

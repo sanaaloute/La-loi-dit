@@ -1,0 +1,73 @@
+sample: 84 parent chunks from 7 documents
+
+=== nemotron(openrouter) | droits du salarié licencié : préavis, indemni
+  relevant in top-10: 2/10 | separation: +0.2310
+  [R] 0.3674  Code du travail du Burkina Faso (Loi 028-2008/AN)
+  [R] 0.2331  Code du travail du Burkina Faso (Loi 028-2008/AN)
+  [ ] 0.2160  Code du travail du Burkina Faso (Loi 028-2008/AN)
+  [ ] 0.2049  Code du travail du Burkina Faso (Loi 028-2008/AN)
+  [ ] 0.1893  Charte de la Transition du Burkina Faso (2015)
+  [ ] 0.1655  Code du travail du Burkina Faso (Loi 028-2008/AN)
+
+=== nemotron(openrouter) | création SARL OHADA capital associés
+  relevant in top-10: 0/10 | separation: -0.0921
+  [ ] 0.3030  Acte uniforme OHADA relatif au droit des sociétés commerci
+  [ ] 0.2930  Traité OHADA
+  [ ] 0.2922  Acte uniforme OHADA relatif au droit des sociétés commerci
+  [ ] 0.2775  Acte uniforme OHADA relatif au droit commercial général (2
+  [ ] 0.2733  Acte uniforme OHADA relatif au droit commercial général (2
+  [ ] 0.2645  Acte uniforme OHADA relatif au droit commercial général (2
+
+=== nomic(local) | droits du salarié licencié : préavis, indemni
+  relevant in top-10: 1/10 | separation: +0.0503
+  [ ] 0.7308  Charte de la Transition du Burkina Faso (2015)
+  [R] 0.7285  Code du travail du Burkina Faso (Loi 028-2008/AN)
+  [ ] 0.7251  Charte de la Transition du Burkina Faso (2015)
+  [ ] 0.7227  Constitution du Burkina Faso (IVème République, 1991)
+  [ ] 0.7179  Acte uniforme OHADA relatif au droit des sociétés commerci
+  [ ] 0.7165  Acte uniforme OHADA relatif au droit commercial général (2
+
+=== nomic(local) | création SARL OHADA capital associés
+  relevant in top-10: 0/10 | separation: -0.4481
+  [ ] 0.5637  Acte uniforme OHADA relatif au droit commercial général (2
+  [ ] 0.5318  Acte uniforme OHADA relatif au droit des sociétés commerci
+  [ ] 0.5293  Acte uniforme OHADA relatif au droit commercial général (2
+  [ ] 0.5286  Traité OHADA
+  [ ] 0.5244  Acte uniforme OHADA relatif au droit commercial général (2
+  [ ] 0.5193  Traité OHADA
+
+=== bge-m3(local) | droits du salarié licencié : préavis, indemni
+  relevant in top-10: 2/10 | separation: +0.1343
+  [R] 0.5741  Code du travail du Burkina Faso (Loi 028-2008/AN)
+  [ ] 0.5461  Charte de la Transition du Burkina Faso (2015)
+  [ ] 0.5145  Code du travail du Burkina Faso (Loi 028-2008/AN)
+  [ ] 0.4933  Code du travail du Burkina Faso (Loi 028-2008/AN)
+  [ ] 0.4896  Acte uniforme OHADA relatif au droit commercial général (2
+  [R] 0.4888  Code du travail du Burkina Faso (Loi 028-2008/AN)
+
+=== bge-m3(local) | création SARL OHADA capital associés
+  relevant in top-10: 0/10 | separation: -0.2656
+  [ ] 0.4601  Traité OHADA
+  [ ] 0.4157  Acte uniforme OHADA relatif au droit commercial général (2
+  [ ] 0.4024  Traité OHADA
+  [ ] 0.3867  Traité OHADA
+  [ ] 0.3667  Code du travail du Burkina Faso (Loi 028-2008/AN)
+  [ ] 0.3647  Acte uniforme OHADA relatif au droit des sociétés commerci
+
+=== qwen3-emb-8b(local) | droits du salarié licencié : préavis, indemni
+  relevant in top-10: 2/10 | separation: +0.2469
+  [R] 0.6853  Code du travail du Burkina Faso (Loi 028-2008/AN)
+  [ ] 0.6231  Constitution du Burkina Faso (IVème République, 1991)
+  [R] 0.6085  Code du travail du Burkina Faso (Loi 028-2008/AN)
+  [ ] 0.5763  Code du travail du Burkina Faso (Loi 028-2008/AN)
+  [ ] 0.5683  Code du travail du Burkina Faso (Loi 028-2008/AN)
+  [ ] 0.5460  Code du travail du Burkina Faso (Loi 028-2008/AN)
+
+=== qwen3-emb-8b(local) | création SARL OHADA capital associés
+  relevant in top-10: 0/10 | separation: -0.4294
+  [ ] 0.6827  Acte uniforme OHADA relatif au droit des sociétés commerci
+  [ ] 0.6627  Acte uniforme OHADA relatif au droit commercial général (2
+  [ ] 0.6381  Acte uniforme OHADA relatif au droit des sociétés commerci
+  [ ] 0.6264  Acte uniforme OHADA relatif au droit des sociétés commerci
+  [ ] 0.5916  Traité OHADA
+  [ ] 0.5889  Acte uniforme OHADA relatif au droit des sociétés commerci

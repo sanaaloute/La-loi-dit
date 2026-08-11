@@ -238,9 +238,12 @@ class ClaimVerificationAgent(Agent):
 
         claims = (
             verify_claims(text, evidence, settings=ctx.settings if ctx is not None else None)
-            if text.strip()
+            if text.strip() and evidence
             else []
         )
+        # No evidence means the answer took the insufficient-evidence path,
+        # which already declares that nothing could be verified — extracting
+        # "claims" from that message would only produce noise warnings.
         direct = sum(1 for c in claims if c.support_level is SupportLevel.DIRECT)
         indirect = sum(1 for c in claims if c.support_level is SupportLevel.INDIRECT)
         insufficient = sum(1 for c in claims if c.support_level is SupportLevel.INSUFFICIENT)

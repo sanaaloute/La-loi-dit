@@ -51,6 +51,8 @@ def _provider_api_key(provider: str, settings: Settings) -> str:
         return settings.openrouter_api_key or settings.llm_api_key
     if provider == "tokenfree":
         return settings.tokenfree_api_key or settings.llm_api_key
+    if provider == "ollama":
+        return settings.ollama_api_key or settings.llm_api_key
     return settings.llm_api_key
 
 

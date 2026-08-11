@@ -3,9 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FilePenLine, Gauge, Menu, MessageSquare, Scale, Settings, Tag } from "lucide-react";
+import { FilePenLine, Gauge, Menu, MessageSquare, Scale, Settings, ShieldCheck, Tag } from "lucide-react";
 import SettingsPopover from "@/components/SettingsPopover";
-import { getToken } from "@/lib/api";
+import { getToken, me } from "@/lib/api";
 
 interface AppHeaderProps {
   /** Controlled token state; when omitted the header manages it internally. */
@@ -24,10 +24,13 @@ const NAV_LINKS = [
   { href: "/compte", label: "Compte", icon: Gauge },
 ];
 
+const ADMIN_LINK = { href: "/admin", label: "Admin", icon: ShieldCheck };
+
 export default function AppHeader({ token: tokenProp, onTokenChange, leftSlot, children }: AppHeaderProps) {
   const [internalToken, setInternalToken] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const pathname = usePathname();
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -53,6 +56,27 @@ export default function AppHeader({ token: tokenProp, onTokenChange, leftSlot, c
   const token = tokenProp !== undefined ? tokenProp : internalToken;
   const handleTokenChange = onTokenChange ?? setInternalToken;
 
+  // The "Admin" entry is only shown to logged-in administrators.
+  useEffect(() => {
+    if (!token) {
+      setIsAdmin(false);
+      return;
+    }
+    let cancelled = false;
+    me(token)
+      .then((p) => {
+        if (!cancelled) setIsAdmin(p.role === "admin");
+      })
+      .catch(() => {
+        if (!cancelled) setIsAdmin(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  const navLinks = isAdmin ? [...NAV_LINKS, ADMIN_LINK] : NAV_LINKS;
+
   return (
     <header className="glass z-40 flex items-center justify-between gap-2 px-4 py-3 sm:px-6">
       <div className="flex min-w-0 items-center gap-3">
@@ -71,7 +95,7 @@ export default function AppHeader({ token: tokenProp, onTokenChange, leftSlot, c
           </div>
         </Link>
         <nav className="ml-2 hidden items-center gap-1 md:flex">
-          {NAV_LINKS.map((link) => {
+          {navLinks.map((link) => {
             const active = pathname === link.href;
             return (
               <Link
@@ -105,7 +129,7 @@ export default function AppHeader({ token: tokenProp, onTokenChange, leftSlot, c
           </button>
           {menuOpen && (
             <div className="absolute right-0 top-full z-50 mt-2 w-48 rounded-xl border border-slate-600/40 bg-[#0f172a]/95 p-1.5 shadow-2xl backdrop-blur-xl">
-              {NAV_LINKS.map((link) => {
+              {navLinks.map((link) => {
                 const active = pathname === link.href;
                 return (
                   <Link

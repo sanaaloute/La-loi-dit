@@ -65,6 +65,14 @@ class VectorWorker(BaseWorker):
         results = await self.ctx.vector_store.search(
             vector, top_k=top_k, filters=filters or None
         )
+        # Domain fallback: a native legal_domains filter that empties the
+        # candidate set would hide on-topic documents the tagger missed —
+        # retry without it before the role fallback.
+        if not results and filters.get("legal_domains"):
+            filters.pop("legal_domains", None)
+            results = await self.ctx.vector_store.search(
+                vector, top_k=top_k, filters=filters or None
+            )
         # Fallback: if no child chunks exist (legacy / test data), search without
         # the role filter rather than returning empty results.
         if not results and filters.get("role") == "child":

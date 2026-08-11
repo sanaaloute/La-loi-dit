@@ -96,6 +96,20 @@ async def test_unverified_article_citation_flagged(settings):
     assert not result.refused  # soft check: never blocking
 
 
+async def test_unicode_hyphen_article_citation_not_flagged(settings):
+    """A non-breaking hyphen (U+2011) must match the ASCII '-' metadata."""
+    from backend.guardrails.output_guard import check_output
+
+    evidence = _evidence_with_article("853-23")
+    answer = FinalAnswer(
+        answer="L'article 853‑23 précise le régime applicable [1].",
+        confidence=0.9,
+        evidence=evidence,
+    )
+    result = await check_output(answer, evidence, settings)
+    assert not any("citation d'article non vérifiée" in w for w in result.warnings)
+
+
 async def test_article_citation_present_in_metadata_not_flagged(settings):
     from backend.guardrails.output_guard import check_output
 

@@ -46,3 +46,34 @@ async def test_parent_child_chunking_sets_parent_chunk_id():
     chunks = await _maybe_await(parent_child_chunk(doc, document_id="ct-test"))
     children = [c for c in chunks if c.parent_chunk_id]
     assert children, "expected at least one child chunk with parent_chunk_id set"
+
+
+_LONG_ARTICLE_TEXT = (
+    "Article 1\n"
+    + "\n".join(f"Alinéa {i} : " + "disposition légale " * 10 for i in range(1, 9))
+    + "\n\nArticle 2\nTexte court."
+)
+
+
+async def test_legal_children_split_on_alinea_boundaries():
+    from backend.ingestion.chunking import legal_parent_child_chunk
+
+    doc = _document(_LONG_ARTICLE_TEXT, name="Code pénal")
+    chunks = await _maybe_await(legal_parent_child_chunk(doc, document_id="cp-test"))
+    children = [c for c in chunks if c.parent_chunk_id and c.article == "1"]
+    # article 1 is longer than the default child size: it must produce several
+    # children, each made of whole alinéas (never a mid-line cut)
+    assert len(children) > 1
+    for child in children:
+        for line in child.content.splitlines():
+            assert line.startswith(("Article 1", "Alinéa")), f"mid-alinéa cut: {line!r}"
+
+
+async def test_legal_short_article_stays_a_single_child():
+    from backend.ingestion.chunking import legal_parent_child_chunk
+
+    doc = _document(_LONG_ARTICLE_TEXT, name="Code pénal")
+    chunks = await _maybe_await(legal_parent_child_chunk(doc, document_id="cp-test"))
+    children = [c for c in chunks if c.parent_chunk_id and c.article == "2"]
+    assert len(children) == 1
+    assert children[0].content == "Article 2\nTexte court."

@@ -68,6 +68,28 @@ async def test_expansion_keeps_first_matching_child_retrieval_text(ctx):
     assert {c.chunk_id for c in parent.child_chunks} == {"child-a", "child-b"}
 
 
+async def test_expanded_parent_inherits_best_child_scores(ctx):
+    parent = EvidenceChunk(chunk_id="parent-3", document_id="doc-1", content="Article complet.")
+    weak = EvidenceChunk(
+        chunk_id="child-weak", document_id="doc-1", content="Passage faible.",
+        parent_chunk_id="parent-3", retrieval_score=0.4, rerank_score=0.3,
+    )
+    strong = EvidenceChunk(
+        chunk_id="child-strong", document_id="doc-1", content="Passage fort.",
+        parent_chunk_id="parent-3", retrieval_score=0.9, rerank_score=0.8,
+    )
+    await _upsert(ctx, [parent, weak, strong])
+
+    state = {"evidence": [weak, strong], "trace": [], "errors": []}
+    out = await parent_expansion_node(state, ctx)
+
+    assert out["evidence"] == [parent]
+    # The parent displays the best attached child's scores, not 0.00.
+    assert parent.retrieval_score == 0.9
+    assert parent.rerank_score == 0.8
+    assert parent.metadata["expansion"] == "parent"
+
+
 async def test_chunks_without_parent_keep_dual_text_none(ctx):
     standalone = EvidenceChunk(chunk_id="solo-1", document_id="doc-2", content="Texte autonome.")
     await _upsert(ctx, [standalone])

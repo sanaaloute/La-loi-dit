@@ -32,9 +32,14 @@ KNOWN_INFRA_COMPONENTS = frozenset(
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="LEGAL_AI_",
+        # ``.env.dev`` is loaded after ``.env`` so local overrides (Milvus Lite
+        # URI, ./data dir, dev LLM) win over the docker/production defaults.
         env_file=[".env", ".env.dev"],
         env_file_encoding="utf-8",
         extra="ignore",
+        # Settings fields prefixed ``model_`` (e.g. ``model_role_routing_enabled``)
+        # would otherwise trip pydantic's protected-namespace warning.
+        protected_namespaces=(),
     )
 
     # --- application ---
@@ -61,6 +66,9 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 60.0
     openrouter_api_key: str = ""  # falls back to llm_api_key when empty
     tokenfree_api_key: str = ""  # falls back to llm_api_key when empty
+    # Dedicated Ollama Cloud key; falls back to llm_api_key (documented for
+    # single-key setups where the main key IS the ollama.com key).
+    ollama_api_key: str = ""
     # Comma-separated providers tried (in order) when the primary LLM fails or
     # returns an empty completion. Providers without a configured API key are
     # skipped silently, so the chain is inert in key-less/offline setups.
@@ -161,6 +169,10 @@ class Settings(BaseSettings):
     retrieval_similarity_floor: float = 0.45  # strong semantic match floor
     retrieval_weak_similarity_floor: float = 0.25
     retrieval_min_shared_tokens: int = 2
+    # Domain filter (spec §18): when the query clearly maps to legal domains
+    # (same taxonomy as ingestion's infer_legal_domains), off-domain chunks are
+    # dropped before ranking; untagged chunks and the empty-match fallback are kept.
+    retrieval_domain_filter_enabled: bool = True
     retrieval_cache_namespace: str = "retrieval:"
     dedup_jaccard_threshold: float = 0.9  # near-duplicate detection
     rerank_similarity_weight: float = 0.75
@@ -183,7 +195,7 @@ class Settings(BaseSettings):
     rerank_llm_blend_weight: float = 0.5  # weight of the LLM rescore in the final rerank blend
     reranker_max_retries: int = 1  # extra attempts after the first API rerank failure
     graph_expansion_score: float = 0.01  # retrieval score stamped on graph-expansion candidates
-    graph_expansion_sources: int = 3  # top-ranked chunks whose graph edges are followed
+    graph_expansion_sources: int = 8  # top-ranked chunks whose graph edges are followed
     graph_expansion_limit: int = 8  # hard cap on candidates appended by graph expansion
     temporal_score_unknown: float = 0.3  # "current" intent score when status/dates are unknown
     temporal_score_repealed_before_date: float = 0.1  # "historical" score when repealed before the scenario date
@@ -223,6 +235,9 @@ class Settings(BaseSettings):
     currency_tool_timeout_seconds: float = 5.0
 
     # --- chunking / ingestion ---
+    # Legal docs use boundary-based parents (whole articles) with alinéa-based
+    # children; ``chunk_parent_size`` only applies to the unstructured
+    # ``parent_child`` fallback, and ``chunk_child_size`` caps child length.
     chunk_parent_size: int = 2000
     chunk_child_size: int = 500
     chunk_overlap: int = 100
@@ -232,6 +247,10 @@ class Settings(BaseSettings):
     ingestion_html_timeout_seconds: float = 30.0
     ingestion_freshness_timeout_seconds: float = 20.0
     pdf_parser_max_pages: int = 50
+    # Last-resort LLM classification at ingest: one completion, only when the
+    # heuristics found neither legal domains nor authority (never runs on the
+    # happy path for known documents, never with the mock provider).
+    ingestion_llm_classification_enabled: bool = True
     # Persist the relational legal knowledge graph (backend/knowledge) at ingest
     # and let the graph retrieval worker use it; failures never block either path.
     legal_graph_enabled: bool = True
@@ -277,6 +296,10 @@ class Settings(BaseSettings):
     # Standalone {filename: display title} JSON; overrides the document_titles
     # section of the legal-sources file when set.
     document_titles_path: Optional[str] = None
+    # Domain-keyword taxonomy JSON for ingestion classification
+    # ({"version": 1, "domains": {slug: [unaccented stems]}}; default
+    # data/legal_domains.json; falls back to the embedded map when corrupt).
+    legal_domains_path: Optional[str] = None
     # JSON with optional authority_weights / official_domains / legal_domains
     # keys, merged onto the backend.core.constants defaults (see load_* there).
     authority_config_path: Optional[str] = None
