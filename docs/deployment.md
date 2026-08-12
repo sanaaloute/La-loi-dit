@@ -7,9 +7,9 @@
 
 | Service | Image | Port | Role |
 |---|---|---|---|
-| api | `docker/backend.Dockerfile` | 8000 | FastAPI app (uvicorn) |
+| api | `docker/backend.Dockerfile` | 8000 (localhost only) | FastAPI app (uvicorn) |
 | celery-worker | same image | — | background ingestion/batch jobs |
-| nginx | nginx:1.27-alpine | 80/443 | reverse proxy, rate limit, TLS termination |
+| frontend | `frontend/Dockerfile` | 3000 (localhost only) | Next.js UI — proxy from your external nginx |
 | postgres | postgres:16-alpine | 5432 | system of record |
 | redis | redis:7-alpine | 6379 | cache + Celery broker |
 | etcd, minio, milvus | milvusdb/milvus:v2.4.15 stack | 19530 | vector store |
@@ -35,6 +35,30 @@ visible inside the containers.
 Set `LEGAL_AI_INGEST_ON_STARTUP=true` to have the API index
 `data/legal_docs` in the background on every boot (idempotent, lock-guarded
 against multi-worker double runs).
+
+## Host nginx (external reverse proxy)
+
+The compose stack does **not** include an nginx container. The host's nginx is
+managed by:
+
+- `docker/host-nginx/yawoto.neobytech.net.conf` — the vhost template.
+- `scripts/install-nginx-config.sh` — installs the template and reloads nginx.
+
+Both `scripts/deploy.sh` and `scripts/update.sh` call the install script
+automatically when a host nginx binary is available. The default config assumes
+Let's Encrypt certificates at:
+
+```
+/etc/letsencrypt/live/yawoto.neobytech.net/fullchain.pem
+/etc/letsencrypt/live/yawoto.neobytech.net/privkey.pem
+```
+
+Obtain certificates first (e.g. `certbot --nginx`), or override the paths:
+
+```bash
+sudo scripts/install-nginx-config.sh yawoto.neobytech.net \
+  /path/to/fullchain.pem /path/to/privkey.pem
+```
 
 ## Environment variables
 
@@ -137,9 +161,12 @@ what strict mode verifies at boot and via `/ready`.
 1. **Secrets** — set strong `LEGAL_AI_SECRET_KEY`, Postgres credentials,
    Grafana admin password, Langfuse `NEXTAUTH_SECRET`/`SALT`. Never commit
    `.env` (it is gitignored).
-2. **TLS** — terminate at Nginx: drop certs into `docker/nginx/certs/`,
-   uncomment the TLS block in `docker/nginx/nginx.conf` and the cert volume
-   in `docker-compose.yml`, redirect :80 → :443.
+2. **TLS / reverse proxy** — the compose stack no longer ships its own nginx.
+   Use the nginx already installed on the host. A minimal vhost for
+   `yawoto.neobytech.net` is shown in the `.env.example` comments. Put TLS
+   certificates in the host's normal cert location (e.g. Let's Encrypt) and
+   proxy `https://yawoto.neobytech.net` to `http://127.0.0.1:3000` (the
+   frontend container). Redirect :80 → :443 on the host.
 3. **Backups** — schedule `pg_dump` of `legal_ai` and snapshots of the
    `milvus-data`, `minio-data` and `etcd-data` volumes (see
    [operations.md](operations.md)).
@@ -153,7 +180,7 @@ what strict mode verifies at boot and via `/ready`.
    your collector; create a Langfuse project and set its keys; import/alert
    on the Grafana dashboards.
 7. **Auth hardening** — create the first `admin` user, then disable public
-   registration; enforce rate limits at Nginx (already configured at
-   10 r/s per IP with burst 20).
+   registration; enforce rate limits at your host Nginx (10 r/s per IP with
+   burst 20 is a sensible starting point).
 8. **Image pinning** — the compose file pins minor versions; review and pin
    digests for regulated environments.
