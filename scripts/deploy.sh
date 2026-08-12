@@ -15,13 +15,16 @@ if [[ "${1:-}" != "-y" && "${1:-}" != "--yes" ]]; then
     [[ "$answer" =~ ^[yY]$ ]] || { echo "aborted"; exit 1; }
 fi
 
-echo "== 1/4  stopping and wiping containers + volumes =="
+echo "== 1/5  stopping and wiping containers + volumes =="
 docker compose down -v --remove-orphans
 
-echo "== 2/4  rebuilding images (no cache) =="
+echo "== 2/5  rebuilding images (no cache) =="
 docker compose build --no-cache
 
-echo "== 3/4  starting the stack =="
+echo "== 3/5  initializing data directory permissions =="
+./scripts/init-data-dir.sh
+
+echo "== 4/5  starting the stack =="
 docker compose up -d
 
 echo "== waiting for the API to be healthy =="
@@ -36,7 +39,7 @@ for i in $(seq 1 72); do
     sleep 5
 done
 
-echo "== 4/4  indexing documents (data/legal_docs) =="
+echo "== 5/5  indexing documents (data/legal_docs) =="
 docker compose exec api python -m backend.ingestion.pipeline /app/data/legal_docs
 
 echo "== updating host nginx config =="

@@ -435,10 +435,29 @@ _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def _legal_docs_dir(request: Request) -> Path:
-    """``<data_dir>/legal_docs``, created on demand."""
+    """``<data_dir>/legal_docs``, created on demand.
+
+    Raises a clear HTTP 500 when the directory cannot be created or read so
+    that permission/volume problems are visible in the admin UI.
+    """
     ctx = get_ctx(request)
-    root = ctx.settings.ensure_data_dir() / "legal_docs"
-    root.mkdir(parents=True, exist_ok=True)
+    data_dir = ctx.settings.ensure_data_dir()
+    root = data_dir / "legal_docs"
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        logger.error(
+            "cannot create legal_docs directory",
+            extra={"data_dir": str(data_dir), "legal_docs": str(root), "error": str(exc)},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"cannot create legal_docs directory: {exc}",
+        ) from exc
+    if not root.is_dir():
+        detail = f"legal_docs path is not a directory: {root}"
+        logger.error(detail, extra={"data_dir": str(data_dir)})
+        raise HTTPException(status_code=500, detail=detail)
     return root
 
 
@@ -460,18 +479,32 @@ async def list_folders(request: Request) -> FoldersResponse:
     from backend.ingestion.pipeline import SUPPORTED_EXTENSIONS
 
     root = _legal_docs_dir(request)
-    folders = [
-        FolderInfo(
-            name=entry.name,
-            files=sum(
+    try:
+        entries = sorted(root.iterdir())
+    except OSError as exc:
+        logger.error(
+            "cannot read legal_docs directory",
+            extra={"legal_docs": str(root), "error": str(exc)},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"cannot read legal_docs directory: {exc}",
+        ) from exc
+
+    folders: list[FolderInfo] = []
+    for entry in entries:
+        if not entry.is_dir():
+            continue
+        try:
+            file_count = sum(
                 1
                 for p in entry.iterdir()
                 if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
-            ),
-        )
-        for entry in sorted(root.iterdir())
-        if entry.is_dir()
-    ]
+            )
+        except OSError:
+            # A single unreadable subfolder should not break the whole listing.
+            file_count = 0
+        folders.append(FolderInfo(name=entry.name, files=file_count))
     return FoldersResponse(folders=folders)
 
 

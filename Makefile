@@ -17,6 +17,7 @@ lint:
 	python -m compileall backend -q
 
 docker-up:
+	./scripts/init-data-dir.sh
 	docker compose up -d --build
 
 docker-down:
