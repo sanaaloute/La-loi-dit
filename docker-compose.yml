@@ -51,7 +51,7 @@ services:
       redis:
         condition: service_healthy
       milvus:
-        condition: service_started
+        condition: service_healthy
       temporal:
         condition: service_started
       ollama-relay:

@@ -1,0 +1,972 @@
+{
+ "version": 1,
+ "terms": [
+  {
+   "canonical": "licenciement",
+   "synonyms": [
+    "licencié",
+    "licencier",
+    "renvoi",
+    "dismissal"
+   ],
+   "related_terms": [
+    "rupture du contrat de travail",
+    "résiliation du contrat de travail",
+    "indemnité de licenciement",
+    "préavis"
+   ],
+   "broader_terms": [
+    "cessation du contrat de travail"
+   ],
+   "narrower_terms": [
+    "licenciement abusif",
+    "licenciement économique",
+    "licenciement pour faute"
+   ]
+  },
+  {
+   "canonical": "préavis",
+   "synonyms": [
+    "délai de prévenance",
+    "notice period"
+   ],
+   "related_terms": [
+    "indemnité compensatrice de préavis",
+    "licenciement",
+    "démission"
+   ],
+   "broader_terms": [
+    "rupture du contrat de travail"
+   ],
+   "narrower_terms": [
+    "préavis de licenciement",
+    "préavis de démission"
+   ]
+  },
+  {
+   "canonical": "indemnité de licenciement",
+   "synonyms": [
+    "severance pay"
+   ],
+   "related_terms": [
+    "indemnité compensatrice de préavis",
+    "dommages et intérêts",
+    "licenciement"
+   ],
+   "broader_terms": [
+    "indemnités de rupture"
+   ],
+   "narrower_terms": [
+    "indemnité de licenciement économique"
+   ]
+  },
+  {
+   "canonical": "licenciement abusif",
+   "synonyms": [
+    "licenciement sans cause réelle et sérieuse",
+    "unfair dismissal"
+   ],
+   "related_terms": [
+    "dommages et intérêts",
+    "réintégration",
+    "licenciement"
+   ],
+   "broader_terms": [
+    "licenciement"
+   ],
+   "narrower_terms": [
+    "licenciement nul"
+   ]
+  },
+  {
+   "canonical": "licenciement économique",
+   "synonyms": [
+    "licenciement pour motif économique",
+    "redundancy"
+   ],
+   "related_terms": [
+    "reclassement",
+    "indemnité de licenciement"
+   ],
+   "broader_terms": [
+    "licenciement"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "contrat de travail",
+   "synonyms": [
+    "employment contract",
+    "work contract"
+   ],
+   "related_terms": [
+    "salarié",
+    "employeur",
+    "rémunération"
+   ],
+   "broader_terms": [
+    "contrat"
+   ],
+   "narrower_terms": [
+    "contrat à durée indéterminée",
+    "CDI",
+    "contrat à durée déterminée",
+    "CDD",
+    "contrat d'apprentissage"
+   ]
+  },
+  {
+   "canonical": "faute lourde",
+   "synonyms": [
+    "gross misconduct"
+   ],
+   "related_terms": [
+    "faute grave",
+    "licenciement disciplinaire",
+    "faute simple"
+   ],
+   "broader_terms": [
+    "faute professionnelle"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "faute simple",
+   "synonyms": [
+    "faute légère",
+    "minor misconduct"
+   ],
+   "related_terms": [
+    "faute grave",
+    "faute lourde",
+    "sanction disciplinaire"
+   ],
+   "broader_terms": [
+    "faute professionnelle"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "démission",
+   "synonyms": [
+    "démissionner",
+    "resignation"
+   ],
+   "related_terms": [
+    "rupture du contrat de travail",
+    "préavis"
+   ],
+   "broader_terms": [
+    "cessation du contrat de travail"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "salaire",
+   "synonyms": [
+    "rémunération",
+    "paie",
+    "wage",
+    "salary"
+   ],
+   "related_terms": [
+    "salaire minimum",
+    "primes",
+    "bulletin de paie"
+   ],
+   "broader_terms": [
+    "rémunération"
+   ],
+   "narrower_terms": [
+    "salaire minimum interprofessionnel garanti",
+    "SMIG"
+   ]
+  },
+  {
+   "canonical": "tribunal du travail",
+   "synonyms": [
+    "labour court",
+    "labor court"
+   ],
+   "related_terms": [
+    "juridiction compétente",
+    "inspecteur du travail",
+    "contentieux du travail"
+   ],
+   "broader_terms": [
+    "juridiction"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "inspecteur du travail",
+   "synonyms": [
+    "labour inspector",
+    "labor inspector",
+    "inspection du travail"
+   ],
+   "related_terms": [
+    "conciliation",
+    "tribunal du travail",
+    "ministère du travail"
+   ],
+   "broader_terms": [
+    "administration du travail"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "congés payés",
+   "synonyms": [
+    "congé annuel",
+    "paid leave",
+    "annual leave"
+   ],
+   "related_terms": [
+    "certificat de travail",
+    "droits acquis du salarié"
+   ],
+   "broader_terms": [
+    "droits du salarié"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "certificat de travail",
+   "synonyms": [
+    "work certificate"
+   ],
+   "related_terms": [
+    "solde de tout compte",
+    "congés payés",
+    "fin du contrat de travail"
+   ],
+   "broader_terms": [
+    "droits acquis du salarié"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "bail",
+   "synonyms": [
+    "bail locatif",
+    "lease"
+   ],
+   "related_terms": [
+    "location",
+    "loyer",
+    "locataire",
+    "bailleur"
+   ],
+   "broader_terms": [
+    "contrat de location"
+   ],
+   "narrower_terms": [
+    "bail commercial",
+    "bail d'habitation",
+    "bail rural"
+   ]
+  },
+  {
+   "canonical": "loyer",
+   "synonyms": [
+    "rent",
+    "rental"
+   ],
+   "related_terms": [
+    "bail",
+    "charges locatives",
+    "révision du loyer",
+    "impayés de loyer"
+   ],
+   "broader_terms": [
+    "obligations locatives"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "expulsion locative",
+   "synonyms": [
+    "expulsion du locataire",
+    "eviction"
+   ],
+   "related_terms": [
+    "bail",
+    "commandement de payer",
+    "loyer"
+   ],
+   "broader_terms": [
+    "procédure d'exécution"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "responsabilité civile",
+   "synonyms": [
+    "civil liability"
+   ],
+   "related_terms": [
+    "dommages et intérêts",
+    "faute",
+    "préjudice"
+   ],
+   "broader_terms": [
+    "droit des obligations"
+   ],
+   "narrower_terms": [
+    "responsabilité contractuelle",
+    "responsabilité délictuelle"
+   ]
+  },
+  {
+   "canonical": "dommages et intérêts",
+   "synonyms": [
+    "dommages-intérêts",
+    "indemnisation",
+    "damages"
+   ],
+   "related_terms": [
+    "préjudice",
+    "responsabilité civile",
+    "réparation"
+   ],
+   "broader_terms": [
+    "réparation du préjudice"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "prescription",
+   "synonyms": [
+    "prescription extinctive",
+    "limitation period"
+   ],
+   "related_terms": [
+    "délai de recours",
+    "forclusion"
+   ],
+   "broader_terms": [
+    "droit des obligations"
+   ],
+   "narrower_terms": [
+    "prescription civile",
+    "prescription pénale"
+   ]
+  },
+  {
+   "canonical": "mise en demeure",
+   "synonyms": [
+    "sommation",
+    "formal notice"
+   ],
+   "related_terms": [
+    "injonction de payer",
+    "recouvrement",
+    "délai de paiement"
+   ],
+   "broader_terms": [
+    "procédure civile"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "contrat",
+   "synonyms": [
+    "convention",
+    "contract",
+    "agreement"
+   ],
+   "related_terms": [
+    "obligations contractuelles",
+    "clause contractuelle"
+   ],
+   "broader_terms": [
+    "acte juridique"
+   ],
+   "narrower_terms": [
+    "contrat de travail",
+    "contrat de vente",
+    "contrat de bail"
+   ]
+  },
+  {
+   "canonical": "vente",
+   "synonyms": [
+    "sale"
+   ],
+   "related_terms": [
+    "prix de vente",
+    "transfert de propriété",
+    "acheteur",
+    "vendeur"
+   ],
+   "broader_terms": [
+    "contrat"
+   ],
+   "narrower_terms": [
+    "vente commerciale",
+    "vente immobilière"
+   ]
+  },
+  {
+   "canonical": "juridiction compétente",
+   "synonyms": [
+    "competent court",
+    "tribunal compétent"
+   ],
+   "related_terms": [
+    "tribunal du travail",
+    "compétence territoriale",
+    "compétence d'attribution"
+   ],
+   "broader_terms": [
+    "procédure judiciaire"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "divorce",
+   "synonyms": [
+    "dissolution du mariage"
+   ],
+   "related_terms": [
+    "séparation de corps",
+    "pension alimentaire",
+    "garde des enfants"
+   ],
+   "broader_terms": [
+    "dissolution du lien conjugal"
+   ],
+   "narrower_terms": [
+    "divorce contentieux",
+    "divorce par consentement mutuel"
+   ]
+  },
+  {
+   "canonical": "garde des enfants",
+   "synonyms": [
+    "garde d'enfants",
+    "custody",
+    "child custody"
+   ],
+   "related_terms": [
+    "autorité parentale",
+    "droit de visite",
+    "pension alimentaire",
+    "divorce"
+   ],
+   "broader_terms": [
+    "autorité parentale"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "pension alimentaire",
+   "synonyms": [
+    "alimony",
+    "child support"
+   ],
+   "related_terms": [
+    "divorce",
+    "garde des enfants",
+    "obligation alimentaire"
+   ],
+   "broader_terms": [
+    "obligation alimentaire"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "mariage",
+   "synonyms": [
+    "marriage"
+   ],
+   "related_terms": [
+    "régime matrimonial",
+    "célébration du mariage",
+    "acte de mariage"
+   ],
+   "broader_terms": [],
+   "narrower_terms": [
+    "mariage civil",
+    "mariage coutumier",
+    "mariage religieux"
+   ]
+  },
+  {
+   "canonical": "succession",
+   "synonyms": [
+    "héritage",
+    "inheritance"
+   ],
+   "related_terms": [
+    "héritier",
+    "testament",
+    "partage successoral",
+    "réserve héréditaire"
+   ],
+   "broader_terms": [
+    "droit des successions"
+   ],
+   "narrower_terms": [
+    "succession ab intestat",
+    "succession testamentaire"
+   ]
+  },
+  {
+   "canonical": "testament",
+   "synonyms": [
+    "will",
+    "last will"
+   ],
+   "related_terms": [
+    "legs",
+    "héritier",
+    "notaire",
+    "succession"
+   ],
+   "broader_terms": [
+    "droit des successions"
+   ],
+   "narrower_terms": [
+    "testament olographe",
+    "testament authentique"
+   ]
+  },
+  {
+   "canonical": "filiation",
+   "synonyms": [
+    "parentage"
+   ],
+   "related_terms": [
+    "paternité",
+    "reconnaissance d'enfant",
+    "autorité parentale"
+   ],
+   "broader_terms": [],
+   "narrower_terms": [
+    "filiation légitime",
+    "filiation naturelle"
+   ]
+  },
+  {
+   "canonical": "autorité parentale",
+   "synonyms": [
+    "parental authority"
+   ],
+   "related_terms": [
+    "garde des enfants",
+    "droit de visite",
+    "filiation"
+   ],
+   "broader_terms": [],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "infraction",
+   "synonyms": [
+    "offense",
+    "criminal offence"
+   ],
+   "related_terms": [
+    "peine",
+    "poursuites pénales",
+    "code pénal"
+   ],
+   "broader_terms": [
+    "droit pénal"
+   ],
+   "narrower_terms": [
+    "crime",
+    "délit",
+    "contravention"
+   ]
+  },
+  {
+   "canonical": "vol",
+   "synonyms": [
+    "theft",
+    "larcin"
+   ],
+   "related_terms": [
+    "recel",
+    "cambriolage",
+    "atteinte aux biens"
+   ],
+   "broader_terms": [
+    "infraction contre les biens"
+   ],
+   "narrower_terms": [
+    "vol simple",
+    "vol qualifié"
+   ]
+  },
+  {
+   "canonical": "coups et blessures",
+   "synonyms": [
+    "assault",
+    "violences volontaires"
+   ],
+   "related_terms": [
+    "agression",
+    "légitime défense"
+   ],
+   "broader_terms": [
+    "atteintes aux personnes"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "garde à vue",
+   "synonyms": [
+    "police custody"
+   ],
+   "related_terms": [
+    "arrestation",
+    "procès-verbal",
+    "officier de police judiciaire"
+   ],
+   "broader_terms": [
+    "mesures privatives de liberté"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "amende",
+   "synonyms": [
+    "fine"
+   ],
+   "related_terms": [
+    "peine",
+    "sanction pénale",
+    "contravention"
+   ],
+   "broader_terms": [
+    "peine"
+   ],
+   "narrower_terms": [
+    "amende pénale",
+    "amende administrative"
+   ]
+  },
+  {
+   "canonical": "légitime défense",
+   "synonyms": [
+    "self-defence",
+    "self-defense"
+   ],
+   "related_terms": [
+    "état de nécessité",
+    "coups et blessures"
+   ],
+   "broader_terms": [
+    "causes d'irresponsabilité pénale"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "société commerciale",
+   "synonyms": [
+    "société",
+    "commercial company"
+   ],
+   "related_terms": [
+    "OHADA",
+    "capital social",
+    "associés",
+    "RCCM"
+   ],
+   "broader_terms": [
+    "personne morale"
+   ],
+   "narrower_terms": [
+    "SARL",
+    "SA",
+    "société en nom collectif",
+    "GIE"
+   ]
+  },
+  {
+   "canonical": "SARL",
+   "synonyms": [
+    "société à responsabilité limitée",
+    "limited liability company"
+   ],
+   "related_terms": [
+    "capital social",
+    "gérant",
+    "OHADA"
+   ],
+   "broader_terms": [
+    "société commerciale"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "RCCM",
+   "synonyms": [
+    "registre du commerce et du crédit mobilier",
+    "trade register"
+   ],
+   "related_terms": [
+    "immatriculation",
+    "OHADA",
+    "greffe du tribunal"
+   ],
+   "broader_terms": [
+    "formalités des entreprises"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "procédure collective",
+   "synonyms": [
+    "faillite",
+    "bankruptcy",
+    "insolvency"
+   ],
+   "related_terms": [
+    "règlement préventif",
+    "redressement judiciaire",
+    "liquidation des biens"
+   ],
+   "broader_terms": [
+    "droit OHADA"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "bail commercial",
+   "synonyms": [
+    "commercial lease"
+   ],
+   "related_terms": [
+    "loyer",
+    "renouvellement du bail",
+    "fonds de commerce"
+   ],
+   "broader_terms": [
+    "bail"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "capital social",
+   "synonyms": [
+    "share capital"
+   ],
+   "related_terms": [
+    "apports",
+    "associés",
+    "statuts de la société"
+   ],
+   "broader_terms": [
+    "constitution de la société"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "fonction publique",
+   "synonyms": [
+    "civil service",
+    "public service"
+   ],
+   "related_terms": [
+    "fonctionnaire",
+    "concours administratif",
+    "statut des fonctionnaires"
+   ],
+   "broader_terms": [
+    "administration publique"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "fonctionnaire",
+   "synonyms": [
+    "civil servant",
+    "agent de l'État"
+   ],
+   "related_terms": [
+    "fonction publique",
+    "avancement",
+    "discipline administrative"
+   ],
+   "broader_terms": [],
+   "narrower_terms": [
+    "fonctionnaire stagiaire",
+    "fonctionnaire titulaire"
+   ]
+  },
+  {
+   "canonical": "acte administratif",
+   "synonyms": [
+    "administrative act",
+    "décision administrative"
+   ],
+   "related_terms": [
+    "recours administratif",
+    "contentieux administratif"
+   ],
+   "broader_terms": [
+    "action administrative"
+   ],
+   "narrower_terms": [
+    "arrêté",
+    "décret",
+    "décision individuelle"
+   ]
+  },
+  {
+   "canonical": "recours administratif",
+   "synonyms": [
+    "administrative appeal"
+   ],
+   "related_terms": [
+    "recours hiérarchique",
+    "recours gracieux",
+    "contentieux administratif"
+   ],
+   "broader_terms": [
+    "voies de recours"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "marché public",
+   "synonyms": [
+    "public procurement",
+    "commande publique"
+   ],
+   "related_terms": [
+    "appel d'offres",
+    "passation des marchés"
+   ],
+   "broader_terms": [],
+   "narrower_terms": [
+    "marché de travaux",
+    "marché de fournitures",
+    "marché de services"
+   ]
+  },
+  {
+   "canonical": "impôt",
+   "synonyms": [
+    "taxe",
+    "tax",
+    "taxation"
+   ],
+   "related_terms": [
+    "fiscalité",
+    "contribuable",
+    "administration fiscale",
+    "déclaration fiscale"
+   ],
+   "broader_terms": [
+    "prélèvements obligatoires"
+   ],
+   "narrower_terms": [
+    "impôt sur le revenu",
+    "impôt sur les sociétés",
+    "TVA"
+   ]
+  },
+  {
+   "canonical": "TVA",
+   "synonyms": [
+    "taxe sur la valeur ajoutée",
+    "VAT"
+   ],
+   "related_terms": [
+    "impôt",
+    "facturation",
+    "déclaration fiscale"
+   ],
+   "broader_terms": [
+    "impôts indirects"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "contribuable",
+   "synonyms": [
+    "taxpayer",
+    "redevable"
+   ],
+   "related_terms": [
+    "fiscalité",
+    "déclaration fiscale",
+    "impôt"
+   ],
+   "broader_terms": [],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "propriété foncière",
+   "synonyms": [
+    "land ownership",
+    "propriété immobilière"
+   ],
+   "related_terms": [
+    "titre foncier",
+    "bornage",
+    "cadastre",
+    "litige foncier"
+   ],
+   "broader_terms": [
+    "droit foncier"
+   ],
+   "narrower_terms": [
+    "propriété rurale",
+    "propriété urbaine"
+   ]
+  },
+  {
+   "canonical": "titre foncier",
+   "synonyms": [
+    "land title"
+   ],
+   "related_terms": [
+    "immatriculation foncière",
+    "cadastre",
+    "bornage",
+    "propriété foncière"
+   ],
+   "broader_terms": [
+    "droit foncier"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "bornage",
+   "synonyms": [
+    "délimitation",
+    "boundary marking"
+   ],
+   "related_terms": [
+    "titre foncier",
+    "litige foncier",
+    "géomètre-expert"
+   ],
+   "broader_terms": [
+    "procédure foncière"
+   ],
+   "narrower_terms": []
+  },
+  {
+   "canonical": "expropriation",
+   "synonyms": [
+    "expropriation pour cause d'utilité publique"
+   ],
+   "related_terms": [
+    "indemnisation",
+    "utilité publique",
+    "propriété foncière"
+   ],
+   "broader_terms": [
+    "droit foncier"
+   ],
+   "narrower_terms": []
+  }
+ ]
+}

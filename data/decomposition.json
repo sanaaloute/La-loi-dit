@@ -1,0 +1,124 @@
+{
+ "version": 1,
+ "topics": {
+  "licenciement": {
+   "domains": [
+    "labor_code"
+   ],
+   "keywords": [
+    "licenciement",
+    "licencié",
+    "licencie",
+    "\\bdismissal\\b",
+    "\\bdismissed\\b",
+    "\\bfired\\b"
+   ],
+   "issues": [
+    "motifs légitimes du licenciement",
+    "préavis et indemnité compensatrice de préavis",
+    "indemnité de licenciement",
+    "licenciement abusif et dommages-intérêts",
+    "droits acquis du salarié (congés payés, certificat de travail)",
+    "voies de recours du salarié licencié",
+    "juridiction compétente en cas de licenciement"
+   ]
+  },
+  "contrat_de_travail": {
+   "domains": [
+    "labor_code"
+   ],
+   "keywords": [
+    "contrat de travail",
+    "employment contract",
+    "work contract"
+   ],
+   "issues": [
+    "formation et preuve du contrat de travail",
+    "période d'essai",
+    "modification du contrat de travail",
+    "rupture du contrat de travail",
+    "obligations des parties au contrat de travail"
+   ]
+  },
+  "divorce": {
+   "domains": [
+    "family_code"
+   ],
+   "keywords": [
+    "divorce"
+   ],
+   "issues": [
+    "formes et causes de divorce",
+    "procédure de divorce",
+    "conséquences patrimoniales du divorce",
+    "pension alimentaire",
+    "garde des enfants et autorité parentale"
+   ]
+  },
+  "bail_loyer": {
+   "domains": [
+    "civil_law",
+    "land_law"
+   ],
+   "keywords": [
+    "\\bbail",
+    "loyer",
+    "locataire",
+    "location",
+    "\\blease\\b",
+    "\\brent\\b",
+    "\\btenant\\b",
+    "\\blandlord\\b"
+   ],
+   "issues": [
+    "formation et contenu du bail",
+    "fixation et révision du loyer",
+    "charges et réparations locatives",
+    "congé et résiliation du bail",
+    "expulsion du locataire"
+   ]
+  },
+  "succession": {
+   "domains": [
+    "civil_law",
+    "family_code"
+   ],
+   "keywords": [
+    "succession",
+    "héritage",
+    "héritier",
+    "testament",
+    "\\binheritance\\b",
+    "\\bheir\\b",
+    "\\bwill\\b"
+   ],
+   "issues": [
+    "ouverture de la succession et héritiers",
+    "réserve héréditaire et quotité disponible",
+    "testament et legs",
+    "acceptation et renonciation à la succession",
+    "partage successoral"
+   ]
+  },
+  "societe_ohada": {
+   "domains": [
+    "commercial_law",
+    "ohada_law"
+   ],
+   "keywords": [
+    "société",
+    "sarl",
+    " ohada",
+    "\\bcompany\\b",
+    "\\bcorporation\\b"
+   ],
+   "issues": [
+    "formes de sociétés commerciales OHADA",
+    "constitution et immatriculation de la société",
+    "capital social et apports",
+    "dirigeants sociaux et responsabilité",
+    "dissolution et liquidation de la société"
+   ]
+  }
+ }
+}

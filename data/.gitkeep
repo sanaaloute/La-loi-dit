@@ -1,2 +1,3 @@
 # Placeholder so Git tracks the empty data/ directory on the server.
-# All actual contents (uploaded documents, generated DBs, indexes) are ignored.
+# Compulsory JSON configuration files are tracked; generated DBs/indexes,
+# uploaded source documents, and evaluation reports are ignored.

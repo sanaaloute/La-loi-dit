@@ -979,6 +979,24 @@ async def _run_cli(args: argparse.Namespace) -> int:
         metadata["url"] = args.url
 
     if args.full_reindex:
+        # A destructive full reindex with an in-memory fallback store would
+        # wipe the version registry while leaving the real Milvus index intact,
+        # producing silent duplicates once Milvus comes back. Refuse unless we
+        # are actually talking to Milvus.
+        settings = getattr(ctx, "settings", None)
+        if settings and getattr(settings, "milvus_enabled", False):
+            from backend.vectorstore.milvus_store import MilvusVectorStore
+
+            if not isinstance(ctx.vector_store, MilvusVectorStore):
+                store_name = type(ctx.vector_store).__name__
+                print(
+                    f"ERROR: --full-reindex requires a connected Milvus store, "
+                    f"but the active store is {store_name}. "
+                    "Ensure Milvus is running and reachable before reindexing.",
+                    file=sys.stderr,
+                )
+                return 1
+
         # Drop every known document so the next ingestion starts from scratch.
         for doc_id in list(pipeline._versions.list_document_ids()):
             print((await pipeline.delete_document(doc_id)).model_dump_json())

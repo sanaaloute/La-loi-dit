@@ -1,0 +1,24 @@
+{
+ "version": 1,
+ "domains": {
+  "constitution": ["constitution", "transition"],
+  "criminal_law": ["pénal", "penal", "infraction", "crime", "délit", "criminal"],
+  "civil_law": ["civil", "contrat", "responsabilité civile", "droit commercial général"],
+  "family_code": ["famille", "mariage", "divorce", "filiation"],
+  "labor_code": ["travail", "licenci", "salaire", "salari", "employeur", "preavis"],
+  "tax_law": ["impôt", "impots", "fiscal", "taxe", "tva"],
+  "commercial_law": ["commercial", "société", "commerce", "ohada", "sarl", "sa ", "sociétés commerciales"],
+  "ohada_law": ["ohada", "acte uniforme"],
+  "administrative_law": ["administratif", "administration", "fonction publique"],
+  "land_law": ["foncier", "terrain", "propriété"],
+  "procurement_law": ["marchés publics", "appel d'offres"],
+  "environmental_law": ["environnement", "pollution"],
+  "immigration": ["immigration", "visa", "titre de séjour", "étranger"],
+  "public_service": ["fonction publique", "fonctionnaire"],
+  "elections": ["élection", "élections", "ceni", "vote"],
+  "health_regulations": ["santé", "hôpital"],
+  "education_regulations": ["éducation", "école", "université"],
+  "government_procedures": ["procédure", "guichet"],
+  "traffic_law": ["code de la route", "exces de vitesse", "permis de conduire", "circulation", "amende", "radar", "conduite"]
+ }
+}

@@ -4,11 +4,31 @@ __pycache__/
 .venv/
 venv/
 
-# Keep the data/ directory tracked so the server bind-mount exists after clone,
-# but ignore everything inside it. Source documents are uploaded through the
-# admin UI; generated DBs/indexes are never committed.
-data/**
+# Keep the data/ directory tracked so the server bind-mount exists after clone.
+# Compulsory configuration files are tracked; generated indexes/state and
+# uploaded source documents are ignored.
+
+# Generated runtime state and indexes.
+data/*.db
+data/*.db.*
+data/*.bak
+data/*.bak*
+data/ingestion_results.json
+data/versions.json
+data/freshness_state.json
+data/tmp/
+data/eval/**
+
+# Uploaded source documents (re-ingest after deploy; do not commit).
+data/legal_docs/**
+
+# Track the directory skeleton and compulsory configuration files.
 !data/.gitkeep
+!data/legal_docs/.gitkeep
+!data/legal_sources.json
+!data/legal_domains.json
+!data/terminology.json
+!data/decomposition.json
 
 htmlcov/
 node_modules/

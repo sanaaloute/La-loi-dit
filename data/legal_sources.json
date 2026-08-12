@@ -1,0 +1,203 @@
+{
+  "version": 1,
+  "search_registry": [
+    {
+      "name": "Portail du Gouvernement du Burkina Faso",
+      "base_url": "https://www.gouv.bf",
+      "authority": "official_news",
+      "kind": "government",
+      "government_body": "Gouvernement du Burkina Faso",
+      "search_path": "/recherche?search_api_fulltext={query}",
+      "rss_path": "/rss.xml"
+    },
+    {
+      "name": "Journal Officiel du Burkina Faso",
+      "base_url": "https://www.jo.gouv.bf",
+      "authority": "official_gazette",
+      "kind": "regulation",
+      "government_body": "Secrétariat général du Gouvernement",
+      "search_path": "/recherche?search_api_fulltext={query}"
+    },
+    {
+      "name": "Assemblée nationale du Burkina Faso",
+      "base_url": "https://www.assembleenationale.bf",
+      "authority": "law",
+      "kind": "regulation",
+      "government_body": "Assemblée nationale",
+      "rss_path": "/rss.xml"
+    },
+    {
+      "name": "Conseil constitutionnel du Burkina Faso",
+      "base_url": "https://www.conseil-constitutionnel.bf",
+      "authority": "constitution",
+      "kind": "case_law",
+      "government_body": "Conseil constitutionnel"
+    },
+    {
+      "name": "Cour suprême / Cour de cassation du Burkina Faso",
+      "base_url": "https://www.coursupreme.bf",
+      "authority": "case_law",
+      "kind": "case_law",
+      "government_body": "Cour suprême"
+    },
+    {
+      "name": "OHADA — Organisation pour l'Harmonisation en Afrique du Droit des Affaires",
+      "base_url": "https://www.ohada.org",
+      "authority": "treaty_ohada",
+      "kind": "regulation",
+      "government_body": "OHADA",
+      "search_path": "/recherche/?search_api_fulltext={query}"
+    },
+    {
+      "name": "Ministère de l'Économie, des Finances et de la Prospective",
+      "base_url": "https://www.finances.gov.bf",
+      "authority": "official_news",
+      "kind": "government",
+      "government_body": "Ministère des Finances",
+      "rss_path": "/rss.xml"
+    },
+    {
+      "name": "Ministère de la Justice",
+      "base_url": "https://www.justice.gov.bf",
+      "authority": "ministerial_circular",
+      "kind": "government",
+      "government_body": "Ministère de la Justice"
+    },
+    {
+      "name": "Ministère du Travail, de l'Emploi et de la Protection sociale",
+      "base_url": "https://www.travail.gov.bf",
+      "authority": "ministerial_circular",
+      "kind": "government",
+      "government_body": "Ministère du Travail"
+    }
+  ],
+  "crawler_allowed_domains": [
+    "gouvernement.gov.bf",
+    "assembleenationale.bf",
+    "legiburkina.bf",
+    "presidencedufaso.bf",
+    "sig.gov.bf",
+    "ohada.org"
+  ],
+  "freshness_registry": [
+    {
+      "name": "OHADA — Actualités",
+      "url": "https://www.ohada.org/feed/",
+      "kind": "rss",
+      "metadata": {
+        "authority": "treaty_ohada",
+        "government_body": "OHADA"
+      }
+    },
+    {
+      "name": "Législation du Burkina Faso (LégiBurkina)",
+      "url": "https://www.legiburkina.bf/",
+      "kind": "web",
+      "metadata": {
+        "authority": "law",
+        "government_body": "Gouvernement du Burkina Faso"
+      }
+    },
+    {
+      "name": "Assemblée Nationale du Burkina Faso",
+      "url": "https://www.assembleenationale.bf/",
+      "kind": "web",
+      "metadata": {
+        "authority": "law",
+        "government_body": "Assemblée Nationale"
+      }
+    },
+    {
+      "name": "Portail du Gouvernement du Burkina Faso",
+      "url": "https://www.gouvernement.gov.bf/",
+      "kind": "web",
+      "metadata": {
+        "authority": "official_news",
+        "government_body": "Gouvernement du Burkina Faso"
+      }
+    }
+  ],
+  "document_titles": {
+    "code-du-travail-burkina-faso.pdf": "Code du travail du Burkina Faso (Loi 028-2008/AN)",
+    "constitution-burkina-faso.pdf": "Constitution du Burkina Faso (IVème République, 1991)",
+    "constitution-burkina-faso-transition-2015.pdf": "Charte de la Transition du Burkina Faso (2015)",
+    "traite-ohada.pdf": "Traité OHADA",
+    "auscgie-societes-commerciales-gie-2014.pdf": "Acte uniforme OHADA relatif au droit des sociétés commerciales et du GIE (2014)",
+    "audcg-droit-commercial-general-2010.pdf": "Acte uniforme OHADA relatif au droit commercial général (2010)",
+    "aus-suretes-2010.pdf": "Acte uniforme OHADA relatif aux sûretés (2010)"
+  },
+  "document_metadata": {
+    "code-du-travail-burkina-faso.pdf": {
+      "document_name": "Code du travail du Burkina Faso (Loi 028-2008/AN)",
+      "authority": "law",
+      "document_type": "code",
+      "law_number": "028-2008/AN",
+      "legal_domains": [
+        "labor_code"
+      ],
+      "government_body": "Assemblée nationale du Burkina Faso",
+      "publication_date": "2008-05-21"
+    },
+    "constitution-burkina-faso.pdf": {
+      "document_name": "Constitution du Burkina Faso (IVème République, 1991)",
+      "authority": "constitution",
+      "document_type": "law",
+      "legal_domains": [
+        "constitution"
+      ],
+      "publication_date": "1991-06-02"
+    },
+    "constitution-burkina-faso-transition-2015.pdf": {
+      "document_name": "Charte de la Transition du Burkina Faso (2015)",
+      "authority": "constitution",
+      "document_type": "law",
+      "legal_domains": [
+        "constitution"
+      ],
+      "publication_date": "2015-11-05"
+    },
+    "traite-ohada.pdf": {
+      "document_name": "Traité OHADA",
+      "authority": "treaty_ohada",
+      "document_type": "treaty",
+      "legal_domains": [
+        "ohada_law"
+      ],
+      "government_body": "OHADA",
+      "publication_date": "2008-10-17"
+    },
+    "auscgie-societes-commerciales-gie-2014.pdf": {
+      "document_name": "Acte uniforme OHADA relatif au droit des sociétés commerciales et du GIE (2014)",
+      "authority": "treaty_ohada",
+      "document_type": "treaty",
+      "legal_domains": [
+        "commercial_law",
+        "ohada_law"
+      ],
+      "government_body": "OHADA",
+      "publication_date": "2014-01-30"
+    },
+    "audcg-droit-commercial-general-2010.pdf": {
+      "document_name": "Acte uniforme OHADA relatif au droit commercial général (2010)",
+      "authority": "treaty_ohada",
+      "document_type": "treaty",
+      "legal_domains": [
+        "commercial_law",
+        "ohada_law"
+      ],
+      "government_body": "OHADA",
+      "publication_date": "2010-12-15"
+    },
+    "aus-suretes-2010.pdf": {
+      "document_name": "Acte uniforme OHADA relatif aux sûretés (2010)",
+      "authority": "treaty_ohada",
+      "document_type": "treaty",
+      "legal_domains": [
+        "commercial_law",
+        "ohada_law"
+      ],
+      "government_body": "OHADA",
+      "publication_date": "2010-12-15"
+    }
+  }
+}
