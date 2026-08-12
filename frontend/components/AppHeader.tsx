@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { FilePenLine, Gauge, Menu, MessageSquare, Scale, Settings, ShieldCheck, Tag } from "lucide-react";
 import SettingsPopover from "@/components/SettingsPopover";
+import ThemeToggle from "@/components/ThemeToggle";
 import { getToken, me } from "@/lib/api";
 
 interface AppHeaderProps {
@@ -82,15 +83,15 @@ export default function AppHeader({ token: tokenProp, onTokenChange, leftSlot, c
       <div className="flex min-w-0 items-center gap-3">
         {leftSlot}
         <Link href="/" className="flex shrink-0 items-center gap-3" title="Yawoto — accueil">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-law-cyan to-law-blue shadow-glow-sm">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent">
             <Scale className="h-5 w-5 text-white" />
           </div>
           <div className="hidden sm:block">
-            <span className="block text-base font-semibold text-white sm:text-lg">
-              Yawoto<span className="gradient-text">.</span>
+            <span className="block text-base font-semibold text-gray-900 sm:text-lg">
+              Yawoto
             </span>
-            <span className="block text-xs text-slate-400">
-              Assistant juridique — Afrique de l&apos;Ouest
+            <span className="block text-xs text-gray-500">
+              Assistant juridique
             </span>
           </div>
         </Link>
@@ -103,8 +104,8 @@ export default function AppHeader({ token: tokenProp, onTokenChange, leftSlot, c
                 href={link.href}
                 className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
                   active
-                    ? "border-law-cyan/40 bg-law-cyan/10 text-law-cyan"
-                    : "border-transparent text-slate-300 hover:bg-white/5 hover:text-white"
+                    ? "border-accent/40 bg-accent/10 text-accent"
+                    : "border-transparent text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                 }`}
               >
                 <link.icon className="h-4 w-4" />
@@ -121,14 +122,14 @@ export default function AppHeader({ token: tokenProp, onTokenChange, leftSlot, c
           <button
             type="button"
             onClick={() => setMenuOpen((v) => !v)}
-            className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-300 transition-colors hover:bg-white/5 hover:text-white"
+            className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900"
             title="Menu"
             aria-label="Menu"
           >
             <Menu className="h-5 w-5" />
           </button>
           {menuOpen && (
-            <div className="absolute right-0 top-full z-50 mt-2 w-48 rounded-xl border border-slate-600/40 bg-[#0f172a]/95 p-1.5 shadow-2xl backdrop-blur-xl">
+            <div className="absolute right-0 top-full z-50 mt-2 w-48 rounded-xl border border-gray-200 bg-white p-1.5 shadow-2xl backdrop-blur-xl">
               {navLinks.map((link) => {
                 const active = pathname === link.href;
                 return (
@@ -137,8 +138,8 @@ export default function AppHeader({ token: tokenProp, onTokenChange, leftSlot, c
                     href={link.href}
                     className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm transition-colors ${
                       active
-                        ? "bg-law-cyan/10 text-law-cyan"
-                        : "text-slate-200 hover:bg-white/5"
+                        ? "bg-accent/10 text-accent"
+                        : "text-gray-700 hover:bg-gray-100"
                     }`}
                   >
                     <link.icon className="h-4 w-4" />
@@ -149,6 +150,8 @@ export default function AppHeader({ token: tokenProp, onTokenChange, leftSlot, c
             </div>
           )}
         </div>
+        {/* Theme */}
+        <ThemeToggle />
         {/* Account */}
         <div className="relative">
           <button
@@ -156,8 +159,8 @@ export default function AppHeader({ token: tokenProp, onTokenChange, leftSlot, c
             onClick={() => setSettingsOpen((v) => !v)}
             className={`flex h-10 w-10 items-center justify-center rounded-lg border text-xs font-medium transition-colors ${
               token
-                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
-                : "border-slate-600/60 bg-slate-800/60 text-slate-300 hover:bg-slate-700/60"
+                ? "border-accent/40 bg-accent/10 text-accent hover:bg-accent/20"
+                : "border-gray-300 bg-gray-50 text-gray-600 hover:bg-gray-100"
             }`}
             title="Compte et connexion"
             aria-label="Compte et connexion"

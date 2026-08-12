@@ -2,8 +2,60 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Theme palettes — "R G B" triplets consumed by tailwind.config.ts. The
+   `dark` class on <html> switches to the dark theme (see lib/theme.ts). */
 :root {
   --font-geist-sans: "Geist", system-ui, sans-serif;
+
+  --c-white: 255 255 255;
+  --c-gray-50: 249 250 251;
+  --c-gray-100: 243 244 246;
+  --c-gray-200: 229 231 235;
+  --c-gray-300: 209 213 219;
+  --c-gray-400: 156 163 175;
+  --c-gray-500: 107 114 128;
+  --c-gray-600: 75 85 99;
+  --c-gray-700: 55 65 81;
+  --c-gray-800: 31 41 55;
+  --c-gray-900: 17 24 39;
+
+  --c-accent: 30 58 138;
+  --c-accent-hover: 30 64 175;
+  --c-accent-light: 238 242 251;
+
+  --c-ink: 17 24 39;
+  --c-ink-soft: 75 85 99;
+
+  --c-warn-bg: 254 249 195;
+  --c-warn-border: 250 204 21;
+  --c-warn-text: 133 77 14;
+}
+
+.dark {
+  color-scheme: dark;
+
+  --c-white: 22 32 48;
+  --c-gray-50: 13 20 32;
+  --c-gray-100: 28 39 56;
+  --c-gray-200: 44 58 79;
+  --c-gray-300: 62 79 105;
+  --c-gray-400: 100 116 139;
+  --c-gray-500: 148 163 184;
+  --c-gray-600: 203 213 225;
+  --c-gray-700: 226 232 240;
+  --c-gray-800: 238 242 247;
+  --c-gray-900: 248 250 252;
+
+  --c-accent: 91 141 239;
+  --c-accent-hover: 125 165 245;
+  --c-accent-light: 30 45 75;
+
+  --c-ink: 248 250 252;
+  --c-ink-soft: 203 213 225;
+
+  --c-warn-bg: 66 50 10;
+  --c-warn-border: 161 98 7;
+  --c-warn-text: 253 230 138;
 }
 
 html {
@@ -11,73 +63,21 @@ html {
 }
 
 body {
-  background: linear-gradient(135deg, #020617 0%, #0f172a 40%, #1e1b4b 100%);
-  background-attachment: fixed;
-  color: #e2e8f0;
+  background: rgb(var(--c-gray-50));
+  color: rgb(var(--c-gray-900));
 }
 
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(circle at 20% 10%, rgba(59, 130, 246, 0.12) 0%, transparent 35%),
-    radial-gradient(circle at 80% 20%, rgba(139, 92, 246, 0.12) 0%, transparent 35%),
-    radial-gradient(circle at 50% 90%, rgba(6, 182, 212, 0.08) 0%, transparent 40%);
-  z-index: -1;
-}
-
-/* Glass panel base */
+/* Header / footer / input bar panels */
 .glass {
-  background: rgba(15, 23, 42, 0.55);
+  background: rgb(var(--c-white) / 0.92);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(148, 163, 184, 0.12);
+  border: 1px solid rgb(var(--c-gray-200));
 }
 
 .glass-elevated {
-  background: rgba(30, 41, 59, 0.65);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(148, 163, 184, 0.15);
-}
-
-/* Accent gradient text */
-.gradient-text {
-  background: linear-gradient(90deg, #22d3ee 0%, #818cf8 50%, #c084fc 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-/* Button shine */
-.btn-primary {
-  position: relative;
-  overflow: hidden;
-  background: linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%);
-  box-shadow: 0 0 20px rgba(6, 182, 212, 0.35);
-  transition: all 0.2s ease;
-}
-
-.btn-primary:hover {
-  box-shadow: 0 0 28px rgba(6, 182, 212, 0.55);
-  transform: translateY(-1px);
-}
-
-.btn-primary::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.25), transparent);
-  transition: left 0.5s ease;
-}
-
-.btn-primary:hover::after {
-  left: 100%;
+  background: rgb(var(--c-white));
+  border: 1px solid rgb(var(--c-gray-200));
 }
 
 /* Scrollbar */
@@ -87,21 +87,21 @@ body::before {
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.3);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.25);
+  background: rgb(var(--c-gray-300));
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.45);
+  background: rgb(var(--c-gray-400));
 }
 
 /* Markdown body for assistant answers */
 .markdown-body {
-  @apply text-sm leading-relaxed text-slate-200;
+  @apply text-sm leading-relaxed text-gray-700;
 }
 
 .markdown-body p {
@@ -112,7 +112,7 @@ body::before {
 .markdown-body h2,
 .markdown-body h3,
 .markdown-body h4 {
-  @apply mt-5 mb-2 font-semibold text-white;
+  @apply mt-5 mb-2 font-semibold text-gray-900;
 }
 
 .markdown-body h1 {
@@ -136,23 +136,23 @@ body::before {
 }
 
 .markdown-body strong {
-  @apply font-semibold text-white;
+  @apply font-semibold text-gray-900;
 }
 
 .markdown-body blockquote {
-  @apply my-3 rounded-r border-l-4 border-accent bg-slate-800/50 px-4 py-2 italic text-slate-300;
+  @apply my-3 rounded-r border-l-4 border-accent bg-gray-50 px-4 py-2 italic text-gray-600;
 }
 
 .markdown-body code {
-  @apply rounded bg-slate-800 px-1.5 py-0.5 text-xs text-accent-light;
+  @apply rounded bg-gray-100 px-1.5 py-0.5 text-xs text-accent;
 }
 
 .markdown-body pre {
-  @apply my-3 overflow-x-auto rounded-lg border border-slate-700 bg-slate-950 p-4 text-xs text-slate-100;
+  @apply my-3 overflow-x-auto rounded-lg border border-gray-200 bg-gray-100 p-4 text-xs text-gray-800;
 }
 
 .markdown-body pre code {
-  @apply bg-transparent p-0 text-slate-100;
+  @apply bg-transparent p-0 text-gray-800;
 }
 
 .markdown-body a {
@@ -160,7 +160,7 @@ body::before {
 }
 
 .markdown-body hr {
-  @apply my-4 border-slate-700;
+  @apply my-4 border-gray-200;
 }
 
 /* Focus rings */
@@ -168,7 +168,7 @@ input:focus,
 textarea:focus,
 button:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.35);
+  box-shadow: 0 0 0 2px rgb(var(--c-accent) / 0.25);
 }
 
 /* Mobile drawer */

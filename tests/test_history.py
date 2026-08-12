@@ -214,3 +214,37 @@ def test_streamed_chat_scoped_to_caller(client):
     _, token_b = _register(client, name="Boureima")
     response = client.get(f"/api/v1/chat/sessions/{session_id}", headers=_headers(token_b))
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Session deletion
+# ---------------------------------------------------------------------------
+
+
+def test_delete_session_removes_it(client):
+    _, token = _register(client)
+    session_id = _chat(client, token)["session_id"]
+
+    response = client.delete(f"/api/v1/chat/sessions/{session_id}", headers=_headers(token))
+    assert response.status_code == 204
+
+    sessions = client.get("/api/v1/chat/sessions", headers=_headers(token)).json()["sessions"]
+    assert sessions == []
+    assert client.get(f"/api/v1/chat/sessions/{session_id}", headers=_headers(token)).status_code == 404
+
+
+def test_delete_session_owner_scoped(client):
+    _, token_a = _register(client, name="Awa")
+    session_id = _chat(client, token_a)["session_id"]
+
+    _, token_b = _register(client, name="Boureima")
+    response = client.delete(f"/api/v1/chat/sessions/{session_id}", headers=_headers(token_b))
+    assert response.status_code == 404  # no existence leak
+
+    # owner session untouched
+    sessions = client.get("/api/v1/chat/sessions", headers=_headers(token_a)).json()["sessions"]
+    assert len(sessions) == 1
+
+
+def test_delete_session_requires_auth(client):
+    assert client.delete("/api/v1/chat/sessions/whatever").status_code == 401

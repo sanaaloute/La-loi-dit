@@ -63,7 +63,7 @@ export default function OverviewTab() {
         <button
           type="button"
           onClick={() => void load()}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-600/60 bg-slate-800/60 px-4 py-2 text-sm font-medium text-slate-200 transition-colors hover:bg-slate-700/60"
+          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-gray-50 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
         >
           Réessayer
         </button>
@@ -87,10 +87,10 @@ export default function OverviewTab() {
               return (
                 <div
                   key={name}
-                  className="flex items-center justify-between gap-2 rounded-lg border border-slate-700/40 bg-slate-800/30 px-3 py-2.5"
+                  className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5"
                 >
-                  <span className="flex min-w-0 items-center gap-2 text-xs text-slate-300">
-                    <Server className="h-3.5 w-3.5 shrink-0 text-law-cyan" />
+                  <span className="flex min-w-0 items-center gap-2 text-xs text-gray-600">
+                    <Server className="h-3.5 w-3.5 shrink-0 text-accent" />
                     <span className="truncate" title={name}>
                       {formatCheckName(name)}
                     </span>
@@ -150,7 +150,7 @@ export default function OverviewTab() {
                   <tr key={p.path}>
                     <Td className="font-mono text-xs">{p.path}</Td>
                     <Td>{formatNumber(p.requests)}</Td>
-                    <Td className={p.errors > 0 ? "text-rose-300" : ""}>{formatNumber(p.errors)}</Td>
+                    <Td className={p.errors > 0 ? "text-red-700" : ""}>{formatNumber(p.errors)}</Td>
                     <Td>{p.avg_latency_ms.toLocaleString("fr-FR")} ms</Td>
                   </tr>
                 ))}

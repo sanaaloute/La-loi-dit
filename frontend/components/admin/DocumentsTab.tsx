@@ -215,7 +215,7 @@ export default function DocumentsTab() {
         <button
           type="button"
           onClick={() => void load()}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-600/60 bg-slate-800/60 px-4 py-2 text-sm font-medium text-slate-200 transition-colors hover:bg-slate-700/60"
+          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-gray-50 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
         >
           Réessayer
         </button>
@@ -244,17 +244,17 @@ export default function DocumentsTab() {
               className="hidden"
             />
             <label htmlFor="admin-doc-file" className={`cursor-pointer ${SECONDARY_BUTTON_CLASS}`}>
-              <Upload className="h-4 w-4 text-law-cyan" />
+              <Upload className="h-4 w-4 text-accent" />
               Choisir un fichier
             </label>
-            <span className="min-w-0 truncate text-xs text-slate-400">
+            <span className="min-w-0 truncate text-xs text-gray-500">
               {file ? file.name : "Aucun fichier sélectionné (PDF, TXT, MD, HTML)"}
             </span>
           </div>
 
           <div className="flex flex-wrap items-end gap-3">
             <div className="min-w-44">
-              <label htmlFor="admin-doc-folder" className="mb-1 block text-xs font-medium text-slate-300">
+              <label htmlFor="admin-doc-folder" className="mb-1 block text-xs font-medium text-gray-600">
                 Dossier de destination
               </label>
               <select
@@ -273,7 +273,7 @@ export default function DocumentsTab() {
             </div>
             <form onSubmit={handleCreateFolder} className="flex flex-wrap items-end gap-2">
               <div>
-                <label htmlFor="admin-new-folder" className="mb-1 block text-xs font-medium text-slate-300">
+                <label htmlFor="admin-new-folder" className="mb-1 block text-xs font-medium text-gray-600">
                   Nouveau dossier
                 </label>
                 <input
@@ -293,7 +293,7 @@ export default function DocumentsTab() {
                 {creatingFolder ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <FolderPlus className="h-4 w-4 text-law-cyan" />
+                  <FolderPlus className="h-4 w-4 text-accent" />
                 )}
                 Créer
               </button>
@@ -310,7 +310,7 @@ export default function DocumentsTab() {
               {suggesting ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <Sparkles className="h-4 w-4 text-law-purple" />
+                <Sparkles className="h-4 w-4 text-ink" />
               )}
               {suggesting ? "Analyse en cours…" : "Suggérer les métadonnées (LLM)"}
             </button>
@@ -329,7 +329,7 @@ export default function DocumentsTab() {
             </button>
           </div>
           {!suggestion && (
-            <p className="text-[11px] text-slate-500">
+            <p className="text-[11px] text-gray-500">
               Sans suggestion, « Ingérer » envoie le document tel quel (métadonnées inférées par le
               pipeline).
             </p>
@@ -342,7 +342,7 @@ export default function DocumentsTab() {
         <SectionCard title="Métadonnées du document">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
-              <label htmlFor="meta-name" className="mb-1 block text-xs font-medium text-slate-300">
+              <label htmlFor="meta-name" className="mb-1 block text-xs font-medium text-gray-600">
                 Nom du document
               </label>
               <input
@@ -354,7 +354,7 @@ export default function DocumentsTab() {
               />
             </div>
             <div>
-              <label htmlFor="meta-authority" className="mb-1 block text-xs font-medium text-slate-300">
+              <label htmlFor="meta-authority" className="mb-1 block text-xs font-medium text-gray-600">
                 Autorité
               </label>
               <select
@@ -371,7 +371,7 @@ export default function DocumentsTab() {
               </select>
             </div>
             <div>
-              <label htmlFor="meta-type" className="mb-1 block text-xs font-medium text-slate-300">
+              <label htmlFor="meta-type" className="mb-1 block text-xs font-medium text-gray-600">
                 Type de document
               </label>
               <select
@@ -388,7 +388,7 @@ export default function DocumentsTab() {
               </select>
             </div>
             <div>
-              <label htmlFor="meta-law-number" className="mb-1 block text-xs font-medium text-slate-300">
+              <label htmlFor="meta-law-number" className="mb-1 block text-xs font-medium text-gray-600">
                 Numéro de loi
               </label>
               <input
@@ -400,7 +400,7 @@ export default function DocumentsTab() {
               />
             </div>
             <div>
-              <label htmlFor="meta-body" className="mb-1 block text-xs font-medium text-slate-300">
+              <label htmlFor="meta-body" className="mb-1 block text-xs font-medium text-gray-600">
                 Organisme
               </label>
               <input
@@ -412,7 +412,7 @@ export default function DocumentsTab() {
               />
             </div>
             <div>
-              <label htmlFor="meta-pub-date" className="mb-1 block text-xs font-medium text-slate-300">
+              <label htmlFor="meta-pub-date" className="mb-1 block text-xs font-medium text-gray-600">
                 Date de publication
               </label>
               <input
@@ -424,7 +424,7 @@ export default function DocumentsTab() {
               />
             </div>
             <div>
-              <label htmlFor="meta-eff-date" className="mb-1 block text-xs font-medium text-slate-300">
+              <label htmlFor="meta-eff-date" className="mb-1 block text-xs font-medium text-gray-600">
                 Date d&apos;entrée en vigueur
               </label>
               <input
@@ -436,7 +436,7 @@ export default function DocumentsTab() {
               />
             </div>
             <div className="sm:col-span-2">
-              <label htmlFor="meta-url" className="mb-1 block text-xs font-medium text-slate-300">
+              <label htmlFor="meta-url" className="mb-1 block text-xs font-medium text-gray-600">
                 URL source
               </label>
               <input
@@ -450,7 +450,7 @@ export default function DocumentsTab() {
             </div>
             {domainChoices.length > 0 && (
               <div className="sm:col-span-2">
-                <span className="mb-1 block text-xs font-medium text-slate-300">Domaines juridiques</span>
+                <span className="mb-1 block text-xs font-medium text-gray-600">Domaines juridiques</span>
                 <div className="flex flex-wrap gap-1.5">
                   {domainChoices.map((domain) => {
                     const active = suggestion.legal_domains.includes(domain);
@@ -462,8 +462,8 @@ export default function DocumentsTab() {
                         aria-pressed={active}
                         className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
                           active
-                            ? "border-law-cyan/40 bg-law-cyan/10 text-law-cyan"
-                            : "border-slate-600/60 bg-slate-800/60 text-slate-400 hover:text-slate-200"
+                            ? "border-accent/40 bg-accent/10 text-accent"
+                            : "border-gray-300 bg-gray-50 text-gray-500 hover:text-gray-700"
                         }`}
                       >
                         {domain}
@@ -482,14 +482,14 @@ export default function DocumentsTab() {
         <SectionCard title="Résultat de l'ingestion">
           <div className="flex flex-wrap items-center gap-3">
             <StatusBadge value={result.status} />
-            <div className="text-sm text-slate-300">
-              <span className="font-medium text-white">{result.document_name}</span>
+            <div className="text-sm text-gray-600">
+              <span className="font-medium text-gray-900">{result.document_name}</span>
               {" — "}
               {formatNumber(result.chunks_created)} chunk{result.chunks_created > 1 ? "s" : ""} créé
               {result.chunks_created > 1 ? "s" : ""}, version {result.version}
             </div>
           </div>
-          {result.detail && <p className="mt-2 text-xs text-slate-400">{result.detail}</p>}
+          {result.detail && <p className="mt-2 text-xs text-gray-500">{result.detail}</p>}
         </SectionCard>
       )}
 
@@ -498,7 +498,7 @@ export default function DocumentsTab() {
         title={`Documents ingérés${status ? ` (${formatNumber(status.total_documents)})` : ""}`}
         actions={
           status?.store_updated_at ? (
-            <span className="text-[11px] text-slate-500">
+            <span className="text-[11px] text-gray-500">
               Registre mis à jour le {formatDateTime(status.store_updated_at)}
             </span>
           ) : undefined
@@ -533,7 +533,7 @@ export default function DocumentsTab() {
                       disabled={deletingId === doc.document_id}
                       title={`Supprimer ${doc.document_id}`}
                       aria-label={`Supprimer ${doc.document_id}`}
-                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-500/30 bg-rose-500/10 text-rose-300 transition-colors hover:bg-rose-500/20 disabled:opacity-50"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-red-700/30 bg-red-700/10 text-red-700 transition-colors hover:bg-red-700/20 disabled:opacity-50"
                     >
                       {deletingId === doc.document_id ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -556,11 +556,11 @@ export default function DocumentsTab() {
             {status.failed_documents.map((rec, i) => (
               <li
                 key={String(rec.document_id ?? i)}
-                className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs"
+                className="rounded-lg border border-red-700/30 bg-red-700/10 px-3 py-2 text-xs"
               >
-                <span className="font-mono text-rose-200">{String(rec.document_id ?? "inconnu")}</span>
+                <span className="font-mono text-red-800">{String(rec.document_id ?? "inconnu")}</span>
                 {typeof rec.detail === "string" && rec.detail && (
-                  <span className="block text-rose-300/80">{rec.detail}</span>
+                  <span className="block text-red-700/80">{rec.detail}</span>
                 )}
               </li>
             ))}

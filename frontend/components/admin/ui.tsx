@@ -1,14 +1,14 @@
 // Shared building blocks for the admin dashboard tabs: cards, badges and
-// tables styled after the /compte page (dark legal-tech theme).
+// tables in the light legal-tech theme (white surfaces, navy accent).
 
 export const INPUT_CLASS =
-  "w-full rounded-lg border border-slate-600/60 bg-slate-900/60 px-3 py-2 text-sm text-white placeholder:text-slate-600 focus:border-law-cyan/60 focus:outline-none";
+  "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-accent/60 focus:outline-none";
 
 export const PRIMARY_BUTTON_CLASS =
-  "inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-law-cyan to-law-blue px-3 py-2 text-sm font-medium text-white shadow-glow-sm transition-all hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50";
 
 export const SECONDARY_BUTTON_CLASS =
-  "inline-flex items-center justify-center gap-2 rounded-lg border border-slate-600/60 bg-slate-800/60 px-3 py-2 text-sm font-medium text-slate-200 transition-colors hover:bg-slate-700/60 disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50";
 
 export function formatNumber(n: number): string {
   return n.toLocaleString("fr-FR");
@@ -61,13 +61,13 @@ interface SectionCardProps {
   children: React.ReactNode;
 }
 
-/** Bordered section card with an uppercase cyan-dotted title. */
+/** Bordered section card with an uppercase accent-dotted title. */
 export function SectionCard({ title, actions, children }: SectionCardProps) {
   return (
-    <section className="rounded-xl border border-slate-600/40 bg-[#0f172a]/95 p-5 shadow-2xl backdrop-blur-xl sm:p-6">
+    <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-2xl backdrop-blur-xl sm:p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-          <span className="h-1.5 w-1.5 rounded-full bg-law-cyan" />
+        <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+          <span className="h-1.5 w-1.5 rounded-full bg-accent" />
           {title}
         </h2>
         {actions}
@@ -87,15 +87,15 @@ interface StatCardProps {
 /** Compact KPI card used in the overview grids. */
 export function StatCard({ label, value, hint, icon: Icon }: StatCardProps) {
   return (
-    <div className="rounded-xl border border-slate-700/40 bg-slate-800/30 p-4">
-      <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-400">
-        {Icon && <Icon className="h-3.5 w-3.5 text-law-cyan" />}
+    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+      <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-gray-500">
+        {Icon && <Icon className="h-3.5 w-3.5 text-accent" />}
         {label}
       </p>
-      <p className="mt-1.5 truncate text-xl font-semibold text-white" title={value}>
+      <p className="mt-1.5 truncate text-xl font-semibold text-gray-900" title={value}>
         {value}
       </p>
-      {hint && <p className="mt-0.5 text-[11px] text-slate-500">{hint}</p>}
+      {hint && <p className="mt-0.5 text-[11px] text-gray-500">{hint}</p>}
     </div>
   );
 }
@@ -103,8 +103,8 @@ export function StatCard({ label, value, hint, icon: Icon }: StatCardProps) {
 /** Muted box for "nothing to show" states. */
 export function EmptyState({ message }: { message: string }) {
   return (
-    <div className="rounded-xl border border-slate-700/40 bg-slate-800/30 p-4 text-center">
-      <p className="text-xs text-slate-400">{message}</p>
+    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-center">
+      <p className="text-xs text-gray-500">{message}</p>
     </div>
   );
 }
@@ -114,10 +114,10 @@ export function StatusBadge({ value }: { value: string }) {
   const v = value.toLowerCase();
   const className =
     v.startsWith("ok") || v === "ready"
-      ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
+      ? "border-accent/30 bg-accent/10 text-accent"
       : v.startsWith("degraded") || v.startsWith("missing") || v === "not_ready"
-        ? "border-rose-400/30 bg-rose-400/10 text-rose-300"
-        : "border-amber-400/30 bg-amber-400/10 text-amber-300";
+        ? "border-red-700/30 bg-red-700/10 text-red-700"
+        : "border-warn-border/60 bg-warn-bg text-warn-text";
   return (
     <span className={`inline-block rounded-full border px-2 py-0.5 text-[11px] font-medium ${className}`}>
       {value}
@@ -128,7 +128,7 @@ export function StatusBadge({ value }: { value: string }) {
 /** Horizontally scrollable table wrapper (desktop admin, wide tables). */
 export function TableShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="overflow-x-auto rounded-xl border border-slate-700/40">
+    <div className="overflow-x-auto rounded-xl border border-gray-200">
       <table className="w-full min-w-max text-left text-sm">{children}</table>
     </div>
   );
@@ -136,7 +136,7 @@ export function TableShell({ children }: { children: React.ReactNode }) {
 
 export function THead({ children }: { children: React.ReactNode }) {
   return (
-    <thead className="border-b border-slate-700/40 bg-slate-800/40 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+    <thead className="border-b border-gray-200 bg-gray-50 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
       {children}
     </thead>
   );
@@ -159,7 +159,7 @@ export function Td({
 }) {
   return (
     <td
-      className={`border-t border-slate-800/60 px-3 py-2.5 text-slate-300 ${className}`}
+      className={`border-t border-gray-200 px-3 py-2.5 text-gray-600 ${className}`}
       title={title}
       colSpan={colSpan}
     >

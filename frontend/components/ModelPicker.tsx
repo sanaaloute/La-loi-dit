@@ -11,8 +11,8 @@ interface ModelPickerProps {
 }
 
 const TIER_BADGES: Partial<Record<Tier, { label: string; className: string }>> = {
-  pro: { label: "Pro", className: "border-law-cyan/40 bg-law-cyan/10 text-law-cyan" },
-  cabinet: { label: "Cabinet", className: "border-law-purple/40 bg-law-purple/10 text-law-purple" },
+  pro: { label: "Pro", className: "border-accent/40 bg-accent/10 text-accent" },
+  cabinet: { label: "Cabinet", className: "border-ink/40 bg-ink/10 text-ink" },
 };
 
 export default function ModelPicker({ token, value, onChange }: ModelPickerProps) {
@@ -65,15 +65,15 @@ export default function ModelPicker({ token, value, onChange }: ModelPickerProps
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 rounded-lg border border-slate-600/60 bg-slate-800/60 px-3 py-2 text-xs font-medium text-slate-200 backdrop-blur-sm transition-colors hover:border-slate-500 hover:bg-slate-700/60"
+        className="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-700 backdrop-blur-sm transition-colors hover:border-gray-400 hover:bg-gray-100"
         title="Choisir le modèle"
       >
-        <Cpu className="h-4 w-4 text-law-cyan" />
+        <Cpu className="h-4 w-4 text-accent" />
         <span className="max-w-40 truncate">{current?.label ?? "Modèle"}</span>
-        <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
+        <ChevronDown className="h-3.5 w-3.5 text-gray-500" />
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-slate-600/40 bg-[#0f172a]/95 p-1.5 shadow-2xl backdrop-blur-xl">
+        <div className="absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-gray-200 bg-white p-1.5 shadow-2xl backdrop-blur-xl">
           {models.map((model) => {
             const badge = model.allowed ? undefined : TIER_BADGES[model.tier_required];
             return (
@@ -84,14 +84,14 @@ export default function ModelPicker({ token, value, onChange }: ModelPickerProps
                 disabled={!model.allowed}
                 className={`flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
                   model.allowed
-                    ? "text-slate-200 hover:bg-white/5"
-                    : "cursor-not-allowed text-slate-500"
+                    ? "text-gray-700 hover:bg-gray-100"
+                    : "cursor-not-allowed text-gray-500"
                 }`}
               >
                 <span className="flex min-w-0 items-center gap-2">
                   <span className="truncate">{model.label}</span>
                   {model.id === value && (
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-law-cyan" />
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
                   )}
                 </span>
                 {badge && (

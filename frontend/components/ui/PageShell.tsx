@@ -8,8 +8,8 @@ interface PageShellProps {
 
 /**
  * Common page scaffold: full-height column, scrollable content area and the
- * glass footer disclaimer bar. The gradient background and glow blobs come
- * from globals.css (body). The chat page keeps its own layout.
+ * glass footer disclaimer bar. The off-white page background comes from
+ * globals.css (body). The chat page keeps its own layout.
  */
 export default function PageShell({ header, disclaimer, children }: PageShellProps) {
   return (
@@ -18,7 +18,7 @@ export default function PageShell({ header, disclaimer, children }: PageShellPro
       <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6">{children}</main>
       {disclaimer && (
         <footer className="glass z-10 px-4 py-2 sm:px-6">
-          <p className="mx-auto max-w-3xl text-center text-[10px] text-slate-500">{disclaimer}</p>
+          <p className="mx-auto max-w-3xl text-center text-[10px] text-gray-500">{disclaimer}</p>
         </footer>
       )}
     </div>

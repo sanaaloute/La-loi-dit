@@ -60,7 +60,7 @@ function isForbidden(err: unknown): boolean {
 }
 
 const INPUT_CLASS =
-  "w-full rounded-lg border border-slate-600/60 bg-slate-900/60 px-3 py-2 text-sm text-white placeholder:text-slate-600 focus:border-law-cyan/60 focus:outline-none";
+  "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-accent/60 focus:outline-none";
 
 function FieldInput({
   field,
@@ -256,7 +256,7 @@ export default function RedactionPage() {
           <button
             type="button"
             onClick={() => window.location.reload()}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-600/60 bg-slate-800/60 px-4 py-2 text-sm font-medium text-slate-200 transition-colors hover:bg-slate-700/60"
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-gray-50 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
           >
             Réessayer
           </button>
@@ -267,13 +267,13 @@ export default function RedactionPage() {
           <div className="mx-auto max-w-4xl">
             <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="text-xl font-semibold text-white">Choisissez un modèle</h2>
-                <p className="mt-1 text-sm text-slate-400">
+                <h2 className="text-xl font-semibold text-gray-900">Choisissez un modèle</h2>
+                <p className="mt-1 text-sm text-gray-500">
                   Le document est généré à partir de vos réponses et de sources vérifiées.
                 </p>
               </div>
               <div className="relative sm:w-64">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
                 <input
                   type="text"
                   value={search}
@@ -284,14 +284,14 @@ export default function RedactionPage() {
               </div>
             </div>
             {grouped.length === 0 ? (
-              <p className="py-10 text-center text-sm text-slate-500">
+              <p className="py-10 text-center text-sm text-gray-500">
                 Aucun modèle ne correspond à votre recherche.
               </p>
             ) : (
               grouped.map((group) => (
                 <section key={group.category} className="mb-8">
-                  <h3 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                    <span className="h-1.5 w-1.5 rounded-full bg-law-cyan" />
+                  <h3 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    <span className="h-1.5 w-1.5 rounded-full bg-accent" />
                     {group.label}
                   </h3>
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -300,13 +300,13 @@ export default function RedactionPage() {
                         key={t.id}
                         type="button"
                         onClick={() => pickTemplate(t)}
-                        className="rounded-xl border border-slate-700/60 bg-slate-800/40 p-4 text-left backdrop-blur-sm transition-all hover:border-law-cyan/50 hover:bg-slate-700/50"
+                        className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-left backdrop-blur-sm transition-all hover:border-accent/50 hover:bg-gray-100"
                       >
-                        <span className="mb-2 flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-law-cyan/20 to-law-blue/20 text-law-cyan">
+                        <span className="mb-2 flex h-9 w-9 items-center justify-center rounded-lg bg-accent/10 text-accent">
                           <FilePenLine className="h-4 w-4" />
                         </span>
-                        <span className="block text-sm font-medium text-white">{t.label}</span>
-                        <span className="mt-1 block text-xs leading-relaxed text-slate-400">
+                        <span className="block text-sm font-medium text-gray-900">{t.label}</span>
+                        <span className="mt-1 block text-xs leading-relaxed text-gray-500">
                           {t.description}
                         </span>
                       </button>
@@ -321,35 +321,35 @@ export default function RedactionPage() {
             <button
               type="button"
               onClick={() => setStep("templates")}
-              className="mb-4 flex items-center gap-1.5 text-xs text-slate-400 transition-colors hover:text-white"
+              className="mb-4 flex items-center gap-1.5 text-xs text-gray-500 transition-colors hover:text-gray-900"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
               Tous les modèles
             </button>
             {quotaError && (
-              <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
-                <p className="mb-1 flex items-center gap-2 text-sm font-semibold text-amber-300">
+              <div className="mb-4 rounded-xl border border-warn-border/60 bg-warn-bg p-3">
+                <p className="mb-1 flex items-center gap-2 text-sm font-semibold text-warn-text">
                   <AlertTriangle className="h-4 w-4" />
                   Quota journalier atteint
                 </p>
-                <p className="text-xs text-amber-100">{quotaError}</p>
-                <p className="mt-1 text-xs text-amber-300/80">
+                <p className="text-xs text-warn-text">{quotaError}</p>
+                <p className="mt-1 text-xs text-warn-text/80">
                   Passez à l&apos;offre supérieure pour continuer.
                 </p>
               </div>
             )}
-            <div className="rounded-xl border border-slate-600/40 bg-[#0f172a]/95 p-5 shadow-2xl backdrop-blur-xl sm:p-6">
-              <h2 className="text-lg font-semibold text-white">{template.label}</h2>
-              <p className="mb-5 mt-1 text-sm text-slate-400">{template.description}</p>
+            <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-2xl backdrop-blur-xl sm:p-6">
+              <h2 className="text-lg font-semibold text-gray-900">{template.label}</h2>
+              <p className="mb-5 mt-1 text-sm text-gray-500">{template.description}</p>
               <form onSubmit={handleGenerate} className="space-y-4">
                 {template.fields.map((field) => (
                   <div key={field.name}>
                     <label
                       htmlFor={`draft-field-${field.name}`}
-                      className="mb-1 block text-xs font-medium text-slate-300"
+                      className="mb-1 block text-xs font-medium text-gray-600"
                     >
                       {field.label}
-                      {field.required && <span className="text-rose-400"> *</span>}
+                      {field.required && <span className="text-red-700"> *</span>}
                     </label>
                     <FieldInput
                       field={field}
@@ -359,8 +359,8 @@ export default function RedactionPage() {
                   </div>
                 ))}
                 <div>
-                  <label htmlFor="draft-instructions" className="mb-1 block text-xs font-medium text-slate-300">
-                    Instructions complémentaires <span className="text-slate-500">(facultatif)</span>
+                  <label htmlFor="draft-instructions" className="mb-1 block text-xs font-medium text-gray-600">
+                    Instructions complémentaires <span className="text-gray-500">(facultatif)</span>
                   </label>
                   <textarea
                     id="draft-instructions"
@@ -371,11 +371,11 @@ export default function RedactionPage() {
                     className={INPUT_CLASS}
                   />
                 </div>
-                {formError && <p className="text-xs text-rose-300">{formError}</p>}
+                {formError && <p className="text-xs text-red-700">{formError}</p>}
                 <button
                   type="submit"
                   disabled={busy}
-                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-law-cyan to-law-blue px-3 py-2.5 text-sm font-medium text-white shadow-glow-sm transition-all hover:shadow-glow disabled:opacity-50"
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
                 >
                   {busy ? (
                     <>
@@ -398,7 +398,7 @@ export default function RedactionPage() {
               <button
                 type="button"
                 onClick={() => setStep("form")}
-                className="flex items-center gap-1.5 text-xs text-slate-400 transition-colors hover:text-white"
+                className="flex items-center gap-1.5 text-xs text-gray-500 transition-colors hover:text-gray-900"
               >
                 <ArrowLeft className="h-3.5 w-3.5" />
                 Modifier les informations
@@ -410,23 +410,23 @@ export default function RedactionPage() {
                   setTemplate(null);
                   setStep("templates");
                 }}
-                className="flex items-center gap-1.5 rounded-lg border border-slate-600/60 bg-slate-800/60 px-3 py-2 text-xs font-medium text-slate-200 transition-colors hover:bg-slate-700/60"
+                className="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-100"
               >
                 <FilePenLine className="h-4 w-4" />
                 Nouveau document
               </button>
             </div>
 
-            <div className="rounded-xl border border-slate-600/40 bg-[#0f172a]/95 p-5 shadow-2xl backdrop-blur-xl sm:p-6">
-              <div className="mb-4 flex flex-wrap items-start justify-between gap-3 border-b border-slate-700/40 pb-4">
+            <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-2xl backdrop-blur-xl sm:p-6">
+              <div className="mb-4 flex flex-wrap items-start justify-between gap-3 border-b border-gray-200 pb-4">
                 <div>
-                  <h2 className="text-lg font-semibold text-white">{draft.title}</h2>
-                  <p className="mt-1 text-[11px] text-slate-500">
+                  <h2 className="text-lg font-semibold text-gray-900">{draft.title}</h2>
+                  <p className="mt-1 text-[11px] text-gray-500">
                     Généré en {draft.latency_ms.toFixed(0)} ms
                   </p>
                 </div>
                 {draft.requires_human_review && (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-rose-400/30 bg-rose-400/10 px-2.5 py-0.5 text-xs font-semibold text-rose-300">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-red-700/30 bg-red-700/10 px-2.5 py-0.5 text-xs font-semibold text-red-700">
                     <ShieldAlert className="h-3 w-3" />
                     Révision humaine recommandée
                   </span>
@@ -434,18 +434,18 @@ export default function RedactionPage() {
               </div>
 
               {draft.requires_human_review && (
-                <div className="mb-4 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+                <div className="mb-4 rounded-xl border border-red-700/20 bg-red-700/10 px-3 py-2 text-xs text-red-800">
                   Ce document doit être relu et validé par un juriste avant toute utilisation.
                 </div>
               )}
 
               {draft.warnings.length > 0 && (
-                <div className="mb-4 rounded-xl border border-amber-500/20 bg-amber-500/10 p-3">
-                  <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-amber-300">
+                <div className="mb-4 rounded-xl border border-warn-border/60 bg-warn-bg p-3">
+                  <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-warn-text">
                     <AlertTriangle className="h-3.5 w-3.5" />
                     Avertissements
                   </p>
-                  <ul className="list-disc space-y-1 pl-4 text-xs text-amber-100">
+                  <ul className="list-disc space-y-1 pl-4 text-xs text-warn-text">
                     {draft.warnings.map((w, i) => (
                       <li key={i}>{w}</li>
                     ))}
@@ -457,7 +457,7 @@ export default function RedactionPage() {
                 <ReactMarkdown>{draft.draft_markdown}</ReactMarkdown>
               </div>
 
-              <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-slate-700/40 pt-4">
+              <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-gray-200 pt-4">
                 {DRAFT_EXPORTS.filter((f) => !allowedExports || allowedExports.includes(f.id)).map(
                   (f) => (
                     <button
@@ -465,12 +465,12 @@ export default function RedactionPage() {
                       type="button"
                       onClick={() => void handleExport(f.id)}
                       disabled={exporting !== null}
-                      className="flex items-center gap-2 rounded-lg border border-slate-600/40 bg-slate-800/50 px-3 py-2 text-xs font-medium text-slate-200 transition-colors hover:border-law-cyan/40 hover:bg-slate-700/50 disabled:opacity-50"
+                      className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-700 transition-colors hover:border-accent/40 hover:bg-gray-100 disabled:opacity-50"
                     >
                       {exporting === f.id ? (
-                        <Loader2 className="h-4 w-4 animate-spin text-law-cyan" />
+                        <Loader2 className="h-4 w-4 animate-spin text-accent" />
                       ) : (
-                        <f.icon className="h-4 w-4 text-law-cyan" />
+                        <f.icon className="h-4 w-4 text-accent" />
                       )}
                       {f.label}
                     </button>
@@ -479,16 +479,16 @@ export default function RedactionPage() {
                 <button
                   type="button"
                   onClick={() => void handleCopy()}
-                  className="flex items-center gap-2 rounded-lg border border-slate-600/40 bg-slate-800/50 px-3 py-2 text-xs font-medium text-slate-200 transition-colors hover:border-law-cyan/40 hover:bg-slate-700/50"
+                  className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-700 transition-colors hover:border-accent/40 hover:bg-gray-100"
                 >
                   {copied ? (
-                    <Check className="h-4 w-4 text-emerald-400" />
+                    <Check className="h-4 w-4 text-accent" />
                   ) : (
-                    <Copy className="h-4 w-4 text-law-cyan" />
+                    <Copy className="h-4 w-4 text-accent" />
                   )}
                   {copied ? "Copié !" : "Copier"}
                 </button>
-                <span className="ml-auto hidden items-center gap-1 text-[11px] text-slate-500 sm:flex">
+                <span className="ml-auto hidden items-center gap-1 text-[11px] text-gray-500 sm:flex">
                   <Download className="h-3 w-3" />
                   Export au format PDF, Word ou Markdown
                 </span>
@@ -496,7 +496,7 @@ export default function RedactionPage() {
             </div>
 
             {draft.citations.length > 0 && (
-              <div className="rounded-xl border border-slate-600/40 bg-[#0f172a]/95 shadow-2xl backdrop-blur-xl">
+              <div className="rounded-xl border border-gray-200 bg-white shadow-2xl backdrop-blur-xl">
                 <CitationPanel citations={draft.citations} />
               </div>
             )}

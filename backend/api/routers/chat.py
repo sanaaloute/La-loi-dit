@@ -23,7 +23,7 @@ import logging
 import time
 from typing import Any, AsyncIterator, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from langchain_core.callbacks import AsyncCallbackHandler
 from pydantic import BaseModel, ValidationError
@@ -689,3 +689,25 @@ async def get_chat_session(
             for m in messages
         ],
     }
+
+
+@router.delete("/chat/sessions/{session_id}", status_code=204, response_class=Response)
+async def delete_chat_session(
+    session_id: str,
+    request: Request,
+    user: TokenPayload = Depends(require_user),
+) -> Response:
+    """Delete one of the caller's chat sessions (all its messages).
+
+    Owner-scoped like the read endpoints: deleting another user's session
+    yields 404 (no existence leak). 204 with an empty body on success.
+    """
+    ctx = get_ctx(request)
+    deleted = (
+        0
+        if ctx.memory is None
+        else await ctx.memory.delete_session(user.user_id or user.sub, session_id)
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Session introuvable.")
+    return Response(status_code=204)

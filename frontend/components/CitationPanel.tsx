@@ -10,47 +10,47 @@ interface CitationPanelProps {
 export default function CitationPanel({ citations }: CitationPanelProps) {
   return (
     <div className="p-4">
-      <h3 className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-        <span className="h-1.5 w-1.5 rounded-full bg-law-cyan" />
+      <h3 className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+        <span className="h-1.5 w-1.5 rounded-full bg-accent" />
         Citations ({citations.length})
       </h3>
       {citations.length === 0 ? (
-        <div className="rounded-xl border border-slate-700/40 bg-slate-800/30 p-4 text-center">
-          <p className="text-xs text-slate-400">Aucune citation pour cette réponse.</p>
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-center">
+          <p className="text-xs text-gray-500">Aucune citation pour cette réponse.</p>
         </div>
       ) : (
         <ul className="space-y-3">
           {citations.map((citation, i) => (
             <li
               key={`${citation.label}-${i}`}
-              className="rounded-xl border border-slate-700/40 bg-surface-elevated p-3 transition-colors hover:border-law-cyan/30"
+              className="rounded-xl border border-gray-200 bg-surface-elevated p-3 transition-colors hover:border-accent/30"
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-slate-100">{citation.label}</p>
+                  <p className="text-sm font-medium text-gray-900">{citation.label}</p>
                   {citation.article && (
-                    <p className="mt-0.5 text-xs text-slate-400">Article {citation.article}</p>
+                    <p className="mt-0.5 text-xs text-gray-500">Article {citation.article}</p>
                   )}
                 </div>
                 {citation.verified ? (
-                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent">
                     <CheckCircle2 className="h-3 w-3" />
                     Vérifiée
                   </span>
                 ) : (
-                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-[10px] font-medium text-amber-300">
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-warn-border/60 bg-warn-bg px-2 py-0.5 text-[10px] font-medium text-warn-text">
                     <AlertCircle className="h-3 w-3" />
                     Non vérifiée
                   </span>
                 )}
               </div>
-              <p className="mt-1 truncate text-[11px] text-slate-500">{citation.document_name}</p>
+              <p className="mt-1 truncate text-[11px] text-gray-500">{citation.document_name}</p>
               {citation.url && (
                 <a
                   href={citation.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="mt-2 inline-flex items-center gap-1 truncate text-xs text-law-cyan hover:text-law-cyan/80 hover:underline"
+                  className="mt-2 inline-flex items-center gap-1 truncate text-xs text-accent hover:text-accent/80 hover:underline"
                 >
                   <ExternalLink className="h-3 w-3" />
                   {citation.url}

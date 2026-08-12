@@ -8,9 +8,9 @@ import { adminApi, listModels, type ModelInfo, type ProvidersResponse, type Tier
 import { EmptyState, SectionCard, StatusBadge, TableShell, Td, Th, THead, formatCheckName, formatCheckValue } from "./ui";
 
 const TIER_STYLES: Record<Tier, { label: string; className: string }> = {
-  gratuit: { label: "Gratuit", className: "border-slate-500/40 bg-slate-500/10 text-slate-300" },
-  pro: { label: "Pro", className: "border-law-cyan/40 bg-law-cyan/10 text-law-cyan" },
-  cabinet: { label: "Cabinet", className: "border-law-purple/40 bg-law-purple/10 text-law-purple" },
+  gratuit: { label: "Gratuit", className: "border-gray-300 bg-gray-100 text-gray-600" },
+  pro: { label: "Pro", className: "border-accent/40 bg-accent/10 text-accent" },
+  cabinet: { label: "Cabinet", className: "border-ink/40 bg-ink/10 text-ink" },
 };
 
 const TIER_ORDER: Tier[] = ["gratuit", "pro", "cabinet"];
@@ -56,7 +56,7 @@ export default function ProvidersTab() {
         <button
           type="button"
           onClick={() => void load()}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-600/60 bg-slate-800/60 px-4 py-2 text-sm font-medium text-slate-200 transition-colors hover:bg-slate-700/60"
+          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-gray-50 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
         >
           Réessayer
         </button>
@@ -90,13 +90,13 @@ export default function ProvidersTab() {
                 return (
                   <Fragment key={p.provider}>
                     <tr>
-                      <Td className="font-medium text-slate-200">{p.provider}</Td>
+                      <Td className="font-medium text-gray-700">{p.provider}</Td>
                       <Td>
                         <span
                           className={`inline-block rounded-full border px-2 py-0.5 text-[11px] font-medium ${
                             p.configured
-                              ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
-                              : "border-rose-400/30 bg-rose-400/10 text-rose-300"
+                              ? "border-accent/30 bg-accent/10 text-accent"
+                              : "border-warn-border/60 bg-warn-bg text-warn-text"
                           }`}
                         >
                           {p.configured ? "Configuré" : "Non configuré"}
@@ -111,17 +111,17 @@ export default function ProvidersTab() {
                       </Td>
                       <Td>
                         {p.models.length === 0 ? (
-                          <span className="text-xs text-slate-500">—</span>
+                          <span className="text-xs text-gray-500">—</span>
                         ) : (
                           <button
                             type="button"
                             onClick={() => toggleProvider(p.provider)}
                             aria-expanded={expanded}
-                            className="inline-flex items-center gap-1 rounded-lg border border-slate-600/60 bg-slate-800/60 px-2 py-1 text-xs font-medium text-slate-200 transition-colors hover:bg-slate-700/60"
+                            className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-gray-50 px-2 py-1 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-100"
                           >
                             {p.models.length} modèle{p.models.length > 1 ? "s" : ""}
                             <ChevronDown
-                              className={`h-3.5 w-3.5 text-slate-400 transition-transform ${expanded ? "rotate-180" : ""}`}
+                              className={`h-3.5 w-3.5 text-gray-500 transition-transform ${expanded ? "rotate-180" : ""}`}
                             />
                           </button>
                         )}
@@ -129,7 +129,7 @@ export default function ProvidersTab() {
                     </tr>
                     {expanded && (
                       <tr>
-                        <Td colSpan={6} className="bg-slate-800/20">
+                        <Td colSpan={6} className="bg-gray-50">
                           <div className="flex flex-wrap gap-1.5">
                             {p.models.map((m) => {
                               const badge = m.tier_required !== "gratuit" ? TIER_STYLES[m.tier_required] : null;
@@ -137,7 +137,7 @@ export default function ProvidersTab() {
                                 <span
                                   key={m.id}
                                   title={m.id}
-                                  className="inline-flex items-center gap-1.5 rounded-full border border-slate-600/60 bg-slate-800/60 px-2.5 py-1 text-xs text-slate-200"
+                                  className="inline-flex items-center gap-1.5 rounded-full border border-gray-300 bg-gray-50 px-2.5 py-1 text-xs text-gray-700"
                                 >
                                   {m.label}
                                   {badge && (
@@ -175,17 +175,17 @@ export default function ProvidersTab() {
               return (
                 <div
                   key={tier}
-                  className="rounded-xl border border-slate-700/40 bg-slate-800/30 p-4"
+                  className="rounded-xl border border-gray-200 bg-gray-50 p-4"
                 >
                   <span
                     className={`inline-block rounded-full border px-2.5 py-1 text-xs font-medium ${style.className}`}
                   >
                     {style.label}
                   </span>
-                  <p className="mt-2 truncate text-sm font-medium text-white" title={modelId}>
+                  <p className="mt-2 truncate text-sm font-medium text-gray-900" title={modelId}>
                     {model?.label ?? modelId ?? "—"}
                   </p>
-                  {model && <p className="mt-0.5 truncate font-mono text-[11px] text-slate-500">{model.id}</p>}
+                  {model && <p className="mt-0.5 truncate font-mono text-[11px] text-gray-500">{model.id}</p>}
                 </div>
               );
             })}
@@ -204,9 +204,9 @@ export default function ProvidersTab() {
               return (
                 <div
                   key={name}
-                  className="flex items-center justify-between gap-2 rounded-lg border border-slate-700/40 bg-slate-800/30 px-3 py-2.5"
+                  className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5"
                 >
-                  <span className="min-w-0 truncate text-xs text-slate-300" title={name}>
+                  <span className="min-w-0 truncate text-xs text-gray-600" title={name}>
                     {formatCheckName(name)}
                   </span>
                   <span title={text}>
@@ -238,7 +238,7 @@ export default function ProvidersTab() {
                 const style = TIER_STYLES[m.tier_required];
                 return (
                   <tr key={m.id}>
-                    <Td className="text-slate-200">{m.label}</Td>
+                    <Td className="text-gray-700">{m.label}</Td>
                     <Td className="font-mono text-xs">{m.id}</Td>
                     <Td className="text-xs">{m.provider}</Td>
                     <Td>

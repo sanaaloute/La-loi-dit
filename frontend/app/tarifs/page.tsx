@@ -157,14 +157,14 @@ export default function TarifsPage() {
       return card.id === "gratuit" ? (
         <Link
           href="/"
-          className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-600/60 bg-slate-800/60 px-3 py-2.5 text-sm font-medium text-slate-200 transition-colors hover:bg-slate-700/60"
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
         >
           Commencer gratuitement
         </Link>
       ) : (
         <Link
           href="/"
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-law-cyan to-law-blue px-3 py-2.5 text-sm font-medium text-white shadow-glow-sm transition-all hover:shadow-glow"
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
         >
           Se connecter pour souscrire
         </Link>
@@ -174,7 +174,7 @@ export default function TarifsPage() {
     const rank = TIER_RANK[card.id] ?? 0;
     if (rank === currentRank) {
       return (
-        <span className="flex w-full cursor-default items-center justify-center gap-2 rounded-lg border border-law-cyan/40 bg-law-cyan/10 px-3 py-2.5 text-sm font-medium text-law-cyan">
+        <span className="flex w-full cursor-default items-center justify-center gap-2 rounded-lg border border-accent/40 bg-accent/10 px-3 py-2.5 text-sm font-medium text-accent">
           <Check className="h-4 w-4" />
           Votre offre
         </span>
@@ -182,14 +182,14 @@ export default function TarifsPage() {
     }
     if (rank < currentRank) {
       return (
-        <span className="flex w-full items-center justify-center rounded-lg px-3 py-2.5 text-xs text-slate-500">
+        <span className="flex w-full items-center justify-center rounded-lg px-3 py-2.5 text-xs text-gray-500">
           Inclus dans votre offre actuelle
         </span>
       );
     }
     if (config && !config.enabled) {
       return (
-        <span className="flex w-full cursor-default items-center justify-center rounded-lg border border-slate-600/40 bg-slate-800/40 px-3 py-2.5 text-xs font-medium text-slate-400">
+        <span className="flex w-full cursor-default items-center justify-center rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-xs font-medium text-gray-500">
           Bientôt disponible
         </span>
       );
@@ -199,7 +199,7 @@ export default function TarifsPage() {
         type="button"
         onClick={() => void handleUpgrade(card.id as PaidTier)}
         disabled={checkoutBusy !== null}
-        className="flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-law-cyan to-law-blue px-3 py-2.5 text-sm font-medium text-white shadow-glow-sm transition-all hover:shadow-glow disabled:opacity-50"
+        className="flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
       >
         {checkoutBusy === card.id ? (
           <Loader2 className="h-4 w-4 animate-spin" />
@@ -217,25 +217,25 @@ export default function TarifsPage() {
     >
       <div className="mx-auto max-w-5xl">
         <div className="mb-8 text-center">
-          <h1 className="mb-2 text-2xl font-semibold text-white sm:text-3xl">
-            Des offres adaptées à <span className="gradient-text">votre pratique</span>
+          <h1 className="mb-2 text-2xl font-semibold text-gray-900 sm:text-3xl">
+            Des offres adaptées à <span className="text-accent">votre pratique</span>
           </h1>
-          <p className="mx-auto max-w-xl text-sm text-slate-400">
+          <p className="mx-auto max-w-xl text-sm text-gray-500">
             Recherche juridique fondée sur des sources vérifiées pour l&apos;Afrique de
             l&apos;Ouest (OHADA et droits nationaux). Changez d&apos;offre à tout moment.
           </p>
         </div>
 
         {banner === "success" && (
-          <div className="mx-auto mb-6 flex max-w-2xl items-start justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
-            <p className="flex items-center gap-2 text-sm text-emerald-200">
-              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-300" />
+          <div className="mx-auto mb-6 flex max-w-2xl items-start justify-between gap-3 rounded-xl border border-accent/30 bg-accent/10 p-4">
+            <p className="flex items-center gap-2 text-sm text-accent">
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-accent" />
               Paiement confirmé — votre offre sera activée sous quelques instants.
             </p>
             <button
               type="button"
               onClick={() => setBanner(null)}
-              className="rounded p-1 text-emerald-300/70 hover:text-emerald-200"
+              className="rounded p-1 text-accent/70 hover:text-accent"
               aria-label="Fermer"
             >
               <X className="h-4 w-4" />
@@ -243,15 +243,15 @@ export default function TarifsPage() {
           </div>
         )}
         {banner === "canceled" && (
-          <div className="mx-auto mb-6 flex max-w-2xl items-start justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
-            <p className="flex items-center gap-2 text-sm text-amber-200">
-              <Info className="h-4 w-4 shrink-0 text-amber-300" />
+          <div className="mx-auto mb-6 flex max-w-2xl items-start justify-between gap-3 rounded-xl border border-warn-border/60 bg-warn-bg p-4">
+            <p className="flex items-center gap-2 text-sm text-warn-text">
+              <Info className="h-4 w-4 shrink-0 text-warn-text" />
               Paiement annulé — aucun montant n&apos;a été débité.
             </p>
             <button
               type="button"
               onClick={() => setBanner(null)}
-              className="rounded p-1 text-amber-300/70 hover:text-amber-200"
+              className="rounded p-1 text-warn-text/70 hover:text-warn-text"
               aria-label="Fermer"
             >
               <X className="h-4 w-4" />
@@ -259,8 +259,8 @@ export default function TarifsPage() {
           </div>
         )}
         {checkoutError && (
-          <div className="mx-auto mb-6 max-w-2xl rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-center">
-            <p className="text-sm text-rose-300">{checkoutError}</p>
+          <div className="mx-auto mb-6 max-w-2xl rounded-xl border border-red-700/30 bg-red-700/10 p-4 text-center">
+            <p className="text-sm text-red-700">{checkoutError}</p>
           </div>
         )}
 
@@ -270,28 +270,28 @@ export default function TarifsPage() {
             return (
               <div
                 key={card.id}
-                className={`relative flex flex-col rounded-xl border bg-[#0f172a]/95 p-6 shadow-2xl backdrop-blur-xl ${
+                className={`relative flex flex-col rounded-xl border bg-white p-6 shadow-2xl backdrop-blur-xl ${
                   highlight
-                    ? "border-law-cyan/50 shadow-glow-sm"
+                    ? "border-accent/50"
                     : card.id === "cabinet"
-                      ? "border-law-purple/40"
-                      : "border-slate-600/40"
+                      ? "border-ink/40"
+                      : "border-gray-200"
                 }`}
               >
                 {highlight && (
-                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full border border-law-cyan/40 bg-[#0f172a] px-3 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-law-cyan">
+                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full border border-accent/40 bg-white px-3 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">
                     Populaire
                   </span>
                 )}
-                <h2 className="text-lg font-semibold text-white">{card.label}</h2>
-                <p className="mt-0.5 text-xs text-slate-400">{card.tagline}</p>
-                <p className="mt-4 text-2xl font-semibold text-white">{TIER_PRICES[card.id]}</p>
+                <h2 className="text-lg font-semibold text-gray-900">{card.label}</h2>
+                <p className="mt-0.5 text-xs text-gray-500">{card.tagline}</p>
+                <p className="mt-4 text-2xl font-semibold text-gray-900">{TIER_PRICES[card.id]}</p>
                 <ul className="mb-6 mt-5 flex-1 space-y-2">
                   {card.features.map((feature) => (
-                    <li key={feature} className="flex items-start gap-2 text-sm text-slate-300">
+                    <li key={feature} className="flex items-start gap-2 text-sm text-gray-600">
                       <Check
                         className={`mt-0.5 h-4 w-4 shrink-0 ${
-                          card.id === "cabinet" ? "text-law-purple" : "text-law-cyan"
+                          card.id === "cabinet" ? "text-ink" : "text-accent"
                         }`}
                       />
                       {feature}

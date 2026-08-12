@@ -1,0 +1,47 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - generic [ref=e4]:
+        - link "Yawoto. Assistant juridique" [ref=e5] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e11]:
+            - generic [ref=e12]: Yawoto.
+            - generic [ref=e13]: Assistant juridique
+        - navigation [ref=e14]:
+          - link "Assistant" [ref=e15] [cursor=pointer]:
+            - /url: /
+          - link "Rédaction" [ref=e18] [cursor=pointer]:
+            - /url: /redaction
+          - link "Tarifs" [ref=e23] [cursor=pointer]:
+            - /url: /tarifs
+          - link "Compte" [ref=e27] [cursor=pointer]:
+            - /url: /compte
+      - generic [ref=e31]:
+        - button "Nouvelle conversation" [ref=e32] [cursor=pointer]
+        - button "Compte et connexion" [ref=e36] [cursor=pointer]
+    - generic [ref=e40]:
+      - complementary [ref=e41]:
+        - generic [ref=e42]:
+          - generic [ref=e43]: Historique
+          - button "Réduire l'historique" [ref=e50] [cursor=pointer]
+        - generic [ref=e54]: Chargement…
+      - main [ref=e59]:
+        - generic [ref=e61]:
+          - heading "Le droit, cité à la source." [level=2] [ref=e66]
+          - paragraph [ref=e67]: Posez vos questions en français. Yawoto répond à partir des textes officiels du Burkina Faso et de l'OHADA, avec citations vérifiables et traçabilité complète.
+          - generic [ref=e68]:
+            - button "Quels sont les droits d'un salarié licencié au Burkina Faso ?" [ref=e69] [cursor=pointer]
+            - button "Quelle est la procédure de divorce selon le Code des personnes et de la famille ?" [ref=e70] [cursor=pointer]
+            - button "Quelles sont les règles OHADA applicables à la création d'une SARL ?" [ref=e71] [cursor=pointer]
+        - generic [ref=e73]:
+          - textbox "Votre question juridique… (Entrée pour envoyer, Maj+Entrée pour sauter une ligne)" [ref=e74]
+          - button "Envoyer" [disabled] [ref=e75]
+      - complementary [ref=e78]:
+        - generic [ref=e79]:
+          - button "Agents" [ref=e80] [cursor=pointer]
+          - button "Citations" [ref=e81] [cursor=pointer]
+          - button "Preuves" [ref=e82] [cursor=pointer]
+        - generic [ref=e84]:
+          - heading "Exécution des agents" [level=3] [ref=e85]
+          - paragraph [ref=e88]: La chaîne d'agents s'affichera ici pendant le traitement d'une question.
+  - alert [ref=e89]

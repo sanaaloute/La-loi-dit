@@ -80,7 +80,7 @@ export default function UsersTab() {
         <button
           type="button"
           onClick={() => void load()}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-600/60 bg-slate-800/60 px-4 py-2 text-sm font-medium text-slate-200 transition-colors hover:bg-slate-700/60"
+          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-gray-50 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
         >
           Réessayer
         </button>
@@ -188,11 +188,11 @@ export default function UsersTab() {
                   <Td>{formatNumber(row.requests)}</Td>
                 </tr>
               ))}
-              <tr className="bg-slate-800/40 font-medium">
-                <Td className="text-xs text-slate-200">Total</Td>
-                <Td className="text-slate-200">{formatNumber(totals.tokens_in ?? 0)}</Td>
-                <Td className="text-slate-200">{formatNumber(totals.tokens_out ?? 0)}</Td>
-                <Td className="text-slate-200">{formatNumber(totals.requests ?? 0)}</Td>
+              <tr className="bg-gray-50 font-medium">
+                <Td className="text-xs text-gray-700">Total</Td>
+                <Td className="text-gray-700">{formatNumber(totals.tokens_in ?? 0)}</Td>
+                <Td className="text-gray-700">{formatNumber(totals.tokens_out ?? 0)}</Td>
+                <Td className="text-gray-700">{formatNumber(totals.requests ?? 0)}</Td>
               </tr>
             </tbody>
           </TableShell>

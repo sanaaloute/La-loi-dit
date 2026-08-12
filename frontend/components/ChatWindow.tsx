@@ -3,14 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import {
-  Bot,
   AlertTriangle,
+  ArrowUp,
+  Bot,
   History,
   Loader2,
   Menu,
   MessageSquarePlus,
   PanelRight,
-  Send,
   Square,
   ThumbsDown,
   ThumbsUp,
@@ -37,6 +37,7 @@ import {
   streamChat,
   submitFeedback,
   type ChatResponse,
+  type ExportItem,
   type StreamEvent,
 } from "@/lib/api";
 
@@ -315,8 +316,32 @@ export default function ChatWindow() {
     }
   }
 
-  const selectedMessage = messages.find((m) => m.id === selectedId);
+  const selectedIndex = messages.findIndex((m) => m.id === selectedId);
+  const selectedMessage = selectedIndex >= 0 ? messages[selectedIndex] : undefined;
   const selectedAnswer = selectedMessage?.response?.answer;
+
+  // The user question the selected answer replies to (not the answer text).
+  let selectedQuery = "";
+  if (selectedMessage?.role === "assistant") {
+    for (let i = selectedIndex - 1; i >= 0; i--) {
+      if (messages[i].role === "user") {
+        selectedQuery = messages[i].text;
+        break;
+      }
+    }
+  }
+
+  // All question/answer exchanges of the conversation, for full-chat exports.
+  const conversationItems: ExportItem[] = [];
+  let pendingQuery: string | null = null;
+  for (const m of messages) {
+    if (m.role === "user") {
+      pendingQuery = m.text;
+    } else if (m.response && pendingQuery !== null) {
+      conversationItems.push({ query: pendingQuery, answer: m.response.answer });
+      pendingQuery = null;
+    }
+  }
 
   const suggestions = [
     "Quels sont les droits d'un salarié licencié au Burkina Faso ?",
@@ -335,7 +360,7 @@ export default function ChatWindow() {
             <button
               type="button"
               onClick={() => setHistoryOpen(true)}
-              className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-300 transition-colors hover:bg-white/5 hover:text-white md:hidden"
+              className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 md:hidden"
               title="Historique des conversations"
             >
               <History className="h-5 w-5" />
@@ -346,7 +371,7 @@ export default function ChatWindow() {
         <button
           type="button"
           onClick={() => setPanelOpen((v) => !v)}
-          className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-300 transition-colors hover:bg-white/5 hover:text-white md:hidden"
+          className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 md:hidden"
           title="Panneau latéral"
         >
           <PanelRight className="h-5 w-5" />
@@ -355,7 +380,7 @@ export default function ChatWindow() {
         <button
           type="button"
           onClick={newConversation}
-          className="hidden items-center gap-1.5 rounded-lg border border-slate-600/60 bg-slate-800/60 px-3 py-2 text-xs font-medium text-slate-200 backdrop-blur-sm transition-colors hover:border-slate-500 hover:bg-slate-700/60 sm:flex"
+          className="hidden items-center gap-1.5 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-700 backdrop-blur-sm transition-colors hover:border-gray-400 hover:bg-gray-100 sm:flex"
         >
           <MessageSquarePlus className="h-4 w-4" />
           Nouvelle conversation
@@ -369,6 +394,10 @@ export default function ChatWindow() {
           token={token}
           activeSessionId={sessionId}
           onSelect={(id) => void loadSession(id)}
+          onDeleted={(id) => {
+            // If the active conversation was deleted, reset to a fresh chat.
+            if (id === sessionId) newConversation();
+          }}
           refreshKey={historyRefresh}
           open={historyOpen}
           onClose={() => setHistoryOpen(false)}
@@ -380,22 +409,22 @@ export default function ChatWindow() {
         <main className="flex min-w-0 flex-1 flex-col">
           <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
             {historyLoading ? (
-              <div className="flex h-full items-center justify-center gap-2 text-sm text-slate-400">
-                <Loader2 className="h-4 w-4 animate-spin text-law-cyan" />
+              <div className="flex h-full items-center justify-center gap-2 text-sm text-gray-500">
+                <Loader2 className="h-4 w-4 animate-spin text-accent" />
                 Chargement de la conversation…
               </div>
             ) : messages.length === 0 ? (
               <div className="mx-auto mt-8 flex max-w-2xl flex-col items-center text-center sm:mt-16">
-                <div className="mb-6 flex h-20 w-20 animate-float items-center justify-center rounded-3xl bg-gradient-to-br from-law-cyan via-law-blue to-law-purple shadow-glow">
+                <div className="mb-6 flex h-20 w-20 animate-float items-center justify-center rounded-3xl bg-accent shadow-panel">
                   <Bot className="h-10 w-10 text-white" />
                 </div>
-                <h2 className="mb-3 text-2xl font-semibold text-white sm:text-3xl">
-                  Posez votre question de droit
+                <h2 className="mb-3 text-2xl font-semibold text-gray-900 sm:text-3xl">
+                  Le droit, cité à la source.
                 </h2>
-                <p className="mb-8 max-w-lg text-sm leading-relaxed text-slate-400 sm:text-base">
-                  Assistant agentique de recherche juridique pour l&apos;Afrique de l&apos;Ouest
-                  (OHADA et droits nationaux). Réponses fondées sur des sources officielles,
-                  citations vérifiées et traçabilité complète.
+                <p className="mb-8 max-w-lg text-sm leading-relaxed text-gray-500 sm:text-base">
+                  Posez vos questions en français. Yawoto répond à partir des textes officiels du
+                  Burkina Faso et de l&apos;OHADA, avec citations vérifiables et traçabilité
+                  complète.
                 </p>
                 <div className="grid w-full gap-3 sm:grid-cols-3">
                   {suggestions.map((s) => (
@@ -405,7 +434,7 @@ export default function ChatWindow() {
                       onClick={() => {
                         setInput(s);
                       }}
-                      className="rounded-xl border border-slate-700/60 bg-slate-800/40 p-4 text-left text-sm text-slate-300 backdrop-blur-sm transition-all hover:border-law-cyan/50 hover:bg-slate-700/50 hover:text-white"
+                      className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-left text-sm text-gray-600 backdrop-blur-sm transition-all hover:border-accent/50 hover:bg-gray-100 hover:text-gray-900"
                     >
                       {s}
                     </button>
@@ -417,16 +446,16 @@ export default function ChatWindow() {
                 {messages.map((msg) =>
                   msg.role === "user" ? (
                     <div key={msg.id} className="flex justify-end gap-3">
-                      <div className="max-w-[85%] rounded-2xl rounded-br-sm border border-law-cyan/20 bg-gradient-to-br from-law-cyan/20 to-law-blue/20 px-4 py-3 text-sm text-white shadow-panel sm:max-w-[75%]">
+                      <div className="max-w-[85%] rounded-2xl rounded-br-sm border border-accent/20 bg-accent/5 px-4 py-3 text-sm text-gray-900 shadow-panel sm:max-w-[75%]">
                         {msg.text}
                       </div>
-                      <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-700 text-slate-300">
+                      <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-200 text-gray-600">
                         <User className="h-4 w-4" />
                       </div>
                     </div>
                   ) : (
                     <div key={msg.id} className="flex justify-start gap-3">
-                      <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-law-purple to-law-blue text-white shadow-glow-sm">
+                      <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-white">
                         <Bot className="h-4 w-4" />
                       </div>
                       <button
@@ -434,37 +463,37 @@ export default function ChatWindow() {
                         onClick={() => setSelectedId(msg.id)}
                         className={`max-w-[90%] rounded-2xl rounded-bl-sm border px-4 py-3 text-left transition-all sm:max-w-[82%] ${
                           msg.error
-                            ? "border-rose-500/30 bg-rose-500/10"
+                            ? "border-red-700/30 bg-red-700/10"
                             : msg.quota
-                              ? "border-amber-500/30 bg-amber-500/10"
+                              ? "border-warn-border/60 bg-warn-bg"
                               : selectedId === msg.id
-                                ? "border-law-cyan/40 bg-surface-elevated shadow-glow-sm"
-                                : "border-slate-700/60 bg-surface/80 hover:border-slate-600 hover:bg-surface-elevated"
+                                ? "border-accent/40 bg-surface-elevated"
+                                : "border-gray-200 bg-surface/80 hover:border-gray-400 hover:bg-surface-elevated"
                         }`}
                         title="Sélectionner pour voir citations et preuves"
                       >
                         {msg.error ? (
-                          <p className="text-sm text-rose-300">{msg.text}</p>
+                          <p className="text-sm text-red-700">{msg.text}</p>
                         ) : msg.quota ? (
                           <div className="text-sm">
-                            <p className="mb-1 flex items-center gap-2 font-semibold text-amber-300">
+                            <p className="mb-1 flex items-center gap-2 font-semibold text-warn-text">
                               <AlertTriangle className="h-4 w-4" />
                               Quota journalier atteint
                             </p>
-                            <p className="text-amber-100">{msg.text}</p>
-                            <p className="mt-1 text-xs text-amber-300/80">
+                            <p className="text-warn-text">{msg.text}</p>
+                            <p className="mt-1 text-xs text-warn-text/80">
                               Passez à l&apos;offre supérieure pour continuer.
                             </p>
                           </div>
                         ) : msg.response ? (
                           <AnswerView answer={msg.response.answer} />
                         ) : (
-                          <div className="markdown-body text-sm text-slate-200">
+                          <div className="markdown-body text-sm text-gray-700">
                             <ReactMarkdown>{msg.text}</ReactMarkdown>
                           </div>
                         )}
                         {msg.response && msg.response.latency_ms > 0 && (
-                          <p className="mt-2 text-[11px] text-slate-500">
+                          <p className="mt-2 text-[11px] text-gray-500">
                             {msg.response.latency_ms.toFixed(0)} ms — cliquer pour voir les détails
                           </p>
                         )}
@@ -479,8 +508,8 @@ export default function ChatWindow() {
                                 }}
                                 className={`rounded p-1 transition-colors ${
                                   msg.feedback === "thumbs-up"
-                                    ? "text-emerald-400"
-                                    : "text-slate-500 hover:text-slate-300"
+                                    ? "text-accent"
+                                    : "text-gray-500 hover:text-gray-600"
                                 }`}
                                 aria-label="Utile"
                                 title="Utile"
@@ -496,8 +525,8 @@ export default function ChatWindow() {
                                 }}
                                 className={`rounded p-1 transition-colors ${
                                   msg.feedback === "thumbs-down"
-                                    ? "text-rose-400"
-                                    : "text-slate-500 hover:text-slate-300"
+                                    ? "text-red-700"
+                                    : "text-gray-500 hover:text-gray-600"
                                 }`}
                                 aria-label="Pas utile"
                                 title="Pas utile"
@@ -511,10 +540,10 @@ export default function ChatWindow() {
                   ),
                 )}
                 {busy && (
-                  <div className="flex items-center gap-3 text-sm text-slate-400">
+                  <div className="flex items-center gap-3 text-sm text-gray-500">
                     <span className="relative flex h-3 w-3">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-law-cyan opacity-75" />
-                      <span className="relative inline-flex h-3 w-3 rounded-full bg-law-cyan" />
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
+                      <span className="relative inline-flex h-3 w-3 rounded-full bg-accent" />
                     </span>
                     Traitement en cours par les agents… ({elapsed}s)
                   </div>
@@ -526,14 +555,14 @@ export default function ChatWindow() {
 
           {/* Input */}
           <div className="glass z-10 px-4 py-3 sm:px-6">
-            <div className="mx-auto flex max-w-3xl items-end gap-2">
+            <div className="relative mx-auto max-w-3xl">
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 rows={2}
                 placeholder="Votre question juridique… (Entrée pour envoyer, Maj+Entrée pour sauter une ligne)"
-                className="flex-1 resize-none rounded-xl border border-slate-700/60 bg-slate-900/60 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-law-cyan/60 focus:bg-slate-900/80 focus:outline-none disabled:opacity-60"
+                className="w-full resize-none rounded-xl border border-gray-200 bg-white py-3 pl-4 pr-14 text-sm text-gray-900 placeholder:text-gray-400 focus:border-accent/60 focus:bg-white focus:outline-none disabled:opacity-60"
                 disabled={busy}
               />
               {busy ? (
@@ -541,45 +570,48 @@ export default function ChatWindow() {
                   type="button"
                   onClick={stop}
                   title="Arrêter la génération"
-                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-red-500/80 text-white transition hover:bg-red-500"
+                  aria-label="Arrêter la génération"
+                  className="absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-red-700 text-white transition-colors hover:bg-red-800"
                 >
-                  <Square className="h-5 w-5" />
+                  <Square className="h-4 w-4" />
                 </button>
               ) : (
                 <button
                   type="button"
                   onClick={() => void send()}
                   disabled={input.trim().length === 0}
-                  className="btn-primary flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-white disabled:opacity-50 disabled:hover:translate-y-0"
+                  title="Envoyer"
+                  aria-label="Envoyer"
+                  className={`absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full transition-colors ${
+                    input.trim().length === 0
+                      ? "cursor-not-allowed bg-gray-200 text-gray-400"
+                      : "bg-accent text-white hover:bg-accent-hover"
+                  }`}
                 >
-                  <Send className="h-5 w-5" />
+                  <ArrowUp className="h-4 w-4" />
                 </button>
               )}
             </div>
-            <p className="mx-auto mt-2 max-w-3xl text-center text-[10px] text-slate-500">
-              Avertissement : cet outil est une aide à la recherche juridique. Ses réponses ne
-              constituent pas un conseil juridique.
-            </p>
           </div>
         </main>
 
         {/* Side panel (desktop + mobile drawer) */}
         <aside
-          className={`absolute inset-y-0 right-0 z-30 flex w-[min(86vw,22rem)] flex-col border-l border-slate-700/40 bg-[#0b1120]/95 shadow-2xl backdrop-blur-xl transition-transform duration-300 md:static md:w-80 md:translate-x-0 md:bg-surface/70 md:shadow-none lg:w-96 ${
+          className={`absolute inset-y-0 right-0 z-30 flex w-[min(86vw,22rem)] flex-col border-l border-gray-200 bg-white shadow-2xl backdrop-blur-xl transition-transform duration-300 md:static md:w-80 md:translate-x-0 md:bg-surface/70 md:shadow-none lg:w-96 ${
             panelOpen ? "translate-x-0" : "translate-x-full md:translate-x-0"
           }`}
         >
-          <div className="flex items-center justify-between border-b border-slate-700/40 px-4 py-3 md:hidden">
-            <span className="text-sm font-medium text-white">Détails de la réponse</span>
+          <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 md:hidden">
+            <span className="text-sm font-medium text-gray-900">Détails de la réponse</span>
             <button
               type="button"
               onClick={() => setPanelOpen(false)}
-              className="rounded-lg p-1.5 text-slate-400 hover:bg-white/5 hover:text-white"
+              className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-900"
             >
               <Menu className="h-5 w-5" />
             </button>
           </div>
-          <div className="flex border-b border-slate-700/40 bg-slate-900/30">
+          <div className="flex border-b border-gray-200 bg-gray-50">
             {(
               [
                 { id: "agents", label: "Agents" },
@@ -593,8 +625,8 @@ export default function ChatWindow() {
                 onClick={() => setTab(t.id)}
                 className={`flex-1 px-2 py-3 text-xs font-medium transition-colors sm:text-sm ${
                   tab === t.id
-                    ? "border-b-2 border-law-cyan text-law-cyan"
-                    : "text-slate-400 hover:text-slate-200"
+                    ? "border-b-2 border-accent text-accent"
+                    : "text-gray-500 hover:text-gray-700"
                 }`}
               >
                 {t.label}
@@ -607,8 +639,12 @@ export default function ChatWindow() {
             {tab === "preuves" && <EvidenceViewer evidence={selectedAnswer?.evidence ?? []} />}
           </div>
           {selectedMessage?.response && (
-            <div className="border-t border-slate-700/40 p-3">
-              <ExportMenu response={selectedMessage.response} query={selectedMessage.text} />
+            <div className="border-t border-gray-200 p-3">
+              <ExportMenu
+                response={selectedMessage.response}
+                query={selectedQuery}
+                conversation={conversationItems}
+              />
             </div>
           )}
         </aside>

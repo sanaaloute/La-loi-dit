@@ -67,7 +67,7 @@ export default function AdminPage() {
           <button
             type="button"
             onClick={() => window.location.reload()}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-600/60 bg-slate-800/60 px-4 py-2 text-sm font-medium text-slate-200 transition-colors hover:bg-slate-700/60"
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-gray-50 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
           >
             Réessayer
           </button>
@@ -82,7 +82,7 @@ export default function AdminPage() {
       ) : (
         <div className="mx-auto max-w-5xl space-y-5">
           {/* Tab bar */}
-          <div className="flex flex-wrap gap-1 rounded-xl border border-slate-600/40 bg-[#0f172a]/95 p-1.5 shadow-2xl backdrop-blur-xl">
+          <div className="flex flex-wrap gap-1 rounded-xl border border-gray-200 bg-white p-1.5 shadow-2xl backdrop-blur-xl">
             {TABS.map((t) => {
               const active = tab === t.id;
               return (
@@ -92,8 +92,8 @@ export default function AdminPage() {
                   onClick={() => setTab(t.id)}
                   className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
                     active
-                      ? "border-law-cyan/40 bg-law-cyan/10 text-law-cyan"
-                      : "border-transparent text-slate-300 hover:bg-white/5 hover:text-white"
+                      ? "border-accent/40 bg-accent/10 text-accent"
+                      : "border-transparent text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                   }`}
                 >
                   <t.icon className="h-4 w-4" />

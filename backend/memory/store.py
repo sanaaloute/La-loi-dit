@@ -291,6 +291,36 @@ class MemoryStore:
             self.stats["db_failures"] += 1
         return []
 
+    async def delete_session(self, user_id: str, session_id: str) -> int:
+        """Delete one session's messages, scoped to its owner. Rows deleted.
+
+        The in-memory mirror is keyed by session_id only and cannot enforce
+        ownership, so it is used solely when the DB is unavailable (degraded
+        dev mode); with a live DB the scoped delete is authoritative.
+        """
+        db_ok = False
+        try:
+            db_ok = await self._ensure_db()
+            if db_ok:
+                from sqlalchemy import delete
+
+                t = self._tables["messages"]
+                async with self._session_factory() as session:
+                    result = await session.execute(
+                        delete(t)
+                        .where(t.c.user_id == user_id)
+                        .where(t.c.session_id == session_id)
+                    )
+                    await session.commit()
+                    return result.rowcount or 0
+        except Exception:
+            self.stats["db_failures"] += 1
+        if not db_ok and session_id in self._mem_messages:
+            deleted = len(self._mem_messages[session_id])
+            del self._mem_messages[session_id]
+            return deleted
+        return 0
+
     # ------------------------------------------------------------------
     # Semantic long-term memory
     # ------------------------------------------------------------------

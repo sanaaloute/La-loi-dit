@@ -21,16 +21,16 @@ import {
 } from "@/lib/api";
 
 const TIER_STYLES: Record<Tier, { label: string; className: string }> = {
-  gratuit: { label: "Gratuit", className: "border-slate-500/40 bg-slate-500/10 text-slate-300" },
-  pro: { label: "Pro", className: "border-law-cyan/40 bg-law-cyan/10 text-law-cyan" },
-  cabinet: { label: "Cabinet", className: "border-law-purple/40 bg-law-purple/10 text-law-purple" },
+  gratuit: { label: "Gratuit", className: "border-gray-300 bg-gray-100 text-gray-600" },
+  pro: { label: "Pro", className: "border-accent/40 bg-accent/10 text-accent" },
+  cabinet: { label: "Cabinet", className: "border-ink/40 bg-ink/10 text-ink" },
 };
 
 const STATUS_STYLES: Record<SubscriptionStatus, { label: string; className: string }> = {
-  active: { label: "Actif", className: "border-emerald-400/30 bg-emerald-400/10 text-emerald-300" },
-  past_due: { label: "En retard de paiement", className: "border-amber-400/30 bg-amber-400/10 text-amber-300" },
-  canceled: { label: "Résilié", className: "border-rose-400/30 bg-rose-400/10 text-rose-300" },
-  none: { label: "Aucun", className: "border-slate-500/40 bg-slate-500/10 text-slate-300" },
+  active: { label: "Actif", className: "border-accent/30 bg-accent/10 text-accent" },
+  past_due: { label: "En retard de paiement", className: "border-warn-border/60 bg-warn-bg text-warn-text" },
+  canceled: { label: "Résilié", className: "border-red-700/30 bg-red-700/10 text-red-700" },
+  none: { label: "Aucun", className: "border-gray-300 bg-gray-100 text-gray-600" },
 };
 
 function formatNumber(n: number): string {
@@ -94,10 +94,10 @@ export default function ComptePage() {
   const pct = budget > 0 ? Math.min(100, (consumed / budget) * 100) : 0;
   const barClass =
     pct >= 100
-      ? "bg-rose-500"
+      ? "bg-red-700"
       : pct > 80
-        ? "bg-amber-400"
-        : "bg-gradient-to-r from-law-cyan to-law-blue";
+        ? "bg-warn-border"
+        : "bg-accent";
 
   // History comes most-recent-first; display ascending. Bar height = total tokens.
   const days = useMemo(() => [...(usage?.history ?? [])].reverse(), [usage]);
@@ -119,7 +119,7 @@ export default function ComptePage() {
           <button
             type="button"
             onClick={() => window.location.reload()}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-600/60 bg-slate-800/60 px-4 py-2 text-sm font-medium text-slate-200 transition-colors hover:bg-slate-700/60"
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-gray-50 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
           >
             Réessayer
           </button>
@@ -130,19 +130,19 @@ export default function ComptePage() {
           <div className="mx-auto max-w-3xl space-y-5">
             {/* Profile card */}
             {profile && (
-              <section className="rounded-xl border border-slate-600/40 bg-[#0f172a]/95 p-5 shadow-2xl backdrop-blur-xl sm:p-6">
+              <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-2xl backdrop-blur-xl sm:p-6">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-3">
-                    <UserCircle className="h-9 w-9 shrink-0 text-slate-400" />
+                    <UserCircle className="h-9 w-9 shrink-0 text-gray-500" />
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-white">
+                      <p className="truncate text-sm font-medium text-gray-900">
                         {profile.name || profile.email}
                       </p>
                       {profile.name && (
-                        <p className="truncate text-xs text-slate-400">{profile.email}</p>
+                        <p className="truncate text-xs text-gray-500">{profile.email}</p>
                       )}
                       {profile.workspace_name && (
-                        <p className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-400">
+                        <p className="mt-0.5 flex items-center gap-1.5 text-xs text-gray-500">
                           <Building2 className="h-3 w-3 shrink-0" />
                           <span className="truncate">{profile.workspace_name}</span>
                         </p>
@@ -162,9 +162,9 @@ export default function ComptePage() {
 
             {/* Subscription card */}
             {subscription && (
-              <section className="rounded-xl border border-slate-600/40 bg-[#0f172a]/95 p-5 shadow-2xl backdrop-blur-xl sm:p-6">
-                <h2 className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  <span className="h-1.5 w-1.5 rounded-full bg-law-cyan" />
+              <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-2xl backdrop-blur-xl sm:p-6">
+                <h2 className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  <span className="h-1.5 w-1.5 rounded-full bg-accent" />
                   Abonnement
                 </h2>
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -186,7 +186,7 @@ export default function ComptePage() {
                       )}
                     </p>
                     {subscription.current_period_end && (
-                      <p className="text-xs text-slate-400">
+                      <p className="text-xs text-gray-500">
                         {subscription.cancel_at_period_end
                           ? `Résiliation en fin de période — accès jusqu'au ${formatDate(subscription.current_period_end)}`
                           : `Renouvellement le ${formatDate(subscription.current_period_end)}`}
@@ -195,7 +195,7 @@ export default function ComptePage() {
                   </div>
                   <Link
                     href="/tarifs"
-                    className="flex items-center gap-1.5 rounded-lg border border-slate-600/60 bg-slate-800/60 px-3 py-2 text-xs font-medium text-slate-200 transition-colors hover:border-law-cyan/40 hover:bg-slate-700/60"
+                    className="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-700 transition-colors hover:border-accent/40 hover:bg-gray-100"
                   >
                     Voir les offres
                     <ArrowRight className="h-3.5 w-3.5" />
@@ -205,44 +205,44 @@ export default function ComptePage() {
             )}
 
             {/* Today's usage */}
-            <section className="rounded-xl border border-slate-600/40 bg-[#0f172a]/95 p-5 shadow-2xl backdrop-blur-xl sm:p-6">
-              <h2 className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                <span className="h-1.5 w-1.5 rounded-full bg-law-cyan" />
+            <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-2xl backdrop-blur-xl sm:p-6">
+              <h2 className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                <span className="h-1.5 w-1.5 rounded-full bg-accent" />
                 Consommation du jour
               </h2>
               <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-                <p className="text-sm text-slate-200">
-                  <span className="text-lg font-semibold text-white">{formatNumber(consumed)}</span>
+                <p className="text-sm text-gray-700">
+                  <span className="text-lg font-semibold text-gray-900">{formatNumber(consumed)}</span>
                   {" / "}
                   {formatNumber(budget)} tokens
                 </p>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-gray-500">
                   {formatNumber(usage.remaining_tokens)} restants — {formatNumber(usage.today.requests)}{" "}
                   requête{usage.today.requests > 1 ? "s" : ""} aujourd&apos;hui
                 </p>
               </div>
-              <div className="h-2.5 overflow-hidden rounded-full bg-slate-800">
+              <div className="h-2.5 overflow-hidden rounded-full bg-gray-100">
                 <div
                   className={`h-full rounded-full transition-all ${barClass}`}
                   style={{ width: `${pct}%` }}
                 />
               </div>
               {pct >= 100 && (
-                <p className="mt-2 text-xs text-rose-300">
+                <p className="mt-2 text-xs text-red-700">
                   Quota journalier atteint — passez à l&apos;offre supérieure pour continuer.
                 </p>
               )}
             </section>
 
             {/* 30-day history */}
-            <section className="rounded-xl border border-slate-600/40 bg-[#0f172a]/95 p-5 shadow-2xl backdrop-blur-xl sm:p-6">
-              <h2 className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                <span className="h-1.5 w-1.5 rounded-full bg-law-cyan" />
+            <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-2xl backdrop-blur-xl sm:p-6">
+              <h2 className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                <span className="h-1.5 w-1.5 rounded-full bg-accent" />
                 Historique (30 jours)
               </h2>
               {days.length === 0 ? (
-                <div className="rounded-xl border border-slate-700/40 bg-slate-800/30 p-4 text-center">
-                  <p className="text-xs text-slate-400">
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-center">
+                  <p className="text-xs text-gray-500">
                     Aucune activité enregistrée sur les 30 derniers jours.
                   </p>
                 </div>
@@ -255,7 +255,7 @@ export default function ComptePage() {
                         <div
                           key={d.day}
                           title={`${d.day} : ${formatNumber(total)} tokens, ${formatNumber(d.requests)} requête${d.requests > 1 ? "s" : ""}`}
-                          className="min-w-1 flex-1 rounded-t bg-gradient-to-t from-law-cyan/60 to-law-blue/80 transition-colors hover:from-law-cyan hover:to-law-blue"
+                          className="min-w-1 flex-1 rounded-t bg-accent/50 transition-colors hover:bg-accent"
                           style={{ height: `${Math.max(2, (total / maxTokens) * 100)}%` }}
                         />
                       );
@@ -263,7 +263,7 @@ export default function ComptePage() {
                   </div>
                   <div className="mt-1 flex gap-1">
                     {days.map((d, i) => (
-                      <div key={d.day} className="min-w-1 flex-1 text-center text-[9px] text-slate-500">
+                      <div key={d.day} className="min-w-1 flex-1 text-center text-[9px] text-gray-500">
                         {i % labelEvery === 0 ? `${d.day.slice(8, 10)}/${d.day.slice(5, 7)}` : ""}
                       </div>
                     ))}

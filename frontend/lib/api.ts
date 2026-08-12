@@ -458,6 +458,18 @@ export async function getSession(sessionId: string, token?: string | null): Prom
   return (await res.json()) as ChatSessionDetail;
 }
 
+/** Delete a conversation (204 on success; 404 when not the owner). */
+export async function deleteSession(sessionId: string, token?: string | null): Promise<void> {
+  const res = await fetch(apiUrl(`/chat/sessions/${encodeURIComponent(sessionId)}`), {
+    method: "DELETE",
+    headers: { ...authHeaders(token) },
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec de la suppression de la conversation (${res.status})`, res.status);
+  }
+}
+
 export async function listDraftTemplates(token?: string | null): Promise<DraftTemplateList> {
   const res = await fetch(apiUrl("/draft/templates"), {
     headers: { ...authHeaders(token) },
@@ -620,9 +632,16 @@ async function safeDetail(res: Response): Promise<string | null> {
 
 export type ExportFormat = "pdf" | "word" | "csv";
 
-export interface ExportRequest {
+export interface ExportItem {
   query: string;
   answer: FinalAnswer;
+}
+
+export interface ExportRequest {
+  query: string;
+  answer?: FinalAnswer;
+  /** When set, exports these exchanges instead of the single query/answer. */
+  items?: ExportItem[];
   session_id: string;
   latency_ms: number;
 }

@@ -36,7 +36,7 @@ def test_defaults_match_previous_hardcoded_values():
     assert s.rerank_llm_blend_weight == 0.5
     assert s.reranker_max_retries == 1
     assert s.graph_expansion_score == 0.01
-    assert s.graph_expansion_sources == 3
+    assert s.graph_expansion_sources == 8
     assert s.graph_expansion_limit == 8
     assert s.temporal_score_unknown == 0.3
     assert s.temporal_score_repealed_before_date == 0.1
