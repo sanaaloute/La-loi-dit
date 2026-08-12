@@ -390,6 +390,10 @@ class Settings(BaseSettings):
         return bool(self.langfuse_public_key and self.langfuse_secret_key)
 
     @property
+    def is_production(self) -> bool:
+        return self.env == "production"
+
+    @property
     def strict_infra_enabled(self) -> bool:
         """Strict infrastructure mode: no silent fallbacks, /ready can 503.
 

@@ -53,6 +53,34 @@ def extract_citations(text: str, evidence: list[EvidenceChunk]) -> tuple[list[Ci
     return verified, rejected
 
 
+def renumber_citations(text: str, citations: list[Citation]) -> tuple[str, list[Citation]]:
+    """Renumber ``[n]`` markers sequentially from [1] in order of appearance.
+
+    Markers cite evidence-list positions, so an answer that only uses chunks 3
+    and 7 shows ``[3]``/``[7]`` — confusing in a user-facing document.  This
+    rewrites the markers to ``[1]``, ``[2]``, … in order of first appearance
+    and relabels the citations to match.  The single-pass ``re.sub`` never
+    rescans replacements, so ``[3] -> [1]`` cannot clobber an original ``[1]``.
+    """
+    by_label = {c.label: c for c in citations}
+    mapping: dict[str, str] = {}
+    ordered: list[Citation] = []
+
+    def repl(match: re.Match[str]) -> str:
+        old = match.group(0)
+        if old not in mapping:
+            mapping[old] = f"[{len(mapping) + 1}]"
+            citation = by_label.get(old)
+            if citation is not None:
+                ordered.append(citation.model_copy(update={"label": mapping[old]}))
+        return mapping[old]
+
+    new_text = re.sub(_CITATION_RE, repl, text or "")
+    # Markers with no verified citation (already stripped upstream, but stay
+    # defensive) keep their citation dropped; text is always renumbered.
+    return new_text, ordered
+
+
 class CitationVerificationAgent(Agent):
     """Verifies citations and removes any that are not grounded in evidence."""
 
@@ -118,6 +146,14 @@ class CitationVerificationAgent(Agent):
                     final.confidence_breakdown.citation_confidence = round(accuracy, 2)
             if warnings:
                 final.warnings.extend(warnings)
+            # User-facing numbering: markers cite evidence positions, which
+            # rarely start at [1]; renumber them sequentially in order of
+            # appearance and relabel the citations to match.
+            if final.citations:
+                renumbered, relabeled = renumber_citations(final.answer, final.citations)
+                final.answer = renumbered
+                final.citations = relabeled
+                cleaned = renumbered
 
         return {
             "draft_answer": cleaned,

@@ -94,6 +94,14 @@ class OutputGuardrailAgent(Agent):
         if full.strip() not in answer.answer and note.strip() not in answer.answer:
             answer.answer = answer.answer.rstrip() + disclaimer
 
+        # Production: internal diagnostics (coverage gaps, unresolved
+        # conflicts, claim-verification notes…) stay in the trace/logs; the
+        # user only sees the answer and the legal disclaimer.  Development
+        # keeps them visible for tuning.
+        if getattr(ctx.settings, "is_production", False):
+            answer.warnings = []
+            answer.conflicts = []
+
         return {
             "final_answer": answer,
             "trace": [

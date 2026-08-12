@@ -20,6 +20,7 @@ import AgentTimeline, { type NodeStatus } from "@/components/AgentTimeline";
 import AnswerView from "@/components/AnswerView";
 import AppHeader from "@/components/AppHeader";
 import CitationPanel from "@/components/CitationPanel";
+import CopyButton from "@/components/CopyButton";
 import EvidenceViewer from "@/components/EvidenceViewer";
 import ExportMenu from "@/components/ExportMenu";
 import HistoryPanel from "@/components/HistoryPanel";
@@ -331,14 +332,18 @@ export default function ChatWindow() {
     }
   }
 
-  // All question/answer exchanges of the conversation, for full-chat exports.
+  // All question/answer exchanges of the conversation, for full-chat exports,
+  // plus the user question each assistant message replies to (per-answer copy
+  // and export actions).
   const conversationItems: ExportItem[] = [];
+  const queryByAssistantId = new Map<string, string>();
   let pendingQuery: string | null = null;
   for (const m of messages) {
     if (m.role === "user") {
       pendingQuery = m.text;
     } else if (m.response && pendingQuery !== null) {
       conversationItems.push({ query: pendingQuery, answer: m.response.answer });
+      queryByAssistantId.set(m.id, pendingQuery);
       pendingQuery = null;
     }
   }
@@ -492,13 +497,17 @@ export default function ChatWindow() {
                             <ReactMarkdown>{msg.text}</ReactMarkdown>
                           </div>
                         )}
-                        {msg.response && msg.response.latency_ms > 0 && (
-                          <p className="mt-2 text-[11px] text-gray-500">
-                            {msg.response.latency_ms.toFixed(0)} ms — cliquer pour voir les détails
-                          </p>
-                        )}
-                        {msg.response && msg.response.trace_id && (
+                        {msg.response && (
                           <div className="mt-2 flex items-center gap-2">
+                            <CopyButton text={msg.response.answer.answer} />
+                            <ExportMenu
+                              response={msg.response}
+                              query={queryByAssistantId.get(msg.id) ?? ""}
+                              scope="response"
+                              iconOnly
+                            />
+                            {msg.response.trace_id && (
+                              <>
                               <button
                                 type="button"
                                 disabled={msg.feedbackPending}
@@ -533,6 +542,8 @@ export default function ChatWindow() {
                               >
                                 <ThumbsDown className={`h-3.5 w-3.5 ${msg.feedbackPending ? "opacity-50" : ""}`} />
                               </button>
+                              </>
+                            )}
                           </div>
                         )}
                       </button>
@@ -638,12 +649,13 @@ export default function ChatWindow() {
             {tab === "citations" && <CitationPanel citations={selectedAnswer?.citations ?? []} />}
             {tab === "preuves" && <EvidenceViewer evidence={selectedAnswer?.evidence ?? []} />}
           </div>
-          {selectedMessage?.response && (
+          {selectedMessage?.response && conversationItems.length > 0 && (
             <div className="border-t border-gray-200 p-3">
               <ExportMenu
                 response={selectedMessage.response}
                 query={selectedQuery}
                 conversation={conversationItems}
+                scope="conversation"
               />
             </div>
           )}

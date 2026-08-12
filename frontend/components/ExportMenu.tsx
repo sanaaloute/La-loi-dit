@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Download, FileCode, FileSpreadsheet, FileText, Loader2 } from "lucide-react";
 import {
   downloadBlob,
@@ -15,8 +15,12 @@ interface ExportMenuProps {
   response: ChatResponse;
   /** The user question this response answers. */
   query: string;
-  /** All question/answer exchanges of the conversation, oldest first. */
+  /** All question/answer exchanges of the conversation (conversation scope). */
   conversation?: ExportItem[];
+  /** Fixed scope: no toggle is shown. Default "response". */
+  scope?: Scope;
+  /** Icon-only trigger for inline placement under a message. */
+  iconOnly?: boolean;
 }
 
 type MenuFormat = ExportFormat | "md";
@@ -29,18 +33,39 @@ const FORMATS: { id: MenuFormat; label: string; icon: React.ElementType; ext: st
   { id: "md", label: "Markdown (.md)", icon: FileCode, ext: "md" },
 ];
 
-export default function ExportMenu({ response, query, conversation = [] }: ExportMenuProps) {
+export default function ExportMenu({
+  response,
+  query,
+  conversation = [],
+  scope: scopeProp,
+  iconOnly = false,
+}: ExportMenuProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState<MenuFormat | null>(null);
-  const [scope, setScope] = useState<Scope>("response");
+  const [scope, setScope] = useState<Scope>(scopeProp ?? "response");
+  const rootRef = useRef<HTMLDivElement>(null);
 
-  const canExportConversation = conversation.length > 1;
+  const canExportConversation = conversation.length > 0;
+  const effectiveScope: Scope =
+    scopeProp ?? (scope === "conversation" && canExportConversation ? "conversation" : "response");
+
+  // Close the dropdown on outside click.
+  useEffect(() => {
+    if (!open) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
 
   async function handleExport(format: MenuFormat) {
     setLoading(format);
     try {
       const items: ExportItem[] =
-        scope === "conversation" && canExportConversation
+        effectiveScope === "conversation" && canExportConversation
           ? conversation
           : [{ query, answer: response.answer }];
       const payload = {
@@ -63,19 +88,40 @@ export default function ExportMenu({ response, query, conversation = [] }: Expor
     }
   }
 
+  const label = effectiveScope === "conversation" ? "Exporter la conversation" : "Exporter la réponse";
+
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-700 transition-colors hover:border-accent/40 hover:bg-gray-100"
-      >
-        <Download className="h-4 w-4" />
-        Exporter
-      </button>
+    <div ref={rootRef} className="relative">
+      {iconOnly ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setOpen((v) => !v);
+          }}
+          className="rounded p-1 text-gray-500 transition-colors hover:text-gray-600"
+          title={label}
+          aria-label={label}
+        >
+          <Download className="h-3.5 w-3.5" />
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-700 transition-colors hover:border-accent/40 hover:bg-gray-100"
+        >
+          <Download className="h-4 w-4" />
+          {label}
+        </button>
+      )}
       {open && (
-        <div className="absolute bottom-full left-0 right-0 z-50 mb-2 rounded-xl border border-gray-200 bg-white p-1.5 shadow-2xl backdrop-blur-xl">
-          {canExportConversation && (
+        <div
+          className={`absolute bottom-full z-50 mb-2 rounded-xl border border-gray-200 bg-white p-1.5 shadow-2xl backdrop-blur-xl ${
+            iconOnly ? "left-0 w-44" : "left-0 right-0"
+          }`}
+        >
+          {!scopeProp && canExportConversation && (
             <div className="mb-1.5 flex gap-1 rounded-lg bg-gray-100 p-1">
               <button
                 type="button"
@@ -105,7 +151,10 @@ export default function ExportMenu({ response, query, conversation = [] }: Expor
             <button
               key={format.id}
               type="button"
-              onClick={() => void handleExport(format.id)}
+              onClick={(e) => {
+                e.stopPropagation();
+                void handleExport(format.id);
+              }}
               disabled={loading !== null}
               className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 disabled:opacity-50"
             >

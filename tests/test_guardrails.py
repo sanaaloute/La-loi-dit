@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from backend.core.models import EvidenceChunk, FinalAnswer, QuestionType, RetrievalPlan, RiskFlag
+from backend.core.models import (
+    ConflictReport,
+    EvidenceChunk,
+    FinalAnswer,
+    QuestionType,
+    RetrievalPlan,
+    RiskFlag,
+)
 
 
 async def test_prompt_injection_blocked(settings):
@@ -200,3 +207,48 @@ async def test_full_disclaimer_for_low_confidence_factual_answer(ctx):
     answer = result["final_answer"]
     assert not answer.requires_human_review
     assert "ne constitue pas un conseil juridique" in answer.answer
+
+
+# ---------------------------------------------------------------------------
+# Production mode: internal diagnostics stay in the logs, not in the UI
+# ---------------------------------------------------------------------------
+
+
+def _answer_with_diagnostics() -> FinalAnswer:
+    answer = _grounded_answer()
+    answer.warnings = [
+        "Réponse potentiellement incomplète : certaines dimensions de la question ne sont pas couvertes.",
+        "Des sources se contredisent sans que le conflit ait pu être résolu.",
+    ]
+    answer.conflicts = [
+        ConflictReport(
+            topic="art. 2",
+            kept_chunk_id="a",
+            dropped_chunk_id="b",
+            reason="les deux sources sont présentées",
+            resolved=False,
+        )
+    ]
+    return answer
+
+
+async def test_production_hides_internal_warnings_and_conflicts(ctx):
+    from backend.agents.output_guardrail import OutputGuardrailAgent
+
+    ctx.settings.env = "production"
+    state = _guardrail_state(_answer_with_diagnostics(), QuestionType.RIGHTS)
+    answer = (await OutputGuardrailAgent().run(state, ctx))["final_answer"]
+    assert answer.warnings == []
+    assert answer.conflicts == []
+    # The legal disclaimer is still appended.
+    assert "ne constitue pas un conseil juridique" in answer.answer
+
+
+async def test_development_keeps_internal_warnings_and_conflicts(ctx):
+    from backend.agents.output_guardrail import OutputGuardrailAgent
+
+    assert ctx.settings.env != "production"
+    state = _guardrail_state(_answer_with_diagnostics(), QuestionType.RIGHTS)
+    answer = (await OutputGuardrailAgent().run(state, ctx))["final_answer"]
+    assert "Réponse potentiellement incomplète" in answer.warnings[0]
+    assert len(answer.conflicts) == 1
