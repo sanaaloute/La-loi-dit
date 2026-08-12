@@ -25,6 +25,7 @@ import EvidenceViewer from "@/components/EvidenceViewer";
 import ExportMenu from "@/components/ExportMenu";
 import HistoryPanel from "@/components/HistoryPanel";
 import ModelPicker from "@/components/ModelPicker";
+import { useAuthToken } from "@/lib/useAuth";
 import {
   ApiError,
   cancelChat,
@@ -32,7 +33,6 @@ import {
   getModel,
   getSession,
   getSessionId,
-  getToken,
   PIPELINE_NODES,
   setSessionId,
   streamChat,
@@ -72,7 +72,7 @@ export default function ChatWindow() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [sessionId, setSessionIdState] = useState<string | null>(null);
-  const [token, setTokenState] = useState<string | null>(null);
+  const [token, setToken] = useAuthToken();
   const [statuses, setStatuses] = useState<Record<string, NodeStatus>>(emptyStatuses);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tab, setTab] = useState<PanelTab>("agents");
@@ -87,7 +87,6 @@ export default function ChatWindow() {
 
   useEffect(() => {
     setSessionIdState(getSessionId());
-    setTokenState(getToken());
     setModelState(getModel());
   }, []);
 
@@ -359,7 +358,7 @@ export default function ChatWindow() {
       {/* Header */}
       <AppHeader
         token={token}
-        onTokenChange={setTokenState}
+        onTokenChange={setToken}
         leftSlot={
           token ? (
             <button

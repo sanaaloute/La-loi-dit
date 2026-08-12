@@ -302,15 +302,53 @@ const TOKEN_KEY = "legal_ai_token";
 const SESSION_KEY = "legal_ai_session_id";
 const MODEL_KEY = "legal_ai_model";
 
+export const AUTH_CHANGE_EVENT = "legal-ai-auth-change";
+
+function parseJwtPayload(token: string): { exp?: number } | null {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return null;
+    const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
+    return JSON.parse(json) as { exp?: number };
+  } catch {
+    return null;
+  }
+}
+
+export function isTokenExpired(token: string): boolean {
+  const payload = parseJwtPayload(token);
+  if (!payload?.exp) return false;
+  return payload.exp * 1000 < Date.now();
+}
+
+function notifyAuthChange() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent(AUTH_CHANGE_EVENT, { detail: { token: getToken() } }),
+  );
+}
+
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(TOKEN_KEY);
+  const token = window.localStorage.getItem(TOKEN_KEY);
+  if (!token) return null;
+  if (isTokenExpired(token)) {
+    window.localStorage.removeItem(TOKEN_KEY);
+    notifyAuthChange();
+    return null;
+  }
+  return token;
 }
 
 export function setToken(token: string | null): void {
   if (typeof window === "undefined") return;
   if (token) window.localStorage.setItem(TOKEN_KEY, token);
   else window.localStorage.removeItem(TOKEN_KEY);
+  notifyAuthChange();
+}
+
+export function clearToken(): void {
+  setToken(null);
 }
 
 export function getSessionId(): string | null {
@@ -340,12 +378,32 @@ function authHeaders(token?: string | null): Record<string, string> {
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
+interface ApiFetchOptions extends RequestInit {
+  token?: string | null;
+}
+
+async function apiFetch(path: string, options: ApiFetchOptions = {}): Promise<Response> {
+  const { token, ...fetchOptions } = options;
+  const headers: Record<string, string> = {
+    ...(fetchOptions.headers as Record<string, string> ?? {}),
+    ...authHeaders(token),
+  };
+  const res = await fetch(apiUrl(path), {
+    ...fetchOptions,
+    headers,
+  });
+  if (res.status === 401) {
+    clearToken();
+  }
+  return res;
+}
+
 // ---------------------------------------------------------------------------
 // API calls
 // ---------------------------------------------------------------------------
 
 export async function login(username: string, password: string): Promise<TokenResponse> {
-  const res = await fetch(apiUrl("/auth/token"), {
+  const res = await apiFetch("/auth/token", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
@@ -358,7 +416,7 @@ export async function login(username: string, password: string): Promise<TokenRe
 }
 
 export async function register(email: string, password: string, name?: string): Promise<TokenResponse> {
-  const res = await fetch(apiUrl("/auth/register"), {
+  const res = await apiFetch("/auth/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password, ...(name ? { name } : {}) }),
@@ -371,9 +429,7 @@ export async function register(email: string, password: string, name?: string): 
 }
 
 export async function me(token?: string | null): Promise<UserProfile> {
-  const res = await fetch(apiUrl("/auth/me"), {
-    headers: { ...authHeaders(token) },
-  });
+  const res = await apiFetch("/auth/me", { token });
   if (!res.ok) {
     const detail = await safeDetail(res);
     throw new Error(detail ?? `Échec de la récupération du profil (${res.status})`);
@@ -382,9 +438,7 @@ export async function me(token?: string | null): Promise<UserProfile> {
 }
 
 export async function usageMe(token?: string | null): Promise<UsageResponse> {
-  const res = await fetch(apiUrl("/usage/me"), {
-    headers: { ...authHeaders(token) },
-  });
+  const res = await apiFetch("/usage/me", { token });
   if (!res.ok) {
     const detail = await safeDetail(res);
     throw new ApiError(detail ?? `Échec du chargement de l'usage (${res.status})`, res.status);
@@ -393,7 +447,7 @@ export async function usageMe(token?: string | null): Promise<UsageResponse> {
 }
 
 export async function billingConfig(): Promise<BillingConfig> {
-  const res = await fetch(apiUrl("/billing/config"));
+  const res = await apiFetch("/billing/config");
   if (!res.ok) {
     const detail = await safeDetail(res);
     throw new ApiError(detail ?? `Échec du chargement de la configuration de paiement (${res.status})`, res.status);
@@ -402,9 +456,10 @@ export async function billingConfig(): Promise<BillingConfig> {
 }
 
 export async function createCheckout(tier: "pro" | "cabinet", token?: string | null): Promise<CheckoutResponse> {
-  const res = await fetch(apiUrl("/billing/checkout"), {
+  const res = await apiFetch("/billing/checkout", {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    headers: { "Content-Type": "application/json" },
+    token,
     body: JSON.stringify({ tier }),
   });
   if (!res.ok) {
@@ -415,9 +470,7 @@ export async function createCheckout(tier: "pro" | "cabinet", token?: string | n
 }
 
 export async function getSubscription(token?: string | null): Promise<SubscriptionInfo> {
-  const res = await fetch(apiUrl("/billing/subscription"), {
-    headers: { ...authHeaders(token) },
-  });
+  const res = await apiFetch("/billing/subscription", { token });
   if (!res.ok) {
     const detail = await safeDetail(res);
     throw new ApiError(detail ?? `Échec du chargement de l'abonnement (${res.status})`, res.status);
@@ -426,9 +479,7 @@ export async function getSubscription(token?: string | null): Promise<Subscripti
 }
 
 export async function listModels(token?: string | null): Promise<ModelList> {
-  const res = await fetch(apiUrl("/models"), {
-    headers: { ...authHeaders(token) },
-  });
+  const res = await apiFetch("/models", { token });
   if (!res.ok) {
     const detail = await safeDetail(res);
     throw new Error(detail ?? `Échec du chargement des modèles (${res.status})`);
@@ -437,9 +488,7 @@ export async function listModels(token?: string | null): Promise<ModelList> {
 }
 
 export async function listSessions(token?: string | null): Promise<ChatSessionList> {
-  const res = await fetch(apiUrl("/chat/sessions"), {
-    headers: { ...authHeaders(token) },
-  });
+  const res = await apiFetch("/chat/sessions", { token });
   if (!res.ok) {
     const detail = await safeDetail(res);
     throw new Error(detail ?? `Échec du chargement de l'historique (${res.status})`);
@@ -448,9 +497,7 @@ export async function listSessions(token?: string | null): Promise<ChatSessionLi
 }
 
 export async function getSession(sessionId: string, token?: string | null): Promise<ChatSessionDetail> {
-  const res = await fetch(apiUrl(`/chat/sessions/${encodeURIComponent(sessionId)}`), {
-    headers: { ...authHeaders(token) },
-  });
+  const res = await apiFetch(`/chat/sessions/${encodeURIComponent(sessionId)}`, { token });
   if (!res.ok) {
     const detail = await safeDetail(res);
     throw new Error(detail ?? `Échec du chargement de la conversation (${res.status})`);
@@ -460,9 +507,9 @@ export async function getSession(sessionId: string, token?: string | null): Prom
 
 /** Delete a conversation (204 on success; 404 when not the owner). */
 export async function deleteSession(sessionId: string, token?: string | null): Promise<void> {
-  const res = await fetch(apiUrl(`/chat/sessions/${encodeURIComponent(sessionId)}`), {
+  const res = await apiFetch(`/chat/sessions/${encodeURIComponent(sessionId)}`, {
     method: "DELETE",
-    headers: { ...authHeaders(token) },
+    token,
   });
   if (!res.ok) {
     const detail = await safeDetail(res);
@@ -471,9 +518,7 @@ export async function deleteSession(sessionId: string, token?: string | null): P
 }
 
 export async function listDraftTemplates(token?: string | null): Promise<DraftTemplateList> {
-  const res = await fetch(apiUrl("/draft/templates"), {
-    headers: { ...authHeaders(token) },
-  });
+  const res = await apiFetch("/draft/templates", { token });
   if (!res.ok) {
     const detail = await safeDetail(res);
     throw new ApiError(detail ?? `Échec du chargement des modèles de documents (${res.status})`, res.status);
@@ -482,9 +527,10 @@ export async function listDraftTemplates(token?: string | null): Promise<DraftTe
 }
 
 export async function createDraft(payload: DraftRequest, token?: string | null): Promise<DraftResponse> {
-  const res = await fetch(apiUrl("/draft"), {
+  const res = await apiFetch("/draft", {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    headers: { "Content-Type": "application/json" },
+    token,
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
@@ -495,9 +541,10 @@ export async function createDraft(payload: DraftRequest, token?: string | null):
 }
 
 export async function chat(request: ChatRequest, token?: string | null): Promise<ChatResponse> {
-  const res = await fetch(apiUrl("/chat"), {
+  const res = await apiFetch("/chat", {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    headers: { "Content-Type": "application/json" },
+    token,
     body: JSON.stringify(request),
   });
   if (!res.ok) {
@@ -524,8 +571,9 @@ export async function streamChat(
   if (request.language) params.set("language", request.language);
   if (request.model) params.set("model", request.model);
 
-  const res = await fetch(`${apiUrl("/chat/stream")}?${params.toString()}`, {
-    headers: { Accept: "text/event-stream", ...authHeaders(token) },
+  const res = await apiFetch(`/chat/stream?${params.toString()}`, {
+    headers: { Accept: "text/event-stream" },
+    token,
     signal,
   });
   if (!res.ok) {
@@ -581,9 +629,10 @@ export async function streamChat(
 }
 
 export async function submitFeedback(payload: FeedbackPayload, token?: string | null): Promise<void> {
-  const res = await fetch(apiUrl("/chat/feedback"), {
+  const res = await apiFetch("/chat/feedback", {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    headers: { "Content-Type": "application/json" },
+    token,
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
@@ -595,9 +644,10 @@ export async function submitFeedback(payload: FeedbackPayload, token?: string | 
 /** Ask the backend to stop an in-flight chat run (UI stop button). */
 export async function cancelChat(sessionId: string, token?: string | null): Promise<void> {
   try {
-    await fetch(apiUrl("/chat/cancel"), {
+    await apiFetch("/chat/cancel", {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      headers: { "Content-Type": "application/json" },
+      token,
       body: JSON.stringify({ session_id: sessionId }),
     });
   } catch {
@@ -647,9 +697,10 @@ export interface ExportRequest {
 }
 
 export async function exportAnswer(format: ExportFormat, payload: ExportRequest, token?: string | null): Promise<Blob> {
-  const res = await fetch(apiUrl(`/export/${format}`), {
+  const res = await apiFetch(`/export/${format}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    headers: { "Content-Type": "application/json" },
+    token,
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
@@ -660,9 +711,10 @@ export async function exportAnswer(format: ExportFormat, payload: ExportRequest,
 }
 
 export async function exportMarkdown(payload: ExportRequest, token?: string | null): Promise<Blob> {
-  const res = await fetch(apiUrl("/export/md"), {
+  const res = await apiFetch("/export/md", {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    headers: { "Content-Type": "application/json" },
+    token,
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
@@ -877,7 +929,7 @@ async function adminRequest<T>(
   path: string,
   init?: { method?: string; json?: unknown; form?: FormData },
 ): Promise<T> {
-  const headers: Record<string, string> = { ...authHeaders() };
+  const headers: Record<string, string> = {};
   let body: BodyInit | undefined;
   if (init?.json !== undefined) {
     headers["Content-Type"] = "application/json";
@@ -886,8 +938,8 @@ async function adminRequest<T>(
     // Let the browser set the multipart boundary.
     body = init.form;
   }
-  const res = await fetch(apiUrl(`/admin${path}`), {
-    method: init?.method ?? "GET",
+  const res = await apiFetch(`/admin${path}`, {
+    method: init?.method,
     headers,
     body,
   });

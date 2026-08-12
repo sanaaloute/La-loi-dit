@@ -23,13 +23,13 @@ import GatePanel from "@/components/ui/GatePanel";
 import LoadingState from "@/components/ui/LoadingState";
 import PageShell from "@/components/ui/PageShell";
 import UpgradePanel from "@/components/ui/UpgradePanel";
+import { useAuthToken } from "@/lib/useAuth";
 import {
   ApiError,
   createDraft,
   downloadBlob,
   exportDraft,
   getModel,
-  getToken,
   listDraftTemplates,
   me,
   type DraftField,
@@ -111,7 +111,7 @@ function FieldInput({
 }
 
 export default function RedactionPage() {
-  const [token, setToken] = useState<string | null>(null);
+  const [token, setToken] = useAuthToken();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [templates, setTemplates] = useState<DraftTemplate[] | null>(null);
   const [forbidden, setForbidden] = useState(false);
@@ -129,10 +129,6 @@ export default function RedactionPage() {
   const [draft, setDraft] = useState<DraftResponse | null>(null);
   const [exporting, setExporting] = useState<ExportFormat | "md" | null>(null);
   const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    setToken(getToken());
-  }, []);
 
   useEffect(() => {
     if (!token) return;

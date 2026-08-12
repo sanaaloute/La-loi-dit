@@ -5,12 +5,12 @@ import Link from "next/link";
 import { Check, CheckCircle2, Info, Loader2, X } from "lucide-react";
 import AppHeader from "@/components/AppHeader";
 import PageShell from "@/components/ui/PageShell";
+import { useAuthToken } from "@/lib/useAuth";
 import {
   ApiError,
   billingConfig,
   createCheckout,
   getSubscription,
-  getToken,
   me,
   type BillingConfig,
   type SubscriptionInfo,
@@ -76,7 +76,7 @@ const TIER_CARDS: TierCard[] = [
 const TIER_RANK: Record<string, number> = { gratuit: 0, pro: 1, cabinet: 2 };
 
 export default function TarifsPage() {
-  const [token, setToken] = useState<string | null>(null);
+  const [token, setToken] = useAuthToken();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [, setSubscription] = useState<SubscriptionInfo | null>(null);
   const [config, setConfig] = useState<BillingConfig | null>(null);
@@ -85,7 +85,6 @@ export default function TarifsPage() {
   const [banner, setBanner] = useState<"success" | "canceled" | null>(null);
 
   useEffect(() => {
-    setToken(getToken());
     // Query params lus côté client (pas de useSearchParams : la page reste statique).
     const params = new URLSearchParams(window.location.search);
     if (params.get("success") === "1") setBanner("success");

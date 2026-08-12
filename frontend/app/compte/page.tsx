@@ -8,9 +8,9 @@ import ErrorCard from "@/components/ui/ErrorCard";
 import GatePanel from "@/components/ui/GatePanel";
 import LoadingState from "@/components/ui/LoadingState";
 import PageShell from "@/components/ui/PageShell";
+import { useAuthToken } from "@/lib/useAuth";
 import {
   getSubscription,
-  getToken,
   me,
   usageMe,
   type SubscriptionInfo,
@@ -44,7 +44,7 @@ function formatDate(iso: string): string {
 }
 
 export default function ComptePage() {
-  const [token, setToken] = useState<string | null>(null);
+  const [token, setToken] = useAuthToken();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [usage, setUsage] = useState<UsageResponse | null>(null);
   const [subscription, setSubscription] = useState<SubscriptionInfo | null>(null);
@@ -52,13 +52,12 @@ export default function ComptePage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setToken(getToken());
-  }, []);
-
-  useEffect(() => {
     if (!token) return;
     let cancelled = false;
     setLoading(true);
+    setError(null);
+    setProfile(null);
+    setUsage(null);
     Promise.all([me(token), usageMe(token)])
       .then(([p, u]) => {
         if (cancelled) return;

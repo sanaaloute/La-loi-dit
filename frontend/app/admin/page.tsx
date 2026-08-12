@@ -11,7 +11,8 @@ import ErrorCard from "@/components/ui/ErrorCard";
 import GatePanel from "@/components/ui/GatePanel";
 import LoadingState from "@/components/ui/LoadingState";
 import PageShell from "@/components/ui/PageShell";
-import { getToken, me, type UserProfile } from "@/lib/api";
+import { useAuthToken } from "@/lib/useAuth";
+import { me, type UserProfile } from "@/lib/api";
 
 type TabId = "apercu" | "documents" | "utilisateurs" | "fournisseurs";
 
@@ -23,15 +24,11 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: 
 ];
 
 export default function AdminPage() {
-  const [token, setToken] = useState<string | null>(null);
+  const [token, setToken] = useAuthToken();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>("apercu");
-
-  useEffect(() => {
-    setToken(getToken());
-  }, []);
 
   useEffect(() => {
     if (!token) return;

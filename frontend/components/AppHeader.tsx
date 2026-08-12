@@ -6,7 +6,8 @@ import { usePathname } from "next/navigation";
 import { FilePenLine, Gauge, Menu, MessageSquare, Scale, Settings, ShieldCheck, Tag } from "lucide-react";
 import SettingsPopover from "@/components/SettingsPopover";
 import ThemeToggle from "@/components/ThemeToggle";
-import { getToken, me } from "@/lib/api";
+import { useAuthToken } from "@/lib/useAuth";
+import { me } from "@/lib/api";
 
 interface AppHeaderProps {
   /** Controlled token state; when omitted the header manages it internally. */
@@ -28,16 +29,12 @@ const NAV_LINKS = [
 const ADMIN_LINK = { href: "/admin", label: "Admin", icon: ShieldCheck };
 
 export default function AppHeader({ token: tokenProp, onTokenChange, leftSlot, children }: AppHeaderProps) {
-  const [internalToken, setInternalToken] = useState<string | null>(null);
+  const [internalToken, setInternalToken] = useAuthToken();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const pathname = usePathname();
   const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    setInternalToken(getToken());
-  }, []);
 
   // Close the mobile nav when the route changes.
   useEffect(() => {
