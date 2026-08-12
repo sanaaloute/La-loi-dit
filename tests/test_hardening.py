@@ -269,25 +269,25 @@ class _FakeRedis:
 
 def test_shared_redis_rate_limit_counter():
     """The Redis path shares one fixed-window counter across workers."""
-    from backend.api.middleware import _allow_shared
+    from backend.api.middleware import _allow_shared_window
     from backend.core.cache import RedisCache
 
     cache = RedisCache.__new__(RedisCache)  # no connection: inject the double
     cache._redis = _FakeRedis()
 
-    allowed, _ = asyncio.run(_allow_shared(cache, "user:x", 2))
+    allowed, _ = asyncio.run(_allow_shared_window(cache, "user:x", 2, 60))
     assert allowed is True
-    allowed, _ = asyncio.run(_allow_shared(cache, "user:x", 2))
+    allowed, _ = asyncio.run(_allow_shared_window(cache, "user:x", 2, 60))
     assert allowed is True
-    allowed, retry_after = asyncio.run(_allow_shared(cache, "user:x", 2))
+    allowed, retry_after = asyncio.run(_allow_shared_window(cache, "user:x", 2, 60))
     assert allowed is False
     assert retry_after >= 1
     # TTL set on first increment so buckets expire.
-    assert any(key.startswith("ratelimit:user:x:") for key in cache._redis.expirations)
+    assert any(key.startswith("ratelimit:60s:user:x:") for key in cache._redis.expirations)
 
 
 def test_shared_redis_path_fails_open_on_error():
-    from backend.api.middleware import _allow_shared
+    from backend.api.middleware import _allow_shared_window
     from backend.core.cache import RedisCache
 
     class _BrokenRedis:
@@ -296,5 +296,5 @@ def test_shared_redis_path_fails_open_on_error():
 
     cache = RedisCache.__new__(RedisCache)
     cache._redis = _BrokenRedis()
-    allowed, _ = asyncio.run(_allow_shared(cache, "user:x", 1))
+    allowed, _ = asyncio.run(_allow_shared_window(cache, "user:x", 1, 60))
     assert allowed is True  # documented fail-open

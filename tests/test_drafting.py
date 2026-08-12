@@ -102,18 +102,18 @@ def test_templates_listed_for_privileged_tier(client):
     assert "employeur" in required
 
 
-def test_gratuit_user_can_access_drafting_in_dev_mode(client):
-    """Dev mode: all tiers share every feature, drafting included."""
+def test_gratuit_user_cannot_access_drafting(client):
+    """Gratuit tier is excluded from drafting; upgrade to pro unlocks it."""
     _, token = _register(client)
     response = client.get("/api/v1/draft/templates", headers=_headers(token))
-    assert response.status_code == 200
+    assert response.status_code == 403
 
     response = client.post(
         "/api/v1/draft",
         json={"template_id": "contrat_travail_cdi", "fields": CDI_FIELDS},
         headers=_headers(token),
     )
-    assert response.status_code == 200
+    assert response.status_code == 403
 
 
 def test_drafting_requires_auth(client):
@@ -220,9 +220,10 @@ def test_me_includes_tier_features(client):
     _, token = _register(client)
     me = client.get("/api/v1/auth/me", headers=_headers(token)).json()
     assert me["tier"] == "gratuit"
-    # Dev mode: every tier exposes the full feature set.
-    assert me["features"]["drafting"] is True
-    assert "csv" in me["features"]["export"]
+    # Gratuit tier has a reduced feature set.
+    assert me["features"]["drafting"] is False
+    assert "md" in me["features"]["export"]
+    assert "pdf" not in me["features"]["export"]
 
     _set_tier(client, token, "pro")
     me = client.get("/api/v1/auth/me", headers=_headers(token)).json()

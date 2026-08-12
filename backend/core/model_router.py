@@ -156,23 +156,31 @@ def resolve_llm(
 
 
 async def check_budget(user_store: Any, user: Any, settings: Settings) -> None:
-    """Raise QuotaExceededError when the caller reached today's token budget.
+    """Raise QuotaExceededError when the caller reached today's budget.
 
-    Only authenticated DB users (user_id claim) are metered. A metering
-    backend outage never blocks the answer path.
+    Enforces both the daily token budget and the daily request count. Only
+    authenticated DB users (user_id claim) are metered. A metering backend
+    outage never blocks the answer path.
     """
     if user is None or not getattr(user, "user_id", None) or user_store is None:
         return
     tier = _tier_of(user)
-    budget = catalog.get_tier(tier, settings=settings).get("daily_token_budget")
-    if not budget:
-        return
+    tier_cfg = catalog.get_tier(tier, settings=settings)
+    token_budget = tier_cfg.get("daily_token_budget")
+    request_budget = tier_cfg.get("daily_request_budget")
     try:
         today = await user_store.get_today_usage(user.user_id)
     except Exception:
         return
-    if today.get("tokens_in", 0) + today.get("tokens_out", 0) >= budget:
+    tokens = today.get("tokens_in", 0) + today.get("tokens_out", 0)
+    requests = today.get("requests", 0)
+    if token_budget and tokens >= token_budget:
         raise QuotaExceededError(
             f"Quota journalier de tokens atteint pour votre offre ({tier}). "
+            "Passez à l'offre supérieure ou réessayez demain."
+        )
+    if request_budget and requests >= request_budget:
+        raise QuotaExceededError(
+            f"Quota journalier de requêtes atteint pour votre offre ({tier}). "
             "Passez à l'offre supérieure ou réessayez demain."
         )

@@ -36,6 +36,10 @@ def _make_client(tmp_path, monkeypatch):
     monkeypatch.setenv("LEGAL_AI_LLM_PROVIDER", "mock")
     monkeypatch.setenv("LEGAL_AI_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path}/admin_api.db")
     monkeypatch.setenv("LEGAL_AI_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("LEGAL_AI_RATE_LIMIT_PER_MINUTE", "1000000")
+    monkeypatch.setenv("LEGAL_AI_RATE_LIMIT_PER_SECOND", "1000000")
+    monkeypatch.setenv("LEGAL_AI_SINGLE_SESSION_PER_USER", "false")
+    monkeypatch.setenv("LEGAL_AI_GUARDRAILS_ENABLED", "false")
     get_settings.cache_clear()
     from fastapi.testclient import TestClient
 

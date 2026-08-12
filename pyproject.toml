@@ -9,6 +9,9 @@ description = "Production-grade Agentic AI Legal Assistant for Burkina Faso laws
 requires-python = ">=3.11"
 readme = "README.md"
 
+[project.optional-dependencies]
+guardrails = ["llm-guard>=0.3.0,<1.0.0"]
+
 [tool.setuptools.packages.find]
 include = ["backend*"]
 

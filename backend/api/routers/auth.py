@@ -14,6 +14,7 @@ tier "cabinet" so the local dev admin sees every model.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -25,6 +26,7 @@ from backend.core.exceptions import AuthenticationError, UserAlreadyExistsError
 from backend.core.models import Role
 from backend.security.jwt import TokenPayload, create_access_token
 from backend.security.passwords import hash_password, verify_password
+from backend.security.sessions import activate_session, device_fingerprint, generate_jti
 
 logger = logging.getLogger(__name__)
 
@@ -64,11 +66,17 @@ class MeResponse(BaseModel):
 
 
 def build_user_store(settings: Settings) -> dict[str, dict[str, Any]]:
-    """Build the in-memory dev user store (passwords hashed at boot)."""
-    users: dict[str, dict[str, Any]] = {}
-    if settings.env == "development":
-        users["admin"] = {"password_hash": hash_password("admin123"), "role": Role.ADMIN}
+    """Build the in-memory dev user store (passwords hashed at boot).
 
+    In production the hardcoded admin/admin123 bootstrap is omitted; the admin
+    must be provisioned via ``LEGAL_AI_DEV_USERS`` (or another secure bootstrap
+    path) so the password never ships in source code. Only one admin entry is
+    kept: an explicit ``LEGAL_AI_DEV_USERS`` admin wins over the development
+    fallback.
+    """
+    users: dict[str, dict[str, Any]] = {}
+
+    # Parse env-var bootstrap entries first so they take precedence.
     raw = settings.dev_users
     for entry in raw.split(","):
         parts = [p.strip() for p in entry.split(":")]
@@ -76,9 +84,19 @@ def build_user_store(settings: Settings) -> dict[str, dict[str, Any]]:
             continue
         username, password, role = parts
         try:
-            users[username] = {"password_hash": hash_password(password), "role": Role(role)}
+            role_obj = Role(role)
         except ValueError:
             logger.warning("ignoring dev user with unknown role", extra={"username": username, "role": role})
+            continue
+        if role_obj == Role.ADMIN and any(u["role"] == Role.ADMIN for u in users.values()):
+            logger.warning("ignoring extra admin bootstrap entry: only one admin is allowed", extra={"username": username})
+            continue
+        users[username] = {"password_hash": hash_password(password), "role": role_obj}
+
+    # Development-only fallback admin, only when no admin was bootstrapped.
+    if settings.env == "development" and not any(u["role"] == Role.ADMIN for u in users.values()):
+        users["admin"] = {"password_hash": hash_password("admin123"), "role": Role.ADMIN}
+
     return users
 
 
@@ -98,8 +116,34 @@ def _db_user_store(request: Request):
     return getattr(get_ctx(request), "user_store", None)
 
 
-def _token_response(record_id: str, email: str, role: Role, settings: Settings, *, user_id: Optional[str], tier: str) -> TokenResponse:
-    token = create_access_token(email or record_id, role, settings, user_id=user_id, tier=tier)
+async def _token_response(
+    record_id: str,
+    email: str,
+    role: Role,
+    settings: Settings,
+    request: Request,
+    *,
+    user_id: Optional[str],
+    tier: str,
+) -> TokenResponse:
+    """Issue a JWT and, when enabled, bind it as the single active session."""
+    from backend.api.deps import get_ctx
+
+    jti = generate_jti()
+    token = create_access_token(email or record_id, role, settings, user_id=user_id, tier=tier, jti=jti)
+    expires_at = int(time.time()) + settings.jwt_expire_minutes * 60
+
+    if settings.single_session_per_user:
+        ctx = get_ctx(request)
+        cache = getattr(ctx, "cache", None)
+        await activate_session(
+            user_id or record_id,
+            jti,
+            device_fingerprint(request),
+            expires_at,
+            cache,
+        )
+
     return TokenResponse(
         access_token=token,
         expires_in=settings.jwt_expire_minutes * 60,
@@ -125,7 +169,7 @@ async def register(payload: RegisterRequest, request: Request) -> TokenResponse:
         raise HTTPException(status_code=503, detail="user registration unavailable") from exc
     except UserAlreadyExistsError:
         raise
-    return _token_response(record.id, record.email, record.role, settings, user_id=record.id, tier=record.tier)
+    return await _token_response(record.id, record.email, record.role, settings, request, user_id=record.id, tier=record.tier)
 
 
 @router.post("/token", response_model=TokenResponse)
@@ -146,17 +190,20 @@ async def issue_token(payload: TokenRequest, request: Request) -> TokenResponse:
         except Exception:
             record = None
         if record is not None:
-            return _token_response(record.id, record.email, record.role, settings, user_id=record.id, tier=record.tier)
+            return await _token_response(record.id, record.email, record.role, settings, request, user_id=record.id, tier=record.tier)
 
     record = _user_store(request).get(payload.username)
     if record is None or not verify_password(payload.password, record["password_hash"]):
         raise AuthenticationError("invalid credentials")
 
-    token = create_access_token(payload.username, record["role"], settings, tier=DEV_USER_TIER)
-    return TokenResponse(
-        access_token=token,
-        expires_in=settings.jwt_expire_minutes * 60,
-        role=record["role"],
+    return await _token_response(
+        payload.username,
+        payload.username,
+        record["role"],
+        settings,
+        request,
+        user_id=payload.username,
+        tier=DEV_USER_TIER,
     )
 
 

@@ -130,6 +130,8 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60
     rate_limit_per_minute: int = 10_000  # dev: effectively unlimited; tighten at deployment
+    rate_limit_per_second: int = 5  # per-user/IP per-second burst cap
+    single_session_per_user: bool = True  # invalidate previous tokens on new login
     # Comma-separated browser origins allowed to call the API directly (CORS).
     # Needed for real-time SSE: bypassing the Next.js /backend-api proxy with
     # NEXT_PUBLIC_API_URL requires the API to accept cross-origin requests.
@@ -353,6 +355,13 @@ class Settings(BaseSettings):
     def strict_critical_list(self) -> list[str]:
         """Parsed ``strict_critical_components`` (empty names dropped)."""
         return [c.strip() for c in self.strict_critical_components.split(",") if c.strip()]
+
+    # --- semantic guardrails (LLM Guard) ---
+    guardrails_enabled: bool = True
+    guardrails_input_scanners: str = "PromptInjection,Jailbreak,Toxicity,Secrets,Anonymize"
+    guardrails_output_scanners: str = "Toxicity,Bias,MaliciousURLs,Deanonymize"
+    guardrails_threshold: float = 0.75
+    guardrails_pii_language: str = "en"
 
     # --- agent behavior knobs (planner / drafting / verification agents) ---
     # Defaults preserve the previous hardcoded behavior exactly.

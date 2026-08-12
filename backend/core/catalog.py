@@ -38,12 +38,11 @@ class ModelEntry(BaseModel):
     label: str = ""
 
 
-# DEVELOPMENT MODE: every tier currently unlocks the full model catalog with
-# effectively unlimited token budgets and rate limits — usage is NOT metered
-# down per tier while the system is being built. Before production deployment,
-# re-introduce per-tier model lists, budgets and rate limits here.
+# Provider vocabulary shared across the catalog.
 _ALL_PROVIDERS = ["ollama", "tokenfree", "openrouter"]
+_FREE_PROVIDERS = ["ollama", "openrouter"]
 
+# Full model catalog (pro / cabinet tiers).
 _ALL_MODELS: list[dict[str, str]] = [
     # Ollama Cloud models verified against the account's plan
     # (https://ollama.com/cloud). nemotron-3-nano:30b and minimax-m3
@@ -78,18 +77,57 @@ _ALL_MODELS: list[dict[str, str]] = [
     },
 ]
 
-_DEV_DAILY_TOKEN_BUDGET = 100_000_000  # dev: effectively unlimited
-_DEV_RATE_LIMIT_PER_MINUTE = 10_000  # dev: effectively unlimited
+# Free-tier catalog: OpenRouter and Ollama only.
+_FREE_MODELS: list[dict[str, str]] = [m for m in _ALL_MODELS if m["provider"] in _FREE_PROVIDERS]
 
-TIER_CATALOG: dict[str, dict[str, Any]] = {
-    tier: {
+# Production quotas. Override via LEGAL_AI_TIER_CATALOG_JSON if needed.
+_TIER_CONFIG: dict[str, dict[str, Any]] = {
+    "gratuit": {
+        "providers": _FREE_PROVIDERS,
+        "models": _FREE_MODELS,
+        "features": {"export": ["md"], "drafting": False, "priority": False},
+        "daily_token_budget": 10_000,
+        "daily_request_budget": 50,
+        "rate_limit_per_minute": 30,
+        "rate_limit_per_second": 1,
+    },
+    "pro": {
+        "providers": _ALL_PROVIDERS,
+        "models": _ALL_MODELS,
+        "features": {"export": ["md", "pdf", "word", "csv"], "drafting": True, "priority": False},
+        "daily_token_budget": 100_000,
+        "daily_request_budget": 500,
+        "rate_limit_per_minute": 120,
+        "rate_limit_per_second": 3,
+    },
+    "cabinet": {
         "providers": _ALL_PROVIDERS,
         "models": _ALL_MODELS,
         "features": {"export": ["md", "pdf", "word", "csv"], "drafting": True, "priority": True},
+        "daily_token_budget": 1_000_000,
+        "daily_request_budget": 10_000,
+        "rate_limit_per_minute": 600,
+        "rate_limit_per_second": 10,
+    },
+}
+
+# Dev defaults (effectively unlimited) used when LEGAL_AI_TIER_CATALOG_JSON is empty.
+_DEV_DAILY_TOKEN_BUDGET = 100_000_000
+_DEV_DAILY_REQUEST_BUDGET = 1_000_000
+_DEV_RATE_LIMIT_PER_MINUTE = 10_000
+_DEV_RATE_LIMIT_PER_SECOND = 10_000
+
+TIER_CATALOG: dict[str, dict[str, Any]] = {
+    tier: {
+        "providers": cfg["providers"],
+        "models": cfg["models"],
+        "features": cfg["features"],
         "daily_token_budget": _DEV_DAILY_TOKEN_BUDGET,
+        "daily_request_budget": _DEV_DAILY_REQUEST_BUDGET,
         "rate_limit_per_minute": _DEV_RATE_LIMIT_PER_MINUTE,
+        "rate_limit_per_second": _DEV_RATE_LIMIT_PER_SECOND,
     }
-    for tier in TIER_ORDER
+    for tier, cfg in _TIER_CONFIG.items()
 }
 
 

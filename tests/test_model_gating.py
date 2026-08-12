@@ -71,13 +71,15 @@ def _headers(token: str) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-def test_catalog_tiers_are_equal_in_dev_mode():
-    """Dev mode: every tier unlocks the same full catalog (limits set at deployment)."""
+def test_catalog_tiers_restricted_in_dev_mode():
+    """Gratuit only sees OpenRouter + Ollama; paid tiers see the full catalog."""
     gratuit = {m.id for m in catalog.allowed_models("gratuit")}
     pro = {m.id for m in catalog.allowed_models("pro")}
     cabinet = {m.id for m in catalog.allowed_models("cabinet")}
-    assert gratuit == pro == cabinet
-    assert len(gratuit) >= 10  # the full multi-provider catalog
+    assert gratuit < pro  # strict subset
+    assert pro == cabinet
+    assert all(m.provider in ("ollama", "openrouter") for m in catalog.allowed_models("gratuit"))
+    assert any(m.provider == "tokenfree" for m in catalog.allowed_models("pro"))
 
 
 def test_is_model_allowed_per_tier():
@@ -91,7 +93,9 @@ def test_is_model_allowed_per_tier():
 
 def test_default_model_and_unknown_tier():
     # Default = mid catalog option (cheap routing handles trivial queries).
-    assert catalog.default_model("gratuit") == "tokenfree/kimi-k2.5"
+    # Gratuit catalog is OpenRouter + Ollama only.
+    assert catalog.default_model("gratuit") == "openrouter/meta-llama/llama-3.3-70b-instruct"
+    assert catalog.default_model("pro") == "tokenfree/kimi-k2.5"
     assert catalog.get_tier("inconnu") == catalog.get_tier("gratuit")
 
 
@@ -103,6 +107,9 @@ def test_all_models_with_access_annotations():
     assert annotated["openrouter/deepseek/deepseek-chat"]["tier_required"] == "gratuit"
     assert annotated["openrouter/openai/gpt-4o"]["allowed"] is True
     assert annotated["openrouter/openai/gpt-4o"]["tier_required"] == "gratuit"
+    # TokenFree models are above gratuit.
+    assert annotated["tokenfree/gemini-2.5-flash"]["allowed"] is True
+    assert annotated["tokenfree/gemini-2.5-flash"]["tier_required"] == "pro"
 
 
 def test_catalog_env_override(monkeypatch):
@@ -128,7 +135,7 @@ def test_catalog_env_override_invalid_falls_back(monkeypatch):
     monkeypatch.setenv("LEGAL_AI_TIER_CATALOG_JSON", "{not valid json")
     get_settings.cache_clear()
     try:
-        assert catalog.default_model("gratuit") == "tokenfree/kimi-k2.5"
+        assert catalog.default_model("gratuit") == "openrouter/meta-llama/llama-3.3-70b-instruct"
     finally:
         get_settings.cache_clear()
 
@@ -257,7 +264,10 @@ async def test_tokenfree_completion_kwargs(monkeypatch):
 def test_resolve_llm_tokenfree_uses_tokenfree_key():
     settings = Settings(llm_provider="openai", llm_api_key="sk-main", tokenfree_api_key="tf-test")
     ctx = SimpleNamespace(settings=settings, llm=None)
-    client = resolve_llm(ctx, _user("gratuit"), "tokenfree/gemini-2.5-flash")
+    # TokenFree models are not available on the gratuit tier.
+    with pytest.raises(AuthorizationError, match="requires a higher subscription tier"):
+        resolve_llm(ctx, _user("gratuit"), "tokenfree/gemini-2.5-flash")
+    client = resolve_llm(ctx, _user("pro"), "tokenfree/gemini-2.5-flash")
     assert client.provider == "tokenfree"
     assert client.model == "openai/gemini-2.5-flash"
     assert client.api_key == "tf-test"
@@ -291,9 +301,8 @@ def test_resolve_llm_denies_unknown_model():
 def test_resolve_llm_defaults_to_tier_model():
     ctx = SimpleNamespace(settings=Settings(llm_provider="openai"), llm=None)
     # No query -> tier default (mid option); cheap routing needs a query.
-    # Dev mode: all tiers share the same default.
-    assert resolve_llm(ctx, _user("gratuit")).model == "openai/kimi-k2.5"
-    assert resolve_llm(ctx, None).model == "openai/kimi-k2.5"  # anonymous
+    assert resolve_llm(ctx, _user("gratuit")).model == "openrouter/meta-llama/llama-3.3-70b-instruct"
+    assert resolve_llm(ctx, None).model == "openrouter/meta-llama/llama-3.3-70b-instruct"  # anonymous
     assert resolve_llm(ctx, _user("pro")).model == "openai/kimi-k2.5"
 
 
@@ -438,12 +447,14 @@ def test_models_endpoint_anonymous_sees_gratuit(client):
     response = client.get("/api/v1/models")
     assert response.status_code == 200
     data = response.json()
-    assert data["default_model"] == "tokenfree/kimi-k2.5"
+    assert data["default_model"] == "openrouter/meta-llama/llama-3.3-70b-instruct"
     by_id = {m["id"]: m for m in data["models"]}
     assert by_id["ollama/gpt-oss:20b"]["allowed"] is True
     assert by_id["openrouter/deepseek/deepseek-chat"]["allowed"] is True
     assert by_id["openrouter/openai/gpt-4o"]["allowed"] is True
     assert by_id["openrouter/openai/gpt-4o"]["tier_required"] == "gratuit"
+    assert by_id["tokenfree/gemini-2.5-flash"]["allowed"] is False
+    assert by_id["tokenfree/gemini-2.5-flash"]["tier_required"] == "pro"
 
 
 def test_models_endpoint_respects_token_tier(client):

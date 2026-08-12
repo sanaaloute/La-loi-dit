@@ -5,6 +5,7 @@ advice, citation verification)."""
 
 from backend.guardrails.document_guard import check_evidence
 from backend.guardrails.input_guard import check_input
+from backend.guardrails.llm_guard import scan_input, scan_output
 from backend.guardrails.output_guard import check_output
 
-__all__ = ["check_evidence", "check_input", "check_output"]
+__all__ = ["check_evidence", "check_input", "check_output", "scan_input", "scan_output"]

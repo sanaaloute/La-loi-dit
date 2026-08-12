@@ -59,6 +59,10 @@ def settings(tmp_path) -> Settings:
         llm_provider="mock",
         database_url=f"sqlite+aiosqlite:///{tmp_path}/test.db",
         data_dir=tmp_path,
+        rate_limit_per_minute=1_000_000,
+        rate_limit_per_second=1_000_000,
+        single_session_per_user=False,
+        guardrails_enabled=False,
     )
 
 

@@ -181,8 +181,10 @@ class UserStore:
     async def create_user(self, email: str, password: str, name: str = "") -> UserRecord:
         """Create an account plus its personal workspace.
 
-        Raises ``UserAlreadyExistsError`` when the email is taken and
-        ``RuntimeError`` when no database is available.
+        Always creates a ``Role.USER`` account; admin accounts cannot be
+        registered through the public API. Raises ``UserAlreadyExistsError``
+        when the email is taken and ``RuntimeError`` when no database is
+        available.
         """
         if not await self._ensure_db():
             raise RuntimeError("user store unavailable")
@@ -280,6 +282,21 @@ class UserStore:
         async with self._session_factory() as session:
             row = (await session.execute(select(t.c.name).where(t.c.id == workspace_id))).first()
         return (row.name or "") if row else ""
+
+    async def count_admins(self) -> int:
+        """Number of admin accounts in the DB (0 when DB down)."""
+        if not await self._ensure_db():
+            return 0
+        from sqlalchemy import func, select
+
+        t = TABLES["users"]
+        async with self._session_factory() as session:
+            row = (await session.execute(select(func.count()).where(t.c.role == Role.ADMIN.value))).first()
+        return int(row[0]) if row else 0
+
+    async def has_admin(self) -> bool:
+        """True if at least one admin account exists."""
+        return await self.count_admins() > 0
 
     async def set_tier(self, user_id: str, tier: str) -> None:
         """Update a user's subscription tier (no-op when DB down)."""

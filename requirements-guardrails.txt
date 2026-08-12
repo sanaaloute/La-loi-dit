@@ -1,0 +1,8 @@
+# Optional semantic guardrails layer (LLM Guard).
+# Keep deterministic regex guards in backend.guardrails.policies active without
+# this package. Install this extra only when you want the LLM-Guard neural
+# scanners (jailbreak, prompt injection, PII, toxicity, bias, malicious URLs).
+#
+# In production Docker builds, pre-download wheels into docker/wheels or build
+# with network access; the default offline image does not bundle this package.
+llm-guard>=0.3.0,<1.0.0

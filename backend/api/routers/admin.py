@@ -306,6 +306,12 @@ async def patch_user(
     record = await store.get_by_id(user_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"unknown user: {user_id}")
+
+    # Enforce exactly one admin account.
+    if payload.role == Role.ADMIN.value and record.role != Role.ADMIN:
+        if await store.has_admin():
+            raise HTTPException(status_code=400, detail="an admin account already exists")
+
     if payload.tier is not None:
         await store.set_tier(user_id, payload.tier)
     if payload.role is not None and not await store.set_role(user_id, payload.role):

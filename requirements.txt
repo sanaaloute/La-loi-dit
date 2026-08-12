@@ -37,6 +37,12 @@ PyJWT==2.10.1
 bcrypt==4.2.1
 cryptography==44.0.0
 
+# Guardrails (optional semantic scanner — not included by default because it is
+# heavy and not always available as a manylinux wheel. Install separately with:
+#   pip install -r requirements-guardrails.txt
+# The deterministic regex guards remain active even without this package.)
+# llm-guard>=0.3.0,<1.0.0
+
 # Observability
 prometheus-client==0.21.1
 opentelemetry-sdk==1.29.0

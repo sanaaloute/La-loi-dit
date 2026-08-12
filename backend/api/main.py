@@ -47,6 +47,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from backend.api.routers.auth import build_user_store
 
     app.state.user_store = build_user_store(ctx.settings)
+    if ctx.settings.is_production:
+        has_bootstrap_admin = any(
+            u["role"].value == "admin" for u in app.state.user_store.values()
+        )
+        if not has_bootstrap_admin:
+            logger.warning(
+                "production boot: no admin account configured. Set LEGAL_AI_DEV_USERS="
+                "'admin:STRONG_PASSWORD:admin' to bootstrap the single admin account."
+            )
+        if ctx.settings.secret_key in ("", "change-me-in-production"):
+            logger.warning("production boot: LEGAL_AI_SECRET_KEY is using the default value")
     app.state.langfuse = None
     try:
         from backend.observability.langfuse_client import get_langfuse
