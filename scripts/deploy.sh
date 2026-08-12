@@ -39,4 +39,12 @@ done
 echo "== 4/4  indexing documents (data/legal_docs) =="
 docker compose exec api python -m backend.ingestion.pipeline /app/data/legal_docs
 
+echo "== updating host nginx config =="
+if command -v nginx >/dev/null 2>&1; then
+    sudo bash scripts/install-nginx-config.sh yawoto.neobytech.net || \
+        echo "WARNING: host nginx config update failed (ensure cert paths are valid)."
+else
+    echo "WARNING: nginx not found on host; skipping nginx config update."
+fi
+
 echo "deploy done."

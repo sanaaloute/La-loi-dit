@@ -20,4 +20,12 @@ docker compose build
 echo "== 3/3  restarting the stack =="
 docker compose up -d
 
+echo "== updating host nginx config =="
+if command -v nginx >/dev/null 2>&1; then
+    sudo bash scripts/install-nginx-config.sh yawoto.neobytech.net || \
+        echo "WARNING: host nginx config update failed (ensure cert paths are valid)."
+else
+    echo "WARNING: nginx not found on host; skipping nginx config update."
+fi
+
 echo "update done. The document index was left untouched (run scripts/reindex.sh if documents changed)."
