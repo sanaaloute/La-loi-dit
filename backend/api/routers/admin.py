@@ -657,6 +657,10 @@ async def admin_upload_document(
     try:
         return await pipeline.ingest_path(dest, **meta)
     except Exception as exc:
+        logger.exception(
+            "admin ingestion failed",
+            extra={"path": str(dest), "metadata": meta},
+        )
         try:
             dest.unlink()
         except OSError:

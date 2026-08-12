@@ -24,7 +24,9 @@ fi
 if [ -n "$APP_UID_GID" ] && command -v sudo >/dev/null 2>&1; then
     echo "[init-data-dir] Setting $DATA_DIR ownership to $APP_UID_GID"
     if sudo chown -R "$APP_UID_GID" "$DATA_DIR"; then
-        chmod -R u+rwx "$DATA_DIR"
+        # Ensure the owner can read/write/execute directories. Use sudo because
+        # after chown the host user may no longer be able to access the path.
+        sudo chmod -R u+rwx "$DATA_DIR"
         exit 0
     fi
 fi
