@@ -17,8 +17,10 @@ build/
 *.log
 .volumes/
 
-# Locally downloaded build wheels (see scripts/download_wheels.sh)
-docker/wheels/
+# Locally downloaded build wheels (see scripts/download_wheels.sh).
+# Keep the directory tracked so COPY doesn't fail, but never commit .whl files.
+docker/wheels/*
+!docker/wheels/.gitkeep
 
 # Windows reserved device name — never commit a stray file named "nul"
 nul

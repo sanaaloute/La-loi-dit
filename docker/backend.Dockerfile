@@ -22,8 +22,17 @@ COPY requirements.txt ./
 # (grpcio, pydantic-core, SQLAlchemy, lxml, temporalio, ...); the only sdist
 # (sgmllib3k, pure Python) installs without a compiler.
 COPY docker/wheels ./wheels
-RUN pip install --no-index --find-links ./wheels --prefix=/install -r requirements.txt \
-    && pip install --no-index --find-links ./wheels --prefix=/install --no-deps setuptools wheel
+# Offline-first install when wheels are present; otherwise fall back to the
+# configured index (PIP_INDEX_URL) so the image can build on fresh servers.
+RUN if [ -n "$(find ./wheels -type f -name '*.whl' 2>/dev/null | head -1)" ]; then \
+        echo "Installing Python deps from local wheels" && \
+        pip install --no-index --find-links ./wheels --prefix=/install -r requirements.txt && \
+        pip install --no-index --find-links ./wheels --prefix=/install --no-deps setuptools wheel; \
+    else \
+        echo "No local wheels; installing from ${PIP_INDEX_URL}" && \
+        pip install --prefix=/install -r requirements.txt && \
+        pip install --prefix=/install --no-deps setuptools wheel; \
+    fi
 
 # ---------------------------------------------------------------------------
 # Runtime: minimal image, non-root user, application code only
