@@ -20,7 +20,8 @@ fi
 # docker-compose only guarantees the container is started, not that the gRPC
 # port is open; a premature reindex fails with "Connection refused".
 echo "Checking Milvus readiness..."
-docker compose exec api python - <<'PY'
+# -T disables TTY allocation: the heredoc below needs stdin, not a terminal.
+docker compose exec -T api python - <<'PY'
 import os, socket, sys, time
 import urllib.request
 
@@ -46,6 +47,7 @@ print(f"ERROR: Milvus not reachable at {host}:{grpc_port} after {attempts * 2}s"
 sys.exit(1)
 PY
 
-docker compose exec api python -m backend.ingestion.pipeline /app/data/legal_docs "${ARGS[@]}"
+# -T keeps this non-interactive so it works from cron/SSH without a tty.
+docker compose exec -T api python -m backend.ingestion.pipeline /app/data/legal_docs "${ARGS[@]}"
 
 echo "reindex done. Answers use the new index immediately (allow ~5 min for the retrieval cache)."

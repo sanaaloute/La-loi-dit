@@ -34,7 +34,7 @@ ingest:
 # ones skipped, deleted files dropped from the index (GC). --full-reindex
 # wipes and rebuilds the whole index.
 reindex:
-	docker compose exec api python -m backend.ingestion.pipeline /app/data/legal_docs
+	docker compose exec -T api python -m backend.ingestion.pipeline /app/data/legal_docs
 
 reindex-local:
 	python -m backend.ingestion.pipeline data/legal_docs
