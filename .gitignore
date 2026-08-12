@@ -3,7 +3,13 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
-data/
+
+# Keep the data/ directory tracked so the server bind-mount exists after clone,
+# but ignore everything inside it. Source documents are uploaded through the
+# admin UI; generated DBs/indexes are never committed.
+data/**
+!data/.gitkeep
+
 htmlcov/
 node_modules/
 dist/
@@ -11,7 +17,7 @@ build/
 *.log
 .volumes/
 
-# Locally downloaded build wheels (see data/download_wheels.sh)
+# Locally downloaded build wheels (see scripts/download_wheels.sh)
 docker/wheels/
 
 # Windows reserved device name — never commit a stray file named "nul"

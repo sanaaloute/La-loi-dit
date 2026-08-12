@@ -1,0 +1,2 @@
+# Placeholder so Git tracks the empty data/ directory on the server.
+# All actual contents (uploaded documents, generated DBs, indexes) are ignored.

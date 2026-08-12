@@ -2,7 +2,7 @@
 
 # ---------------------------------------------------------------------------
 # Builder: install all Python dependencies into /install — fully OFFLINE.
-# The wheels are pre-downloaded on the host (data/download_wheels.sh) so the
+# The wheels are pre-downloaded on the host (scripts/download_wheels.sh) so the
 # build never touches a package registry: slow/filtered build networks only
 # need the base image. PIP_INDEX_URL remains as an escape hatch for builds on
 # healthy networks (fallback if a wheel is missing).
