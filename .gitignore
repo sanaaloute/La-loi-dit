@@ -3,26 +3,36 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
-.env
-.env.dev
-!.env.example
-!.env.dev.example
 data/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
 htmlcov/
-.coverage
 node_modules/
 dist/
 build/
 *.log
 .volumes/
-.kimi-code/
-.agents/
 
 # Locally downloaded build wheels (see data/download_wheels.sh)
 docker/wheels/
 
 # Windows reserved device name — never commit a stray file named "nul"
 nul
+
+# Root dotfiles are local tooling/environment — not tracked, except the
+# functional ones negated below (anchored to the repo root so nested
+# dotfiles like frontend/.gitignore are unaffected).
+/.*
+!.gitignore
+!.dockerignore
+!.env.example
+!.env.dev.example
+!.github/
+!.vscode/
+!.kimi/
+
+# Local test / benchmark artifacts at the repo root
+/=*
+/*.png
+/*.pdf
+/test.md
+/*_tmp.py
+/embed_benchmark*.txt
