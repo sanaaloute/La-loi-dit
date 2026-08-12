@@ -29,6 +29,7 @@ nul
 # functional ones negated below (anchored to the repo root so nested
 # dotfiles like frontend/.gitignore are unaffected).
 /.*
+!.gitattributes
 !.gitignore
 !.dockerignore
 !.env.example

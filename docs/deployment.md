@@ -56,9 +56,12 @@ Let's Encrypt certificates at:
 Obtain certificates first (e.g. `certbot --nginx`), or override the paths:
 
 ```bash
-sudo scripts/install-nginx-config.sh yawoto.neobytech.net \
+sudo bash scripts/install-nginx-config.sh yawoto.neobytech.net \
   /path/to/fullchain.pem /path/to/privkey.pem
 ```
+
+If you see a permission error, the script may have lost its executable bit; run
+`chmod +x scripts/install-nginx-config.sh` first.
 
 ## Environment variables
 
