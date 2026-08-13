@@ -40,7 +40,7 @@ for i in $(seq 1 72); do
 done
 
 echo "== 5/5  indexing documents (data/legal_docs) =="
-docker compose exec api python -m backend.ingestion.pipeline /app/data/legal_docs
+docker compose exec -T api python -m backend.ingestion.pipeline /app/data/legal_docs
 
 echo "== updating host nginx config =="
 if command -v nginx >/dev/null 2>&1; then
