@@ -24,9 +24,14 @@ fi
 if [ -n "$APP_UID_GID" ] && command -v sudo >/dev/null 2>&1; then
     echo "[init-data-dir] Setting $DATA_DIR ownership to $APP_UID_GID"
     if sudo chown -R "$APP_UID_GID" "$DATA_DIR"; then
-        # Ensure the owner can read/write/execute directories. Use sudo because
-        # after chown the host user may no longer be able to access the path.
-        sudo chmod -R u+rwx "$DATA_DIR"
+        # Owner (container app) needs full access. Also keep the host user's
+        # primary group writable so git operations on tracked data files still
+        # work, and set the setgid bit on directories so new files inherit the
+        # host group.
+        HOST_GROUP=$(id -gn)
+        sudo chgrp -R "$HOST_GROUP" "$DATA_DIR"
+        sudo find "$DATA_DIR" -type d -exec chmod u+rwx,g+rwxs {} +
+        sudo find "$DATA_DIR" -type f -exec chmod u+rw,g+rw {} +
         exit 0
     fi
 fi
