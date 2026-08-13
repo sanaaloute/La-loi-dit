@@ -50,6 +50,22 @@ _REQUIRED_FIELDS = {
 _NATIVE_FILTER_FIELDS = ("document_id", "article", "status", "document_type")
 
 
+def _get_field_dim(field: Optional[dict[str, Any]]) -> Optional[int]:
+    """Extract the 'dim' parameter from a Milvus field descriptor."""
+    if not field:
+        return None
+    params = field.get("type_params") or field.get("params") or {}
+    if isinstance(params, list):
+        for p in params:
+            if p.get("key") == "dim":
+                return int(p.get("value", 0))
+    elif isinstance(params, dict):
+        dim = params.get("dim")
+        if dim is not None:
+            return int(dim)
+    return None
+
+
 def _norm_filter_value(value: Any) -> str:
     if isinstance(value, Enum):
         return str(value.value)
@@ -178,6 +194,25 @@ class MilvusVectorStore:
                     )
                     await asyncio.to_thread(self._client.drop_collection, self._collection)
                     exists = False
+                else:
+                    # The embedding model may have changed; a dimension mismatch
+                    # makes the existing vectors incompatible with new ones.
+                    vector_field = next(
+                        (f for f in desc.get("fields", []) if f.get("name") == "vector"), None
+                    )
+                    vector_dim = _get_field_dim(vector_field)
+                    if vector_dim is not None and vector_dim != self._dim:
+                        logger.warning(
+                            "Milvus collection %r has vector dim %d but configured dim is %d; "
+                            "dropping and recreating it — re-ingest documents afterwards",
+                            self._collection,
+                            vector_dim,
+                            self._dim,
+                        )
+                        await asyncio.to_thread(
+                            self._client.drop_collection, self._collection
+                        )
+                        exists = False
             if not exists:
                 schema = MilvusClient.create_schema(
                     auto_id=False, enable_dynamic_field=False
