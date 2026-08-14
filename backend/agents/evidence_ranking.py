@@ -54,14 +54,86 @@ class EvidenceRankingAgent(Agent):
         scored = sorted(evidence, key=score, reverse=True)
         strong = [c for c in scored if score(c) >= ctx.settings.min_evidence_score]
         deduped = _dedupe_same_source(strong)
+        selected = _select_per_sub_question(
+            deduped,
+            state.get("branch_membership", []),
+            plan,
+            max_per_group=ctx.settings.answer_max_evidence_per_subquestion,
+        )
         return {
-            "ranked_evidence": deduped,
+            "ranked_evidence": selected,
             "trace": [
                 *state.get("trace", []),
-                f"evidence_ranking: {len(deduped)}/{len(evidence)} chunks kept after ranking"
+                f"evidence_ranking: {len(selected)}/{len(evidence)} chunks kept after ranking"
+                f" (max {ctx.settings.answer_max_evidence_per_subquestion} per sub-question)"
                 + (f" ({len(strong) - len(deduped)} duplicates merged)" if len(deduped) < len(strong) else ""),
             ],
         }
+
+
+def _select_per_sub_question(
+    chunks: list[EvidenceChunk],
+    membership: list[dict[str, str]],
+    plan: Any,
+    *,
+    max_per_group: int,
+) -> list[EvidenceChunk]:
+    """Keep the best ``max_per_group`` chunks of each sub-question.
+
+    ``chunks`` arrives score-sorted and deduped. Every retrieval branch
+    records which sub-question produced each chunk (``branch_membership``);
+    each sub-question keeps its own best chunks above the score threshold,
+    so one dominant sub-question cannot starve the others of evidence.
+    Expanded parents inherit the group of the child that triggered them.
+    Chunks without membership information form one trailing group, capped
+    the same way.
+    """
+    owner: dict[str, str] = {}
+    for entry in membership:
+        owner.setdefault(entry.get("chunk_id", ""), entry.get("query", ""))
+
+    group_order: list[str] = []
+    if plan is not None:
+        group_order.extend(q for q in plan.sub_questions if q.strip())
+    for entry in membership:
+        q = entry.get("query", "")
+        if q and q not in group_order:
+            group_order.append(q)
+
+    groups: dict[str, list[EvidenceChunk]] = {q: [] for q in group_order}
+    other: list[EvidenceChunk] = []
+    for chunk in chunks:
+        q = owner.get(chunk.chunk_id)
+        if q is None:
+            # Expanded parent: inherit the sub-question of the child chunk
+            # whose retrieval triggered the expansion.
+            for child in chunk.child_chunks or []:
+                if child.chunk_id in owner:
+                    q = owner[child.chunk_id]
+                    break
+        if q is not None and q in groups:
+            groups[q].append(chunk)
+        else:
+            other.append(chunk)
+
+    selected: list[EvidenceChunk] = []
+    seen: set[str] = set()
+
+    def take(group: list[EvidenceChunk]) -> None:
+        kept = 0
+        for chunk in group:
+            if kept >= max_per_group:
+                break
+            if chunk.chunk_id in seen:
+                continue
+            seen.add(chunk.chunk_id)
+            selected.append(chunk)
+            kept += 1
+
+    for q in group_order:
+        take(groups[q])
+    take(other)
+    return selected
 
 
 def _dedupe_same_source(chunks: list[EvidenceChunk]) -> list[EvidenceChunk]:

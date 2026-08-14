@@ -98,7 +98,11 @@ async def test_retrieval_branch_searches_its_subquestion(seeded_ctx):
     assert result["branch_evidence"], "branch should return evidence for a seeded topic"
     assert result["branch_trace"][0].startswith("retrieval_branch 1:")
     # No concurrent-channel violations: branches only touch additive channels.
-    assert set(result) == {"branch_evidence", "branch_trace"}
+    assert set(result) == {"branch_evidence", "branch_trace", "branch_membership"}
+    # Each returned chunk is attributed to this branch's sub-question.
+    assert all(
+        m["query"] == "préavis de licenciement" for m in result["branch_membership"]
+    )
 
 
 async def test_retrieval_merge_fuses_branches_and_counts_retry(seeded_ctx):

@@ -75,6 +75,9 @@ class GraphState(TypedDict, total=False):
     branch_index: int  # set per-Send: 0-based branch number
     branch_evidence: Annotated[list[EvidenceChunk], merge_branch_chunks]
     branch_trace: Annotated[list[str], operator.add]
+    # Which sub-question produced each chunk ({"chunk_id", "query"} entries);
+    # evidence_ranking uses it to apply the per-sub-question evidence cap.
+    branch_membership: Annotated[list[dict[str, str]], operator.add]
 
     # --- control / bookkeeping ---
     planning_retries: int

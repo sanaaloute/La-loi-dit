@@ -239,12 +239,14 @@ def test_reasoning_excerpt_chars_and_evidence_count():
 
     default_msg = agent._build_user_message(state, _ctx(Settings()))
     assert "x" * 300 in default_msg  # excerpts effectively untruncated at 2000 chars
-    assert "contenu-9" in default_msg and "contenu-10" not in default_msg  # 10 shown
+    # Every ranked chunk reaches the prompt: the evidence count is bounded
+    # upstream, per sub-question, by the evidence ranking node.
+    assert "contenu-11" in default_msg
 
-    tuned = Settings(reasoning_max_excerpt_chars=20, answer_max_evidence=3)
+    tuned = Settings(reasoning_max_excerpt_chars=20)
     tuned_msg = agent._build_user_message(state, _ctx(tuned))
     assert "x" * 21 not in tuned_msg
-    assert "contenu-2" in tuned_msg and "contenu-3" not in tuned_msg
+    assert "contenu-11" in tuned_msg
 
 
 # ---------------------------------------------------------------------------

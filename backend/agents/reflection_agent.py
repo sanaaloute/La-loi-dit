@@ -12,7 +12,6 @@ import json
 from typing import Any, Optional
 
 from backend.agents.agent import CompletionAgent
-from backend.core.config import get_settings
 from backend.core.context import AppContext
 from backend.core.models import ReflectionResult
 from backend.core.prompts import PromptRef
@@ -28,10 +27,10 @@ class ReflectionAgent(CompletionAgent):
     system_prompt = PromptRef("REFLECTION_SYSTEM")
 
     def _build_user_message(self, state: GraphState, ctx: Optional[AppContext] = None) -> str:
-        settings = ctx.settings if ctx is not None else get_settings()
         evidence_text = "\n".join(
             c.citation_label()
-            for c in state.get("ranked_evidence", [])[: settings.answer_max_evidence]
+            # ranked_evidence is already bounded per sub-question upstream.
+            for c in state.get("ranked_evidence", [])
         )
         return (
             f"Question: {state['query']}\n"

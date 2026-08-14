@@ -64,6 +64,7 @@ class RetrievalBranchAgent(Agent):
         label = branch_query if len(branch_query) <= 60 else branch_query[:57] + "..."
         return {
             "branch_evidence": chunks,
+            "branch_membership": [{"chunk_id": c.chunk_id, "query": branch_query} for c in chunks],
             "branch_trace": [f"retrieval_branch {index + 1}: '{label}' -> {len(chunks)} chunks{trace_line}"],
         }
 

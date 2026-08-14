@@ -55,8 +55,11 @@ async def maybe_summarize(
 ) -> Optional[MemoryRecord]:
     """Summarize the oldest buffer turns when the buffer exceeds ``max_turns``.
 
-    Returns the created summary record, or None when no summarization was
-    needed. Never raises — failures simply skip summarization.
+    Each session owns ONE summary record (deterministic id ``summary:<id>``,
+    upserted by ``store.remember``), refreshed every ``max_turns`` new
+    messages — so hooking this after every turn neither floods the memories
+    table nor pays an LLM call per message. Returns the created/updated
+    record, or None when no summarization was needed. Never raises.
     """
     max_turns = max_turns if max_turns is not None else _settings().memory_summary_max_turns
     try:
@@ -64,6 +67,11 @@ async def maybe_summarize(
     except Exception:
         return None
     if len(buffer) <= max_turns:
+        return None
+    # Refresh only when the overflow crosses a fresh multiple of max_turns
+    # (append_turn adds 1-2 messages per turn, hence the (1, 2) window).
+    overflow = len(buffer) - max_turns
+    if overflow % max_turns not in (1, 2):
         return None
 
     old_turns = buffer[:-max_turns]
@@ -79,6 +87,7 @@ async def maybe_summarize(
         summary_text = _extractive_summary(old_turns)
 
     record = MemoryRecord(
+        id=f"summary:{session_id}",
         user_id=user_id or "unknown",
         session_id=session_id,
         kind="summary",

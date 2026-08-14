@@ -241,6 +241,17 @@ async def run_query(graph, ctx: AppContext, state: GraphState, *, config: Option
                     ChatMessage(role="assistant", content=answer.model_dump_json()),
                 ],
             )
+            # Long-term memory: compress the oldest turns into the session's
+            # summary record once the buffer outgrows the short-term window
+            # (fires only every memory_summary_max_turns new messages).
+            from backend.memory.summarizer import maybe_summarize
+
+            await maybe_summarize(
+                ctx.memory,
+                final_state["session_id"],
+                llm=ctx.llm,
+                user_id=final_state.get("user_id", "anonymous"),
+            )
         except Exception:
             pass  # memory persistence must never break the answer path
 

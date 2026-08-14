@@ -207,15 +207,16 @@ def test_refresh_token_rejects_expired(client):
     assert client.post("/api/v1/auth/refresh", headers=_headers(expired)).status_code == 401
 
 
-def test_refresh_token_rejected_after_login_elsewhere(client):
+def test_refresh_token_rejected_after_login_elsewhere(tmp_path, monkeypatch):
     """Single-session: a new login invalidates the previous token's refresh."""
-    email = f"user-{uuid.uuid4().hex[:8]}@example.com"
-    first = client.post(
-        "/api/v1/auth/register", json={"email": email, "password": PASSWORD, "name": "Awa"}
-    ).json()["access_token"]
-    client.post("/api/v1/auth/token", json={"username": email, "password": PASSWORD})
+    with _make_client(tmp_path, monkeypatch, {"LEGAL_AI_SINGLE_SESSION_PER_USER": "true"}) as client:
+        email = f"user-{uuid.uuid4().hex[:8]}@example.com"
+        first = client.post(
+            "/api/v1/auth/register", json={"email": email, "password": PASSWORD, "name": "Awa"}
+        ).json()["access_token"]
+        client.post("/api/v1/auth/token", json={"username": email, "password": PASSWORD})
 
-    assert client.post("/api/v1/auth/refresh", headers=_headers(first)).status_code == 401
+        assert client.post("/api/v1/auth/refresh", headers=_headers(first)).status_code == 401
 
 
 # ---------------------------------------------------------------------------

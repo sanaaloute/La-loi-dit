@@ -226,7 +226,10 @@ class Settings(BaseSettings):
     # agents / guardrails
     context_max_turns: int = 10  # conversation window (turns) loaded into context
     memory_recall_limit: int = 5
-    answer_max_evidence: int = 10  # evidence chunks attached to the FinalAnswer
+    # Evidence selection is per sub-question: each retrieval branch keeps its
+    # best chunks (score >= min_evidence_score), capped at this many — no
+    # global cap, so one sub-question cannot starve the others of evidence.
+    answer_max_evidence_per_subquestion: int = 5
     input_max_chars: int = 8000  # user queries longer than this is truncated
     input_max_words: int = 200  # user queries longer than this are rejected (HTTP 400)
     evidence_injection_screening: bool = True  # scan retrieved chunks for embedded instructions before prompting

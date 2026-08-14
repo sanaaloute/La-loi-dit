@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 import uuid
 
 import pytest
@@ -272,3 +273,39 @@ def test_stt_available_faster_whisper_missing_package_warns_once(monkeypatch):
 def test_stt_available_unknown_provider(monkeypatch):
     _patch_settings(monkeypatch, stt_provider="bogus")
     assert stt.stt_available() is False
+
+
+# ---------------------------------------------------------------------------
+# Idle eviction of the local Whisper model
+# ---------------------------------------------------------------------------
+
+
+def test_idle_whisper_model_is_evicted(monkeypatch):
+    """A model unused for _WHISPER_IDLE_SECONDS is dropped from the cache."""
+    monkeypatch.setattr(stt, "_WHISPER_MODEL", object())
+    monkeypatch.setattr(stt, "_WHISPER_LAST_USED", time.monotonic() - 3600)
+    assert stt._evict_idle_whisper_model() is True
+    assert stt._WHISPER_MODEL is None
+
+
+def test_recently_used_whisper_model_is_kept(monkeypatch):
+    model = object()
+    monkeypatch.setattr(stt, "_WHISPER_MODEL", model)
+    monkeypatch.setattr(stt, "_WHISPER_LAST_USED", time.monotonic())
+    assert stt._evict_idle_whisper_model() is False
+    assert stt._WHISPER_MODEL is model
+
+
+async def test_transcription_refreshes_last_used(monkeypatch):
+    """Each transcription pushes the idle horizon forward."""
+    _patch_settings(monkeypatch, stt_provider="faster-whisper")
+    monkeypatch.setattr(stt, "_WHISPER_LAST_USED", 0.0)
+
+    class _FakeModel:
+        def transcribe(self, path, language=None):
+            return [], None
+
+    monkeypatch.setattr(stt, "_load_whisper_model", lambda settings: _FakeModel())
+    await stt.transcribe_audio(b"audio-bytes", "vocal.webm")
+    assert stt._WHISPER_LAST_USED > 0
+

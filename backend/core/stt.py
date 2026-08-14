@@ -8,17 +8,21 @@ core/llm.py and core/embeddings.py:
   reusing the main LLM credentials.
 - ``faster-whisper``: fully local transcription. The package is heavy and
   import-guarded: when it is missing, ``stt_available()`` reports False (with
-  one clear warning) and the rest of the platform runs unchanged.
+  one clear warning) and the rest of the platform runs unchanged. The loaded
+  model is evicted after ``_WHISPER_IDLE_SECONDS`` without use so an idle
+  backend does not keep hundreds of MB of RAM allocated.
 """
 
 from __future__ import annotations
 
 import asyncio
+import gc
 import importlib.util
 import io
 import logging
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +42,14 @@ _WHISPER_MODEL_LOCK = threading.Lock()
 # Warn once (not per request) when the local provider is selected but its
 # package is missing.
 _WARNED_MISSING_FASTER_WHISPER = False
+
+# Idle eviction: a loaded Whisper model holds hundreds of MB of RAM, so a
+# daemon reaper unloads it after this long without a transcription. The next
+# request simply reloads it (a few seconds of latency).
+_WHISPER_IDLE_SECONDS = 60.0
+_REAPER_CHECK_SECONDS = 10.0
+_WHISPER_LAST_USED = 0.0  # monotonic timestamp of the last load/transcription
+_WHISPER_REAPER_STARTED = False
 
 
 def _faster_whisper_installed() -> bool:
@@ -63,9 +75,56 @@ def stt_available() -> bool:
     return False
 
 
+def _evict_idle_whisper_model() -> bool:
+    """Drop the cached Whisper model when it has been idle too long.
+
+    In-flight transcriptions are safe: they hold their own reference to the
+    model object, so dropping the global only prevents *new* uses of the
+    stale instance — memory is freed once the last reference returns.
+    """
+    if _WHISPER_MODEL is None:
+        return False
+    if time.monotonic() - _WHISPER_LAST_USED < _WHISPER_IDLE_SECONDS:
+        return False
+    with _WHISPER_MODEL_LOCK:
+        if _WHISPER_MODEL is None:
+            return False
+        if time.monotonic() - _WHISPER_LAST_USED < _WHISPER_IDLE_SECONDS:
+            return False
+        logger.info(
+            "unloading faster-whisper model after %ds idle",
+            int(_WHISPER_IDLE_SECONDS),
+        )
+        globals()["_WHISPER_MODEL"] = None
+    gc.collect()
+    return True
+
+
+def _whisper_reaper_loop() -> None:
+    """Periodically evict the local Whisper model once it goes idle."""
+    while True:
+        time.sleep(_REAPER_CHECK_SECONDS)
+        _evict_idle_whisper_model()
+
+
+def _ensure_reaper_started() -> None:
+    global _WHISPER_REAPER_STARTED
+    if _WHISPER_REAPER_STARTED:
+        return
+    with _WHISPER_MODEL_LOCK:
+        if _WHISPER_REAPER_STARTED:
+            return
+        _WHISPER_REAPER_STARTED = True
+    thread = threading.Thread(
+        target=_whisper_reaper_loop, name="whisper-idle-reaper", daemon=True
+    )
+    thread.start()
+
+
 def _load_whisper_model(settings: Settings) -> Any:
     """Return the cached local WhisperModel, building it on first call."""
-    global _WHISPER_MODEL
+    global _WHISPER_MODEL, _WHISPER_LAST_USED
+    _WHISPER_LAST_USED = time.monotonic()
     if _WHISPER_MODEL is not None:
         return _WHISPER_MODEL
     with _WHISPER_MODEL_LOCK:
@@ -86,11 +145,13 @@ def _load_whisper_model(settings: Settings) -> Any:
             compute_type="int8",
             download_root=str(models_dir),
         )
+        _ensure_reaper_started()
         return _WHISPER_MODEL
 
 
 def _transcribe_local(settings: Settings, audio_bytes: bytes, filename: str) -> str:
     """Blocking faster-whisper transcription (runs in a worker thread)."""
+    global _WHISPER_LAST_USED
     model = _load_whisper_model(settings)
     # faster-whisper accepts a path (a file-like only in newer versions); a
     # temp file works across all versions and lets the decoder sniff the
@@ -105,6 +166,7 @@ def _transcribe_local(settings: Settings, audio_bytes: bytes, filename: str) -> 
         segments, _info = model.transcribe(str(tmp_path), language=settings.stt_language)
         return "".join(segment.text for segment in segments).strip()
     finally:
+        _WHISPER_LAST_USED = time.monotonic()
         tmp.close()
         tmp_path.unlink(missing_ok=True)
 

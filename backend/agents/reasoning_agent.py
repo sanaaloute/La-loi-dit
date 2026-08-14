@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from backend.agents.agent import CompletionAgent
+from backend.agents.context_agent import format_memory_sections
 from backend.core.config import get_settings
 from backend.core.context import AppContext
 from backend.core.prompts import PromptRef
@@ -28,15 +29,19 @@ class ReasoningAgent(CompletionAgent):
 
     def _build_user_message(self, state: GraphState, ctx: Optional[AppContext] = None) -> str:
         settings = ctx.settings if ctx is not None else get_settings()
+        memory_sections = format_memory_sections(state, max_entry_chars=settings.context_message_max_chars)
+        prefix = f"{memory_sections}\n\n" if memory_sections else ""
         evidence = list(state.get("ranked_evidence", []))
         if not evidence:
-            return f"Question: {state['query']}\n\nNo evidence was retrieved."
+            return f"{prefix}Question: {state['query']}\n\nNo evidence was retrieved."
+        # ranked_evidence is already bounded per sub-question by the ranking
+        # node; every kept chunk reaches the prompt.
         evidence_text = "\n\n".join(
             f"[{i}] {c.citation_label()} ({c.publication_date or 'date inconnue'}): "
             f"{repair_extraction_artifacts(c.content)[: settings.reasoning_max_excerpt_chars]}"
-            for i, c in enumerate(evidence[: settings.answer_max_evidence], start=1)
+            for i, c in enumerate(evidence, start=1)
         )
-        return f"Question: {state['query']}\n\nPreuves:\n{evidence_text}"
+        return f"{prefix}Question: {state['query']}\n\nPreuves:\n{evidence_text}"
 
     def _parse_final(self, text: str, state: GraphState, ctx: AppContext) -> dict[str, Any]:
         retries = state.get("retrieval_retries", 0)

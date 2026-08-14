@@ -6,6 +6,7 @@ offline regardless of the project's ``.env`` file.
 
 from __future__ import annotations
 
+import contextlib
 import os
 
 os.environ["LEGAL_AI_LLM_PROVIDER"] = "mock"
@@ -14,22 +15,38 @@ os.environ["LEGAL_AI_LANGFUSE_PUBLIC_KEY"] = ""
 os.environ["LEGAL_AI_LANGFUSE_SECRET_KEY"] = ""
 
 
+@contextlib.contextmanager
 def _client():
     import os
 
     from backend.core.config import get_settings
 
-    os.environ["LEGAL_AI_RATE_LIMIT_PER_MINUTE"] = "1000000"
-    os.environ["LEGAL_AI_RATE_LIMIT_PER_SECOND"] = "1000000"
-    os.environ["LEGAL_AI_SINGLE_SESSION_PER_USER"] = "false"
-    os.environ["LEGAL_AI_GUARDRAILS_ENABLED"] = "false"
+    # Scoped overrides: restored on exit so later test modules in the same
+    # pytest process never inherit them (previously SINGLE_SESSION leaked and
+    # silently disabled session enforcement everywhere downstream).
+    overrides = {
+        "LEGAL_AI_RATE_LIMIT_PER_MINUTE": "1000000",
+        "LEGAL_AI_RATE_LIMIT_PER_SECOND": "1000000",
+        "LEGAL_AI_SINGLE_SESSION_PER_USER": "false",
+        "LEGAL_AI_GUARDRAILS_ENABLED": "false",
+    }
+    saved = {key: os.environ.get(key) for key in overrides}
+    os.environ.update(overrides)
     get_settings.cache_clear()
+    try:
+        from fastapi.testclient import TestClient
 
-    from fastapi.testclient import TestClient
+        from backend.api.main import app
 
-    from backend.api.main import app
-
-    return TestClient(app)
+        with TestClient(app) as client:
+            yield client
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        get_settings.cache_clear()
 
 
 def test_health_returns_200():

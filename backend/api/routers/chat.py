@@ -444,6 +444,15 @@ async def _stream_events(
                             ChatMessage(role="assistant", content=response.answer.model_dump_json()),
                         ],
                     )
+                    # Same long-term-memory hook as run_query (see graph.py).
+                    from backend.memory.summarizer import maybe_summarize
+
+                    await maybe_summarize(
+                        memory,
+                        state.get("session_id", ""),
+                        llm=state.get("llm"),
+                        user_id=state.get("user_id", "anonymous"),
+                    )
                 except Exception:
                     pass  # memory persistence must never break the stream
                 if user_store is not None and meter_user_id and usage_before is not None:

@@ -45,6 +45,31 @@ async def load_conversation_buffer(ctx: Any, state: Any, args: LoadConversationB
 register_tool(load_conversation_buffer)
 
 
+def format_memory_sections(state: Any, *, max_entry_chars: int) -> str:
+    """Render the conversation window and recalled memories as prompt sections.
+
+    Consumed by the reasoning, reflection and response prompts so loaded
+    short-term context and long-term memories actually shape the answer.
+    Returns an empty string when both are empty.
+    """
+    sections: list[str] = []
+    conversation = [
+        m for m in state.get("conversation_context", []) if m.get("content", "").strip()
+    ]
+    if conversation:
+        lines = [
+            f"[{'utilisateur' if m.get('role') == 'user' else 'assistant'}] "
+            f"{m['content'][:max_entry_chars]}"
+            for m in conversation
+        ]
+        sections.append("Conversation précédente:\n" + "\n".join(lines))
+    memories = [m for m in state.get("memories", []) if m.get("content", "").strip()]
+    if memories:
+        lines = [f"- {m['content'][:max_entry_chars]}" for m in memories]
+        sections.append("Souvenirs pertinents (mémoire long terme):\n" + "\n".join(lines))
+    return "\n\n".join(sections)
+
+
 class ContextAgent(Agent):
     """Loads conversation context for the current session."""
 
