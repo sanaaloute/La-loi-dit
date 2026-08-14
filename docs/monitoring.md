@@ -1,15 +1,15 @@
 # Monitoring
 
-Three complementary layers: **Prometheus** for metrics, **Grafana** for
-dashboards, **Langfuse** (+ OpenTelemetry) for LLM/pipeline traces.
+Two complementary layers: **Prometheus metrics** exposed by the API, and
+**Langfuse** (+ OpenTelemetry) for LLM/pipeline traces.
 
 ## Prometheus metrics
 
-The API exposes `GET /metrics`, scraped every 15 s
-(`docker/prometheus/prometheus.yml`). Metrics are defined in
-`backend/observability/metrics.py`; every metric degrades to a no-op if
-`prometheus_client` is unavailable, so instrumentation can never break a
-request.
+The API exposes `GET /metrics` — scrape it with your own Prometheus
+(the local prometheus/grafana containers were removed on the minimac
+branch). Metrics are defined in `backend/observability/metrics.py`; every
+metric degrades to a no-op if `prometheus_client` is unavailable, so
+instrumentation can never break a request.
 
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
@@ -28,14 +28,6 @@ request.
 | `tokens_used_total` | counter | `direction` (`input`/`output`) | LLM token usage |
 
 All histograms use buckets `0.05 … 60` seconds.
-
-## Grafana
-
-Provisioned automatically (`docker/grafana/provisioning/`): the Prometheus
-datasource and the **Legal AI — Overview** dashboard
-(`docker/grafana/dashboards/legal-ai-overview.json`) with four starter
-panels — request rate, chat latency p50/p95, errors & retries, and cache
-hit rate. UI on :3001 (admin/admin in compose — change it).
 
 ## Langfuse traces
 

@@ -59,16 +59,12 @@ flowchart TB
     ca --> memstore
 
     subgraph infra["Infrastructure"]
-        redis[(Redis<br/>cache + Celery broker)]
+        redis[(Redis<br/>cache + session store)]
         pg[(PostgreSQL<br/>users, sessions, memory,<br/>documents, audit)]
-        temporal[Temporal<br/>durable workflows]
-        celery[Celery workers<br/>ingestion & batch jobs]
     end
 
     memstore --> redis
     memstore --> pg
-    api --> temporal
-    api --> celery
 
     subgraph obs["Observability"]
         prom[Prometheus]
@@ -97,7 +93,6 @@ flowchart TB
 | Ingestion | `backend/ingestion/` | Parse → clean → chunk → embed → index |
 | Security | `backend/security/` | JWT, RBAC roles (`admin`, `legal_expert`, `user`, `viewer`), rate limiting |
 | Observability | `backend/observability/` | Prometheus metrics, OpenTelemetry, Langfuse |
-| Temporal | `backend/temporal/` | Durable conversation workflow, resume after interruption |
 | Evaluation | `backend/evaluation/` | Golden dataset, quality metrics, runner |
 
 ## Design principles

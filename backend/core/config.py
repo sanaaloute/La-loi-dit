@@ -117,15 +117,6 @@ class Settings(BaseSettings):
     # --- PostgreSQL (defaults to local SQLite for development) ---
     database_url: str = "sqlite+aiosqlite:///./data/legal_ai.db"
 
-    # --- Temporal ---
-    temporal_address: str = "localhost:7233"
-    temporal_namespace: str = "default"
-    temporal_enabled: bool = False
-    temporal_task_queue: str = "legal-ai"
-
-    # --- Celery ---
-    celery_broker_url: str = "redis://localhost:6379/1"
-
     # --- auth / security ---
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60
@@ -318,17 +309,6 @@ class Settings(BaseSettings):
     memory_min_importance: float = 0.1
     memory_summary_max_turns: int = 20
     memory_summary_max_len: int = 200
-
-    # --- temporal ---
-    temporal_connect_timeout_seconds: float = 5.0
-    temporal_activity_timeout_seconds: float = 180.0
-    temporal_ingestion_timeout_minutes: int = 30
-    temporal_max_turns_per_execution: int = 50
-
-    # --- celery ---
-    celery_task_time_limit_seconds: int = 600
-    celery_worker_max_tasks_per_child: int = 100
-    celery_evaluation_timeout_seconds: int = 1800
 
     # --- crawler ---
     crawler_max_pages: int = 20

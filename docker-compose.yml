@@ -1,24 +1,25 @@
 name: legal-ai-burkina
 
+# ---------------------------------------------------------------------------
+# Mac Mini (minimac branch): minimal stack.
+#
+# Cut vs the original full deployment (all dormant or replaceable):
+#   - milvus + etcd + minio → embedded Milvus Lite (LEGAL_AI_MILVUS_URI points
+#     at /app/data/milvus_lite.db inside the ./data volume — no server needed)
+#   - temporal + temporal-ui + celery-worker → dormant subsystems: nothing in
+#     the API/request path imported them (removed on this branch)
+#   - prometheus + grafana → optional observability; /metrics keeps working
+#   - ollama-relay → WSL-only workaround; Ollama runs natively on the Mac and
+#     is reached via host.docker.internal
+# ---------------------------------------------------------------------------
+
 networks:
   legal-net:
     driver: bridge
-    # Pinned subnet: the ollama-relay service binds the gateway address
-    # (172.18.0.1), so it must stay deterministic across recreations.
-    ipam:
-      config:
-        - subnet: 172.18.0.0/16
-          gateway: 172.18.0.1
 
 volumes:
   postgres-data:
   redis-data:
-  etcd-data:
-  minio-data:
-  milvus-data:
-  temporal-data:
-  prometheus-data:
-  grafana-data:
 
 services:
   api:
@@ -30,9 +31,6 @@ services:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
     image: legal-ai-burkina:latest
     # Multi-worker uvicorn (default 2; override with LEGAL_AI_WEB_WORKERS).
-    # NOTE: in-memory fallbacks (cache, rate limiter, vector store) are
-    # per-process — with workers > 1 you NEED Redis/Postgres/Milvus up
-    # (strict infra mode, on in production, reports them via /ready).
     command: uvicorn backend.api.main:app --host 0.0.0.0 --port 8000 --workers ${LEGAL_AI_WEB_WORKERS}
     # Configuration comes from `.env` (env_file) — the ONLY source of truth.
     # The one exception below: DATABASE_URL is assembled here from the
@@ -50,51 +48,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      milvus:
-        condition: service_healthy
-      temporal:
-        condition: service_started
-      ollama-relay:
-        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 5s
       retries: 5
       start_period: 20s
-    restart: unless-stopped
-    networks: [legal-net]
-
-  celery-worker:
-    image: legal-ai-burkina:latest
-    build:
-      context: .
-      dockerfile: docker/backend.Dockerfile
-      args:
-        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
-    # NOTE: expects the Celery app at backend.workflows.celery_app:app
-    # (being added with the background-task subsystem). Remove/comment this
-    # service until that module lands — the API works without it.
-    command: celery -A backend.workflows.celery_app worker --loglevel=INFO --concurrency=4
-    # Same convention as the api service: `.env` is the only source of truth;
-    # only DATABASE_URL is assembled here from the POSTGRES_* credentials.
-    env_file: .env
-    environment:
-      LEGAL_AI_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-    volumes:
-      - ./data:/app/data
-    depends_on:
-      - api
-      - redis
-      - postgres
-    # The image's HTTP healthcheck targets :8000, which celery doesn't serve —
-    # ping the worker over the broker instead.
-    healthcheck:
-      test: ["CMD", "celery", "-A", "backend.workflows.celery_app", "inspect", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
     restart: unless-stopped
     networks: [legal-net]
 
@@ -105,9 +64,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-    ports:
-      # Host port is configurable: another postgres may already own 5432.
-      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    # No host port: only the api container talks to it.
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -121,8 +78,7 @@ services:
   redis:
     image: redis:7-alpine
     command: redis-server --appendonly yes
-    ports:
-      - "6379:6379"
+    # No host port: only the api container talks to it.
     volumes:
       - redis-data:/data
     healthcheck:
@@ -133,166 +89,12 @@ services:
     restart: unless-stopped
     networks: [legal-net]
 
-  # --- Milvus standalone stack (vector store) ---
-  etcd:
-    image: quay.io/coreos/etcd:v3.5.14
-    environment:
-      ETCD_AUTO_COMPACTION_MODE: revision
-      ETCD_AUTO_COMPACTION_RETENTION: "1000"
-      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
-      ETCD_SNAPSHOT_COUNT: "50000"
-    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
-    volumes:
-      - etcd-data:/etcd
-    healthcheck:
-      test: ["CMD", "etcdctl", "endpoint", "health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
-    networks: [legal-net]
-
-  minio:
-    image: minio/minio:RELEASE.2024-05-28T17-19-04Z
-    environment:
-      # MinIO credentials are sourced from .env (the only source of truth).
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-    command: minio server /minio_data --console-address ":9001"
-    ports:
-      - "9001:9001"
-    volumes:
-      - minio-data:/minio_data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
-    networks: [legal-net]
-
-  milvus:
-    # Server 2.6 to match the pymilvus 3.x client (see requirements.txt).
-    image: milvusdb/milvus:v2.6.0
-    command: ["milvus", "run", "standalone"]
-    environment:
-      ETCD_ENDPOINTS: etcd:2379
-      MINIO_ADDRESS: minio:9000
-      # Milvus authenticates to MinIO with the same .env-sourced credentials
-      # (it panics on signature mismatch otherwise).
-      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
-      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
-    ports:
-      - "19530:19530"
-      - "9091:9091"
-    volumes:
-      - milvus-data:/var/lib/milvus
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-    depends_on:
-      - etcd
-      - minio
-    restart: unless-stopped
-    networks: [legal-net]
-
-  # --- Ollama relay: exposes the WSL-local Ollama to containers ---
-  # Ollama serves on the WSL VM's loopback (127.0.0.1:11434), unreachable from
-  # bridge networks. Host networking puts this relay in the WSL VM namespace,
-  # where it binds the legal-net gateway and forwards to Ollama. The api
-  # reaches it via LEGAL_AI_EMBEDDING_API_BASE=http://172.18.0.1:11434.
-  ollama-relay:
-    image: legal-ai-burkina:latest
-    network_mode: host
-    command: python /app/docker/ollama_relay.py
-    environment:
-      OLLAMA_RELAY_BIND: 172.18.0.1
-      OLLAMA_RELAY_PORT: "11434"
-    volumes:
-      # The backend image does not ship docker/; mount the relay script in.
-      - ./docker/ollama_relay.py:/app/docker/ollama_relay.py:ro
-    # The image's default healthcheck targets the API port; probe the relay instead.
-    healthcheck:
-      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('172.18.0.1', 11434), 3).close()"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
-
-  # --- Temporal (durable conversation workflows) ---
-  temporal:
-    image: temporalio/auto-setup:1.24
-    environment:
-      # auto-setup >= 1.24 driver names: postgres12 | postgres12_pgx (pgx recommended)
-      DB: postgres12_pgx
-      DB_PORT: "5432"
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PWD: ${POSTGRES_PASSWORD}
-      POSTGRES_SEEDS: postgres
-    ports:
-      - "7233:7233"
-    volumes:
-      - temporal-data:/etc/temporal
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-    networks: [legal-net]
-
-  temporal-ui:
-    # 2.34.0: the 2.31 tag's layers are corrupted on the configured registry
-    # mirrors (size-validation failures); this tag pulls cleanly.
-    image: temporalio/ui:2.34.0
-    environment:
-      TEMPORAL_ADDRESS: temporal:7233
-      TEMPORAL_CORS_ORIGINS: ${TEMPORAL_UI_CORS_ORIGINS}
-    ports:
-      - "8080:8080"
-    depends_on:
-      - temporal
-    restart: unless-stopped
-    networks: [legal-net]
-
-  # --- Observability ---
-  prometheus:
-    image: prom/prometheus:v2.53.0
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.retention.time=15d"
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus-data:/prometheus
-    restart: unless-stopped
-    networks: [legal-net]
-
-  grafana:
-    image: grafana/grafana:10.4.2
-    environment:
-      # Grafana credentials are sourced from .env (the only source of truth).
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
-      GF_USERS_ALLOW_SIGN_UP: "false"
-    ports:
-      - "3001:3000"
-    volumes:
-      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - grafana-data:/var/lib/grafana
-    depends_on:
-      - prometheus
-    restart: unless-stopped
-    networks: [legal-net]
-
-  # --- Frontend (default) ---
-  # Publishes host port 3000 on localhost only. Point your external reverse proxy
-  # (e.g. the server's nginx) at http://127.0.0.1:3000. NEXT_PUBLIC_API_URL is
-  # baked into the client bundle at build time; leaving it empty makes the browser
-  # use the same-origin /backend-api proxy, rewritten to API_PROXY_TARGET.
+  # --- Frontend ---
+  # Bound to the Mac's Tailscale IP (MAC_TS_IP in .env) so the public EC2
+  # relay can reach it; falls back to localhost when unset.
+  # NEXT_PUBLIC_API_URL is baked into the client bundle at build time; leaving
+  # it empty makes the browser use the same-origin /backend-api proxy,
+  # rewritten to API_PROXY_TARGET.
   frontend:
     build:
       context: ./frontend
@@ -305,29 +107,9 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
       API_PROXY_TARGET: ${API_PROXY_TARGET}
     ports:
-      - "127.0.0.1:3000:3000"
+      - "${MAC_TS_IP:-127.0.0.1}:3000:3000"
     depends_on:
       api:
-        condition: service_healthy
-    restart: unless-stopped
-    networks: [legal-net]
-
-  langfuse:
-    profiles: [observability]
-    image: langfuse/langfuse:2
-    environment:
-      # Langfuse runs its own migrations on boot; `?schema=` keeps it
-      # isolated inside the shared postgres service. Credentials and secrets
-      # are sourced from .env (the only source of truth).
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=langfuse
-      NEXTAUTH_URL: ${LANGFUSE_NEXTAUTH_URL}
-      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET}
-      SALT: ${LANGFUSE_SALT}
-      TELEMETRY_ENABLED: "false"
-    ports:
-      - "3002:3000"
-    depends_on:
-      postgres:
         condition: service_healthy
     restart: unless-stopped
     networks: [legal-net]

@@ -8,21 +8,15 @@
 | Service | Image | Port | Role |
 |---|---|---|---|
 | api | `docker/backend.Dockerfile` | 8000 (localhost only) | FastAPI app (uvicorn) |
-| celery-worker | same image | — | background ingestion/batch jobs |
-| frontend | `frontend/Dockerfile` | 3000 (localhost only) | Next.js UI — proxy from your external nginx |
-| postgres | postgres:16-alpine | 5432 | system of record |
-| redis | redis:7-alpine | 6379 | cache + Celery broker |
-| etcd, minio, milvus | milvusdb/milvus:v2.4.15 stack | 19530 | vector store |
-| temporal, temporal-ui | temporalio/auto-setup:1.24 | 7233, 8080 | durable workflows + UI |
-| prometheus | prom/prometheus:v2.53.0 | 9090 | metrics |
-| grafana | grafana/grafana:10.4.2 | 3001 | dashboards (admin/admin — change) |
-| langfuse | langfuse/langfuse:2 | 3000 | LLM traces (schema `langfuse` in postgres) |
+| frontend | `frontend/Dockerfile` | 3000 (Tailscale IP / localhost) | Next.js UI — proxy from your external nginx |
+| postgres | postgres:16-alpine | — (internal only) | system of record |
+| redis | redis:7-alpine | — (internal only) | cache + session store |
 
-Named volumes: `postgres-data`, `redis-data`, `etcd-data`, `minio-data`,
-`milvus-data`, `temporal-data`, `prometheus-data`, `grafana-data`.
-The host folder `./data` is bind-mounted to `/app/data` in `api` and
-`celery-worker`, so document edits under `./data/legal_docs` are immediately
-visible inside the containers.
+Named volumes: `postgres-data`, `redis-data`.
+The vector store is embedded **Milvus Lite** (`LEGAL_AI_MILVUS_URI`, a file
+inside the `./data` volume) — no Milvus server/etcd/minio. The host folder
+`./data` is bind-mounted to `/app/data` in `api`, so document edits under
+`./data/legal_docs` are immediately visible inside the container.
 
 ## Deploy scripts
 
@@ -170,18 +164,17 @@ what strict mode verifies at boot and via `/ready`.
    certificates in the host's normal cert location (e.g. Let's Encrypt) and
    proxy `https://yawoto.neobytech.net` to `http://127.0.0.1:3000` (the
    frontend container). Redirect :80 → :443 on the host.
-3. **Backups** — schedule `pg_dump` of `legal_ai` and snapshots of the
-   `milvus-data`, `minio-data` and `etcd-data` volumes (see
-   [operations.md](operations.md)).
-4. **Scaling** — `docker compose up -d --scale api=3 --scale celery-worker=2`
-   behind Nginx; add Temporal workers with the same image for chat
-   throughput. Redis and Postgres are single points — use managed/HA
-   variants for real production.
-5. **Resource limits** — Milvus standalone wants ≥ 4 GB RAM; give the api
-   container a memory limit and uvicorn `--workers` matching CPU.
+3. **Backups** — schedule `pg_dump` of `legal_ai` and a copy of `./data`
+   (which holds the Milvus Lite index, OCR/STT models and legal documents;
+   see [operations.md](operations.md)).
+4. **Scaling** — `docker compose up -d --scale api=3` behind Nginx.
+   Redis and Postgres are single points — use managed/HA variants for real
+   production.
+5. **Resource limits** — give the api container a memory limit and uvicorn
+   `--workers` matching CPU (see the OCR/STT memory notes in
+   [DOCUMENT_PROCESSING.md](DOCUMENT_PROCESSING.md)).
 6. **Observability** — enable OTel (`LEGAL_AI_OTEL_ENABLED=true`) pointed at
-   your collector; create a Langfuse project and set its keys; import/alert
-   on the Grafana dashboards.
+   your collector; create a Langfuse project and set its keys.
 7. **Auth hardening** — create the first `admin` user, then disable public
    registration; enforce rate limits at your host Nginx (10 r/s per IP with
    burst 20 is a sensible starting point).

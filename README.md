@@ -53,13 +53,10 @@ flowchart LR
     end
 
     api --> pipeline
-    ret --> milvus[(Milvus)]
+    ret --> milvus[(Milvus Lite)]
     ret --> bm25[BM25 / web workers]
     mem --> redis[(Redis)]
     mem --> pg[(PostgreSQL)]
-    api --> temporal[Temporal]
-    api --> prom[Prometheus]
-    prom --> grafana[Grafana]
     api --> langfuse[Langfuse]
 ```
 
@@ -247,11 +244,10 @@ nested spans, meaningful input/output, and feedback scores).
 │   ├── api/               # FastAPI application (REST / SSE / WebSocket)
 │   ├── security/          # JWT, RBAC, rate limiting
 │   ├── observability/     # Prometheus metrics, OTel, Langfuse
-│   ├── evaluation/        # metrics, golden dataset, runner
-│   └── temporal/          # durable conversation workflows
+│   └── evaluation/        # metrics, golden dataset, runner
 ├── docs/                  # documentation (see below)
 ├── frontend/              # Next.js web UI (chat, agent timeline, citations, evidence)
-├── docker/                # Dockerfile, Nginx, Prometheus, Grafana
+├── docker/                # Dockerfile, Nginx
 ├── .github/workflows/     # CI
 ├── docker-compose.yml     # full stack
 ├── requirements.txt
@@ -265,7 +261,6 @@ nested spans, meaningful input/output, and feedback scores).
 - [Workflow](docs/workflow.md) — LangGraph graph, conditional edges, retry budgets
 - [Retrieval](docs/retrieval.md) — hybrid RAG pipeline and chunk metadata
 - [Memory](docs/memory.md) — MemGPT-style memory tiers
-- [Temporal](docs/temporal.md) — durable conversations and resume semantics
 - [Database](docs/database.md) — schema (ER diagram)
 - [API reference](docs/api.md) — endpoints with examples
 - [Deployment](docs/deployment.md) — compose topology and production checklist

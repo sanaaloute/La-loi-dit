@@ -80,10 +80,6 @@ reportlab==4.1.0
 # scripts/download_wheels.sh).
 faster-whisper==1.2.1
 
-# Workflows / background tasks
-celery==5.4.0
-temporalio==1.9.0
-
 # Testing
 pytest==8.3.4
 pytest-asyncio==0.25.0

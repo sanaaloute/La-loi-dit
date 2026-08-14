@@ -118,14 +118,6 @@ erDiagram
         string ip
         timestamp created_at
     }
-
-    workflow_state {
-        string session_id PK
-        string temporal_workflow_id
-        string status "running|awaiting_input|completed|failed"
-        json state
-        timestamp updated_at
-    }
 ```
 
 ## Notes
@@ -143,5 +135,3 @@ erDiagram
   (`EvalCaseResult` in `backend/core/models.py`).
 - `audit_logs` records security-relevant events (logins, blocked queries,
   ingestion, role changes) — see [security.md](security.md).
-- `workflow_state` lets the API reconnect a `session_id` to its Temporal
-  workflow after a restart (see [temporal.md](temporal.md)).

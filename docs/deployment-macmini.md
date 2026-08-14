@@ -63,48 +63,35 @@ LEGAL_AI_WEB_WORKERS=2                                       # 32 GB: fine
 LEGAL_AI_EMBEDDING_API_BASE=http://host.docker.internal:11434  # Mac-native Ollama
 API_PROXY_TARGET=http://api:8000
 MAC_TS_IP=100.x.y.z                                          # from Phase 1
-# POSTGRES_*/MINIO_* secrets, STT provider, etc. as on the EC2
+# Embedded Milvus Lite instead of the Milvus/etcd/minio server stack:
+LEGAL_AI_MILVUS_ENABLED=true
+LEGAL_AI_MILVUS_URI=/app/data/milvus_lite.db
+# POSTGRES_* secrets, STT provider, etc. as on the EC2
 ```
 
-Create `docker-compose.mac.yml` next to `docker-compose.yml` (requires
-Docker Compose ≥ 2.24 for `!override`; OrbStack ships newer):
+On the `minimac` branch the main `docker-compose.yml` IS the minimal stack
+(only `api`, `frontend`, `postgres`, `redis`). The cut services and why
+they are safe to drop:
 
-```yaml
-# Mac Mini overrides: no WSL ollama-relay (Ollama is native, reached via
-# host.docker.internal), frontend bound to the Tailscale IP so the EC2
-# relay can reach it.
-services:
-  api:
-    depends_on: !override
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      milvus:
-        condition: service_healthy
-      temporal:
-        condition: service_started
-
-  ollama-relay:
-    profiles: ["disabled-on-mac"]  # never started with the mac override
-
-  frontend:
-    ports: !override
-      - "${MAC_TS_IP}:3000:3000"
-```
+- **milvus + etcd + minio** — replaced by embedded Milvus Lite
+  (`LEGAL_AI_MILVUS_URI` above, a file inside the `./data` volume);
+- **temporal + temporal-ui + celery-worker** — dormant subsystems: nothing in
+  the API/request path imported them (the code is removed on this branch);
+- **prometheus + grafana** — optional observability; `/metrics` keeps working;
+- **ollama-relay** — a WSL-only workaround; Ollama runs natively on the Mac.
 
 Then:
 
 ```bash
-# Copy data (OCR/STT models, legal docs, milvus data if migrating) from EC2:
+# Copy data (OCR/STT models, legal docs) from the EC2:
 rsync -avz ec2:/path/to/yawoto/data/ ./data/
 
-docker compose -f docker-compose.yml -f docker-compose.mac.yml build
-docker compose -f docker-compose.yml -f docker-compose.mac.yml up -d
+docker compose build
+docker compose up -d
 docker compose ps                    # all healthy
 curl http://100.x.y.z:3000           # answers over Tailscale
 
-# Ingest the corpus (reindex script, or admin upload):
+# Ingest the corpus (no Milvus server readiness check on this branch):
 bash scripts/reindex.sh
 ```
 

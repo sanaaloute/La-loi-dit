@@ -21,8 +21,7 @@ Everything runs offline by default (`mock` LLM, SQLite, in-memory stores).
 - `backend/workflows/` — `graph.py` (graph construction, runners)
 - `backend/retrieval/`, `vectorstore/`, `memory/`, `guardrails/`,
   `ingestion/`, `tools/`, `sandbox/` — subsystem adapters behind the ports
-- `backend/api/`, `security/`, `observability/`, `evaluation/`,
-  `temporal/` — service layers
+- `backend/api/`, `security/`, `observability/`, `evaluation/` — service layers
 
 ## Coding conventions
 

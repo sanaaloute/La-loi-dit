@@ -16,10 +16,9 @@ Local dev without Docker: `uvicorn backend.api.main:app --reload`
 
 ## Logs
 
-- API / worker: `docker compose logs -f api celery-worker`
+- API: `docker compose logs -f api`
 - Nginx access: inside the nginx container at `/var/log/nginx/access.log`
-- Temporal workflow histories: Temporal UI on :8080
-- LLM traces: Langfuse on :3000
+- LLM traces: Langfuse (external instance, if configured)
 
 ## Backup / restore PostgreSQL
 
@@ -56,23 +55,16 @@ source directory.
 Official sources go stale. `backend/ingestion/freshness.py`
 (`FreshnessMonitor`) polls configured RSS/web sources, compares against
 saved state, and emits a `ChangeEvent` when a source publishes something
-newer — wire its `on_change` callback to queue a re-ingestion (e.g. via
-Celery beat). Verify with:
-
-```bash
-docker compose logs celery-worker | grep -i freshness
-```
+newer — wire its `on_change` callback to queue a re-ingestion.
 
 ## Common failure modes
 
 | Failure | System behavior | How to verify |
 |---|---|---|
-| **Milvus down** | `get_vector_store` falls back to the in-memory vector store; retrieval still works against whatever was indexed in-process (cold start = empty) | `GET /ready` reports milvus degraded; `docker compose logs api` shows the fallback notice |
-| **Redis down** | Cache falls back to the process-local `InMemoryCache`; Celery/Temporal queueing is unavailable but chat works | `GET /ready`; latency may rise (no shared cache) — check the cache-hit Grafana panel |
+| **Vector store issue** | Milvus Lite is embedded in the api process; on connection failure `get_vector_store` falls back to the in-memory store (cold start = empty) — re-run `scripts/reindex.sh` | `GET /ready` reports milvus degraded; `docker compose logs api` shows the fallback notice |
+| **Redis down** | Cache falls back to the process-local `InMemoryCache`; chat still works | `GET /ready`; latency may rise (no shared cache) |
 | **LLM provider down / no key** | `mock` provider or deterministic fallbacks: heuristic planner, template response generator quoting only real evidence. Answers stay grounded; errors appear in `state.errors` | Response `trace` contains `planner_llm_fallback: …`; answer text comes from the evidence template |
 | **Postgres down** | API `/ready` fails; chat answers still returned but memory persistence is skipped (best-effort) | `GET /ready` → 503; `docker compose logs postgres` |
-| **Temporal down** | With `TEMPORAL_ENABLED=false` nothing changes; with it enabled, new workflows fail to start — disable the flag to run synchronously | Temporal UI unreachable; `docker compose logs temporal` |
-| **celery-worker crash-loops** | The service expects `backend.workflows.celery_app` (background-task subsystem); until that module lands, comment the service out — the API does not depend on it | `docker compose ps` shows the worker restarting |
 | **Nginx rate limit hit** | 429 responses for the offending IP only | `docker compose logs nginx` |
 
 After fixing a dependency, `docker compose restart api` re-wires the
