@@ -376,10 +376,33 @@ def test_authority_config_corrupt_file_falls_back(monkeypatch, tmp_path, caplog)
     _settings(monkeypatch, authority_config_path=str(corrupt))
     with caplog.at_level(logging.WARNING, logger="backend.core.constants"):
         assert constants.load_official_domains() == constants.OFFICIAL_DOMAINS
-        assert constants.load_legal_domains() == constants.LEGAL_DOMAINS
+        domains = constants.load_legal_domains()
         weights = constants.load_authority_weights()
+    # Defaults first, then any extra slugs merged from data/legal_domains.json.
+    assert domains[: len(constants.LEGAL_DOMAINS)] == constants.LEGAL_DOMAINS
+    assert "traffic_law" in domains
     assert weights == constants.AUTHORITY_WEIGHTS
     assert any(r.message == "authority_config_load_failed" for r in caplog.records)
+
+
+def test_load_legal_domains_merges_taxonomy_slugs(monkeypatch, tmp_path):
+    """Domains added to the taxonomy file reach retrieval planning (no override)."""
+    from backend.ingestion import classification
+
+    taxonomy = tmp_path / "legal_domains.json"
+    taxonomy.write_text(
+        json.dumps(
+            {"version": 1, "domains": {"space_law": {"label": "Droit spatial", "keywords": ["satellite"]}}}
+        ),
+        encoding="utf-8",
+    )
+    _settings(monkeypatch, legal_domains_path=str(taxonomy))
+    try:
+        domains = constants.load_legal_domains()
+        assert domains[: len(constants.LEGAL_DOMAINS)] == constants.LEGAL_DOMAINS
+        assert "space_law" in domains
+    finally:
+        classification.invalidate_domain_cache()
 
 
 def test_load_rules_default_still_bundled():

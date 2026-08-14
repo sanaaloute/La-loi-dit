@@ -381,10 +381,11 @@ class UserStore:
     async def record_usage(self, user_id: str, tokens_in: int, tokens_out: int) -> None:
         """Upsert today's usage row: add tokens, increment requests by 1.
 
-        No-op when the DB is down or nothing was consumed — metering must
-        never break the answer path.
+        No-op when the DB is down or no user is identified — metering must
+        never break the answer path. Zero-token calls still count the request
+        (token-less metering, e.g. audio transcription).
         """
-        if not user_id or (tokens_in <= 0 and tokens_out <= 0):
+        if not user_id:
             return
         if not await self._ensure_db():
             return
@@ -504,3 +505,33 @@ class UserStore:
         if rows:
             return rows[0]  # type: ignore[return-value]
         return {"tokens_in": 0, "tokens_out": 0, "requests": 0}
+
+    # ------------------------------------------------------------------
+    # App settings (key-value, e.g. admin tier budget overrides)
+    # ------------------------------------------------------------------
+
+    async def get_setting(self, key: str) -> Optional[str]:
+        """Read an app setting (None when missing or DB down)."""
+        if not key or not await self._ensure_db():
+            return None
+        from sqlalchemy import select
+
+        t = TABLES["app_settings"]
+        async with self._session_factory() as session:
+            row = (await session.execute(select(t.c.value).where(t.c.key == key))).first()
+        return row.value if row else None
+
+    async def set_setting(self, key: str, value: str) -> None:
+        """Upsert an app setting (no-op when DB down)."""
+        if not key or not await self._ensure_db():
+            return None
+        from sqlalchemy import select, update
+
+        t = TABLES["app_settings"]
+        async with self._session_factory() as session:
+            row = (await session.execute(select(t).where(t.c.key == key))).first()
+            if row is None:
+                await session.execute(t.insert(), {"key": key, "value": value})
+            else:
+                await session.execute(update(t).where(t.c.key == key).values(value=value))
+            await session.commit()

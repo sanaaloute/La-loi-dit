@@ -24,9 +24,14 @@ from backend.core.config import Settings
 from backend.core import catalog
 from backend.core.exceptions import AuthenticationError, UserAlreadyExistsError
 from backend.core.models import Role
-from backend.security.jwt import TokenPayload, create_access_token
+from backend.security.jwt import TokenPayload, create_access_token, decode_access_token
 from backend.security.passwords import hash_password, verify_password
-from backend.security.sessions import activate_session, device_fingerprint, generate_jti
+from backend.security.sessions import (
+    activate_session,
+    device_fingerprint,
+    generate_jti,
+    verify_active_session,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +209,48 @@ async def issue_token(payload: TokenRequest, request: Request) -> TokenResponse:
         request,
         user_id=payload.username,
         tier=DEV_USER_TIER,
+    )
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh_token(request: Request) -> TokenResponse:
+    """Exchange a valid, non-expired JWT for a fresh one (sliding session).
+
+    The renewed token keeps the same ``jti`` so single-session enforcement is
+    preserved and refreshing never kicks out the session. Expired or displaced
+    tokens get a 401 — the user must log in again.
+    """
+    from backend.api.deps import get_ctx
+
+    ctx = get_ctx(request)
+    settings = ctx.settings
+    header = request.headers.get("authorization", "")
+    scheme, _, raw = header.partition(" ")
+    if scheme.lower() != "bearer" or not raw.strip():
+        raise AuthenticationError("missing bearer token")
+    payload = decode_access_token(raw.strip(), settings)
+    if payload.sub == "anonymous":
+        raise AuthenticationError("authentication required")
+
+    session_user = payload.user_id or payload.sub
+    cache = getattr(ctx, "cache", None)
+    if settings.single_session_per_user and not await verify_active_session(
+        session_user, payload.jti, cache
+    ):
+        raise AuthenticationError("session no longer active")
+
+    jti = payload.jti or generate_jti()
+    token = create_access_token(
+        session_user, payload.role, settings, user_id=payload.user_id, tier=payload.tier, jti=jti
+    )
+    expires_at = int(time.time()) + settings.jwt_expire_minutes * 60
+    if settings.single_session_per_user:
+        await activate_session(session_user, jti, device_fingerprint(request), expires_at, cache)
+
+    return TokenResponse(
+        access_token=token,
+        expires_in=settings.jwt_expire_minutes * 60,
+        role=payload.role,
     )
 
 

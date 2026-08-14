@@ -3,15 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { X, Building2, Gauge, LogOut, UserCircle } from "lucide-react";
-import { login, me, register, setToken, type Tier, type UserProfile } from "@/lib/api";
+import AuthCard from "@/components/AuthCard";
+import { me, setToken, type Tier, type UserProfile } from "@/lib/api";
 
 interface SettingsPopoverProps {
   token: string | null;
   onTokenChange: (token: string | null) => void;
   onClose: () => void;
 }
-
-type AuthMode = "login" | "register";
 
 const TIER_STYLES: Record<Tier, { label: string; className: string }> = {
   gratuit: { label: "Gratuit", className: "border-gray-300 bg-gray-100 text-gray-600" },
@@ -20,13 +19,6 @@ const TIER_STYLES: Record<Tier, { label: string; className: string }> = {
 };
 
 export default function SettingsPopover({ token, onTokenChange, onClose }: SettingsPopoverProps) {
-  const [mode, setMode] = useState<AuthMode>("login");
-  const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
-  const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -56,52 +48,10 @@ export default function SettingsPopover({ token, onTokenChange, onClose }: Setti
     };
   }, [token]);
 
-  async function handleLogin(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await login(username, password);
-      setToken(res.access_token);
-      onTokenChange(res.access_token);
-      setPassword("");
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Échec de connexion");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleRegister(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await register(email, password, name.trim() || undefined);
-      setToken(res.access_token);
-      onTokenChange(res.access_token);
-      setPassword("");
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Échec de l'inscription");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   function handleLogout() {
     setToken(null);
     onTokenChange(null);
-    setUsername("");
-    setEmail("");
-    setName("");
     setProfile(null);
-  }
-
-  function switchMode(next: AuthMode) {
-    setMode(next);
-    setError(null);
   }
 
   const tierStyle = profile ? TIER_STYLES[profile.tier] : null;
@@ -170,124 +120,7 @@ export default function SettingsPopover({ token, onTokenChange, onClose }: Setti
           </button>
         </div>
       ) : (
-        <>
-          <p className="mb-4 text-xs text-gray-500">
-            En développement, l&apos;API accepte les appels anonymes. Un jeton JWT est facultatif.
-          </p>
-          <div className="mb-3 flex rounded-lg border border-gray-300 bg-white p-1">
-            {(
-              [
-                { id: "login", label: "Se connecter" },
-                { id: "register", label: "Créer un compte" },
-              ] as { id: AuthMode; label: string }[]
-            ).map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => switchMode(m.id)}
-                className={`flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
-                  mode === m.id
-                    ? "bg-gray-200 text-gray-900"
-                    : "text-gray-500 hover:text-gray-700"
-                }`}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-          {mode === "login" ? (
-            <form onSubmit={handleLogin} className="space-y-3">
-              <div>
-                <label htmlFor="settings-username" className="mb-1 block text-xs font-medium text-gray-600">
-                  Nom d&apos;utilisateur
-                </label>
-                <input
-                  id="settings-username"
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  autoComplete="username"
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-accent/60 focus:outline-none"
-                  required
-                />
-              </div>
-              <div>
-                <label htmlFor="settings-password" className="mb-1 block text-xs font-medium text-gray-600">
-                  Mot de passe
-                </label>
-                <input
-                  id="settings-password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="current-password"
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-accent/60 focus:outline-none"
-                  required
-                />
-              </div>
-              {error && <p className="text-xs text-red-700">{error}</p>}
-              <button
-                type="submit"
-                disabled={busy}
-                className="w-full rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
-              >
-                {busy ? "Connexion…" : "Obtenir un jeton"}
-              </button>
-            </form>
-          ) : (
-            <form onSubmit={handleRegister} className="space-y-3">
-              <div>
-                <label htmlFor="settings-email" className="mb-1 block text-xs font-medium text-gray-600">
-                  Adresse e-mail
-                </label>
-                <input
-                  id="settings-email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  autoComplete="email"
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-accent/60 focus:outline-none"
-                  required
-                />
-              </div>
-              <div>
-                <label htmlFor="settings-name" className="mb-1 block text-xs font-medium text-gray-600">
-                  Nom <span className="text-gray-500">(facultatif)</span>
-                </label>
-                <input
-                  id="settings-name"
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  autoComplete="name"
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-accent/60 focus:outline-none"
-                />
-              </div>
-              <div>
-                <label htmlFor="settings-new-password" className="mb-1 block text-xs font-medium text-gray-600">
-                  Mot de passe
-                </label>
-                <input
-                  id="settings-new-password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="new-password"
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-accent/60 focus:outline-none"
-                  required
-                />
-              </div>
-              {error && <p className="text-xs text-red-700">{error}</p>}
-              <button
-                type="submit"
-                disabled={busy}
-                className="w-full rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
-              >
-                {busy ? "Création…" : "Créer mon compte"}
-              </button>
-            </form>
-          )}
-        </>
+        <AuthCard idPrefix="settings" onSuccess={onClose} />
       )}
     </div>
   );

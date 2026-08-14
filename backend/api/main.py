@@ -44,6 +44,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.ctx = ctx
     app.state.graph = build_graph(ctx)
 
+    # Load persisted admin tier-budget overrides into the catalog cache so
+    # enforcement matches the stored settings from the first request.
+    if ctx.user_store is not None:
+        try:
+            from backend.core import catalog
+
+            raw = await ctx.user_store.get_setting(catalog.TIER_BUDGETS_SETTING_KEY)
+            catalog.set_budget_overrides(catalog.parse_budget_overrides(raw))
+        except Exception:
+            logger.warning("could not load tier budget overrides", exc_info=True)
+
     from backend.api.routers.auth import build_user_store
 
     app.state.user_store = build_user_store(ctx.settings)

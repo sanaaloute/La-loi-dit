@@ -61,7 +61,9 @@ class OutputGuardrailAgent(Agent):
 
         from backend.guardrails.output_guard import check_output
 
-        answer = await check_output(answer, evidence, ctx.settings)
+        answer = await check_output(
+            answer, evidence, ctx.settings, route=state.get("route", "retrieval")
+        )
 
         lowered = (state.get("query", "") + " " + answer.answer).lower()
         if any(p in lowered for p in _HIGH_RISK_PATTERNS):
@@ -83,16 +85,19 @@ class OutputGuardrailAgent(Agent):
 
         # Context-sensitive disclaimer (spec §33): full legal disclaimer for
         # high-impact question types, human-review or low-confidence answers;
-        # short informational note otherwise.
-        english = answer.language.startswith("en")
-        full = get_prompt("DISCLAIMER_EN" if english else "DISCLAIMER_FR")
-        note = get_prompt("INFO_NOTE_EN" if english else "INFO_NOTE_FR")
-        if self._needs_full_disclaimer(state, answer, ctx):
-            disclaimer = full
-        else:
-            disclaimer = note
-        if full.strip() not in answer.answer and note.strip() not in answer.answer:
-            answer.answer = answer.answer.rstrip() + disclaimer
+        # short informational note otherwise. Direct-route answers (casual
+        # conversation, no legal corpus involved) get neither — the direct
+        # prompt already frames the informational nature when pertinent.
+        if state.get("route") != "direct":
+            english = answer.language.startswith("en")
+            full = get_prompt("DISCLAIMER_EN" if english else "DISCLAIMER_FR")
+            note = get_prompt("INFO_NOTE_EN" if english else "INFO_NOTE_FR")
+            if self._needs_full_disclaimer(state, answer, ctx):
+                disclaimer = full
+            else:
+                disclaimer = note
+            if full.strip() not in answer.answer and note.strip() not in answer.answer:
+                answer.answer = answer.answer.rstrip() + disclaimer
 
         # Production: internal diagnostics (coverage gaps, unresolved
         # conflicts, claim-verification notes…) stay in the trace/logs; the

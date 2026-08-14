@@ -21,16 +21,19 @@ import asyncio
 import json
 import logging
 import time
+from pathlib import Path
 from typing import Any, AsyncIterator, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from langchain_core.callbacks import AsyncCallbackHandler
 from pydantic import BaseModel, ValidationError
 
 from backend.api.deps import get_ctx, get_graph, require_user
+from backend.core import stt
 from backend.core.answer_cache import AnswerCache, is_cacheable
 from backend.core.config import Settings
+from backend.core.exceptions import STTError
 from backend.core.model_router import check_budget, resolve_llm, resolve_model_entry
 from backend.core.llm import LLMClient
 from backend.core.models import ChatMessage, ChatRequest, ChatResponse, FinalAnswer, Role, parse_answer_json
@@ -633,6 +636,71 @@ async def chat_feedback(
         settings=settings,
     )
     return {"status": "recorded"}
+
+
+# ---------------------------------------------------------------------------
+# Audio transcription (voice input for the chat composer)
+# ---------------------------------------------------------------------------
+
+#: Accepted uploads: extension OR content-type must match (browsers are
+#: inconsistent about what MediaRecorder reports).
+_AUDIO_EXTENSIONS = {".webm", ".ogg", ".mp3", ".wav", ".m4a", ".mp4"}
+_AUDIO_CONTENT_TYPES = {"video/mp4", "application/ogg"}  # plus any audio/*
+
+
+@router.post("/chat/transcribe")
+async def chat_transcribe(
+    request: Request,
+    file: UploadFile = File(...),
+    user: TokenPayload = Depends(require_role(Role.VIEWER)),
+) -> dict[str, str]:
+    """Transcribe a voice message to text; the chat flow itself is unchanged.
+
+    The browser records with MediaRecorder and posts the blob here; the
+    returned text is inserted into the composer so the user reviews it and
+    sends it through the normal chat endpoints.
+    """
+    ctx = get_ctx(request)
+    settings: Settings = ctx.settings
+    # Same quota gate as the chat endpoints: over-budget users get a 429
+    # instead of free transcriptions.
+    await check_budget(ctx.user_store, user, settings)
+    ext = Path(file.filename or "").suffix.lower()
+    content_type = (file.content_type or "").lower()
+    if ext not in _AUDIO_EXTENSIONS and not (
+        content_type.startswith("audio/") or content_type in _AUDIO_CONTENT_TYPES
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Format audio non pris en charge. Formats acceptés : webm, ogg, mp3, wav, m4a, mp4.",
+        )
+    audio = await file.read()
+    if len(audio) > settings.stt_max_audio_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail="Le fichier audio dépasse la taille maximale autorisée.",
+        )
+    if not audio:
+        raise HTTPException(status_code=400, detail="Le fichier audio est vide.")
+    if not stt.stt_available():
+        raise HTTPException(
+            status_code=503,
+            detail="La transcription audio n'est pas disponible sur ce serveur.",
+        )
+    try:
+        text = await stt.transcribe_audio(audio, file.filename or f"audio{ext or '.webm'}")
+    except STTError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="La transcription a échoué. Réessayez ou saisissez votre question.",
+        ) from exc
+    # Meter one request, no tokens (same best-effort pattern as _meter).
+    if getattr(user, "user_id", None) and ctx.user_store is not None:
+        try:
+            await ctx.user_store.record_usage(user.user_id, 0, 0)
+        except Exception:
+            pass
+    return {"text": text}
 
 
 # ---------------------------------------------------------------------------

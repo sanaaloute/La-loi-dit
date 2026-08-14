@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Cpu, FileText, LayoutDashboard, Users } from "lucide-react";
+import { Cpu, FileText, Gauge, LayoutDashboard, Users } from "lucide-react";
 import AppHeader from "@/components/AppHeader";
 import DocumentsTab from "@/components/admin/DocumentsTab";
 import OverviewTab from "@/components/admin/OverviewTab";
 import ProvidersTab from "@/components/admin/ProvidersTab";
+import QuotasTab from "@/components/admin/QuotasTab";
 import UsersTab from "@/components/admin/UsersTab";
 import ErrorCard from "@/components/ui/ErrorCard";
 import GatePanel from "@/components/ui/GatePanel";
@@ -14,12 +15,13 @@ import PageShell from "@/components/ui/PageShell";
 import { useAuthToken } from "@/lib/useAuth";
 import { me, type UserProfile } from "@/lib/api";
 
-type TabId = "apercu" | "documents" | "utilisateurs" | "fournisseurs";
+type TabId = "apercu" | "documents" | "utilisateurs" | "quotas" | "fournisseurs";
 
 const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: "apercu", label: "Aperçu", icon: LayoutDashboard },
   { id: "documents", label: "Documents", icon: FileText },
   { id: "utilisateurs", label: "Utilisateurs", icon: Users },
+  { id: "quotas", label: "Quotas", icon: Gauge },
   { id: "fournisseurs", label: "Fournisseurs", icon: Cpu },
 ];
 
@@ -103,6 +105,7 @@ export default function AdminPage() {
           {tab === "apercu" && <OverviewTab />}
           {tab === "documents" && <DocumentsTab />}
           {tab === "utilisateurs" && <UsersTab />}
+          {tab === "quotas" && <QuotasTab />}
           {tab === "fournisseurs" && <ProvidersTab />}
         </div>
       )}

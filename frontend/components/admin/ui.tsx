@@ -128,8 +128,12 @@ export function StatusBadge({ value }: { value: string }) {
 /** Horizontally scrollable table wrapper (desktop admin, wide tables). */
 export function TableShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="overflow-x-auto rounded-xl border border-gray-200">
-      <table className="w-full min-w-max text-left text-sm">{children}</table>
+    <div className="relative">
+      <div className="overflow-x-auto rounded-xl border border-gray-200">
+        <table className="w-full min-w-max text-left text-sm">{children}</table>
+      </div>
+      {/* Scroll hint on small screens: fades the right edge of wide tables. */}
+      <div className="pointer-events-none absolute inset-y-0 right-0 w-10 rounded-r-xl bg-gradient-to-l from-white sm:hidden" />
     </div>
   );
 }

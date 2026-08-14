@@ -57,9 +57,15 @@ Everything runs offline by default (`mock` LLM, SQLite, in-memory stores).
 
 ## Add a legal domain
 
-1. Add the domain name to `LEGAL_DOMAINS` in `backend/core/constants.py`.
-2. Add its keyword tuple to `_DOMAIN_KEYWORDS` in
-   `backend/planner/agent.py` (French + English keywords).
+Domains are data-driven: `data/legal_domains.json` maps each slug to a
+French label and keywords, loaded by `load_domain_keywords()` /
+`load_domain_labels()` in `backend/ingestion/classification.py` and merged
+into `LEGAL_DOMAINS` (`backend/core/constants.py`).
+
+1. Preferred: add it at runtime — admin UI (Documents tab) or
+   `POST /api/v1/admin/domains` with `{slug, label, keywords}`.
+2. Code/config path: add an entry to `data/legal_domains.json`
+   (`{"label": "...", "keywords": [...]}`, French + English keywords).
 3. If it needs a dedicated source, add a `SearchKind` in
    `backend/core/models.py` and a worker (below).
 

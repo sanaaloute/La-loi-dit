@@ -152,6 +152,10 @@ class ResponseGeneratorAgent(CompletionAgent):
         template.  This keeps the final answer an actual answer to the
         question rather than a bare list of articles whenever possible.
         """
+        # Direct route (query router short-circuit): plain conversational
+        # answer, no evidence screening, citations or grounding machinery.
+        if state.get("route") == "direct":
+            return await self._run_direct(state, ctx)
         # Retrieved-document injection screening (spec §42): sanitize the
         # evidence BEFORE it reaches the prompt. When every chunk is dropped,
         # the parse step follows the existing insufficient-evidence path.
@@ -184,6 +188,42 @@ class ResponseGeneratorAgent(CompletionAgent):
         except Exception as exc:
             return self._fallback(state, f"LLM completion failed: {exc!r}")
         return self._parse_final(text, state, ctx)
+
+    async def _run_direct(self, state: GraphState, ctx: AppContext) -> dict[str, Any]:
+        """Conversational answer for the direct route: no retrieval, no citations.
+
+        The query router already established that the question does not need
+        the legal corpus; the answer must never present itself as grounded
+        legal research (no [n] markers, no Sources section — enforced by the
+        RESPONSE_DIRECT_SYSTEM prompt).
+        """
+        language = state.get("language") or "fr"
+        user_message = f"Question: {state['query']}\nLanguage: {language}"
+        errors: list[str] = []
+        try:
+            text = await ctx.llm.complete(
+                get_prompt("RESPONSE_DIRECT_SYSTEM"),
+                user_message,
+                temperature=ctx.settings.llm_temperature,
+            )
+        except Exception as exc:
+            text = ""
+            errors.append(f"{self.name}: LLM completion failed: {exc!r}")
+        draft = text.strip() or self._unavailable_message(language)
+        answer = FinalAnswer(
+            answer=draft,
+            language=language,
+            metadata={"route": "direct"},
+        )
+        return {
+            "final_answer": answer,
+            "draft_answer": draft,
+            "errors": [*state.get("errors", []), *errors],
+            "trace": [
+                *state.get("trace", []),
+                f"response_generator: direct answer ({len(draft)} chars)",
+            ],
+        }
 
     def _system_prompt_for(self, state: GraphState) -> str:
         """Base prompt plus a structure addendum for complex question types.

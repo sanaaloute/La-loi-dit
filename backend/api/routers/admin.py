@@ -181,7 +181,7 @@ async def retrieval_analytics(request: Request) -> RetrievalAnalyticsResponse:
 
 
 # ---------------------------------------------------------------------------
-# Dashboard: users, usage, providers
+# Dashboard: users, usage, tier budgets, providers
 # ---------------------------------------------------------------------------
 
 
@@ -345,6 +345,78 @@ async def usage_overview(
     return AdminUsageResponse(per_user=users, totals=totals)
 
 
+class TierBudgetPatch(BaseModel):
+    """Daily budget fields adjustable per tier (all optional)."""
+
+    daily_token_budget: Optional[int] = None
+    daily_request_budget: Optional[int] = None
+
+
+class TierBudgetsResponse(BaseModel):
+    """Per-tier daily budgets: effective values and built-in defaults."""
+
+    effective: dict[str, dict[str, int]]
+    defaults: dict[str, dict[str, int]]
+
+
+async def _stored_budget_overrides(store: Any) -> dict[str, dict[str, int]]:
+    """Persisted budget overrides (validated; {} when unset/unusable)."""
+    raw = await store.get_setting(catalog.TIER_BUDGETS_SETTING_KEY)
+    return catalog.parse_budget_overrides(raw)
+
+
+def _tier_budgets_response(request: Request) -> TierBudgetsResponse:
+    return TierBudgetsResponse(
+        effective=catalog.effective_tier_budgets(settings=get_ctx(request).settings),
+        defaults=catalog.default_tier_budgets(),
+    )
+
+
+@router.get("/settings/tier-budgets", response_model=TierBudgetsResponse)
+async def get_tier_budgets(request: Request) -> TierBudgetsResponse:
+    """Effective per-tier daily budgets (built-in defaults + admin overrides).
+
+    The persisted overrides are (re)loaded into the catalog cache on every
+    read, so a restart picks them up even before the next write.
+    """
+    store = _user_store(request)
+    catalog.set_budget_overrides(await _stored_budget_overrides(store))
+    return _tier_budgets_response(request)
+
+
+@router.patch("/settings/tier-budgets", response_model=TierBudgetsResponse)
+async def patch_tier_budgets(
+    payload: dict[str, TierBudgetPatch],
+    request: Request,
+) -> TierBudgetsResponse:
+    """Merge admin budget overrides, persist them and refresh the catalog.
+
+    Unknown tiers and non-positive values are rejected; omitted fields keep
+    their current (overridden or default) value.
+    """
+    if not payload:
+        raise HTTPException(status_code=400, detail="nothing to update: provide at least one tier")
+    for tier, fields in payload.items():
+        if tier not in catalog.TIER_ORDER:
+            raise HTTPException(status_code=400, detail=f"unknown tier: {tier}")
+        for field, value in fields.model_dump(exclude_none=True).items():
+            if value <= 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{field} for tier '{tier}' must be a positive integer",
+                )
+
+    store = _user_store(request)
+    overrides = await _stored_budget_overrides(store)
+    for tier, fields in payload.items():
+        updates = fields.model_dump(exclude_none=True)
+        if updates:
+            overrides.setdefault(tier, {}).update(updates)
+    await store.set_setting(catalog.TIER_BUDGETS_SETTING_KEY, json.dumps(overrides))
+    catalog.set_budget_overrides(overrides)
+    return _tier_budgets_response(request)
+
+
 @router.get("/providers", response_model=ProvidersResponse)
 async def providers_overview(request: Request) -> ProvidersResponse:
     """Provider configuration status; API keys are NEVER exposed in full."""
@@ -429,9 +501,14 @@ class FolderCreateResponse(BaseModel):
 class MetadataSuggestionResponse(BaseModel):
     suggestion: dict[str, Any]
     available_domains: list[str]
+    domain_labels: dict[str, str]  # slug -> French display label
 
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
+
+#: Headroom for multipart framing (boundaries, part headers) when the early
+#: Content-Length check compares the whole request body to the file cap.
+_MULTIPART_OVERHEAD_BYTES = 64 * 1024
 
 
 def _legal_docs_dir(request: Request) -> Path:
@@ -529,6 +606,152 @@ async def create_folder(
     return FolderCreateResponse(name=slug, created=created)
 
 
+# ---------------------------------------------------------------------------
+# Dashboard: legal-domain taxonomy management
+# ---------------------------------------------------------------------------
+
+
+class DomainInfo(BaseModel):
+    """One legal-domain taxonomy entry (slug, French label, keyword stems)."""
+
+    slug: str
+    label: str
+    keywords: list[str]
+
+
+class DomainsResponse(BaseModel):
+    domains: list[DomainInfo]
+
+
+class DomainCreateRequest(BaseModel):
+    slug: str
+    label: str
+    keywords: list[str] = []
+
+
+_DOMAIN_SLUG_RE = re.compile(r"^[a-z0-9_]+$")
+
+
+def _list_domains() -> list[DomainInfo]:
+    """Effective taxonomy (file or embedded fallback), sorted by slug."""
+    from backend.ingestion.classification import load_domain_keywords, load_domain_labels
+
+    keywords = load_domain_keywords()
+    labels = load_domain_labels()
+    return [
+        DomainInfo(slug=slug, label=labels.get(slug, slug), keywords=kws)
+        for slug, kws in sorted(keywords.items())
+    ]
+
+
+def _read_domains_file(path: Path) -> dict[str, Any]:
+    """Raw ``domains`` object of the taxonomy file, for rewriting.
+
+    A missing/corrupt file seeds from the effective taxonomy (embedded
+    fallback included) so a write never silently drops the active domains.
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        raw = data.get("domains") if isinstance(data, dict) else None
+        if isinstance(raw, dict):
+            return dict(raw)
+    except Exception:  # missing/corrupt: fall through to the effective taxonomy
+        pass
+    return {
+        info.slug: {"label": info.label, "keywords": info.keywords} for info in _list_domains()
+    }
+
+
+def _write_domains_file(path: Path, domains: dict[str, Any]) -> None:
+    """Persist the taxonomy atomically (temp file + replace), then invalidate."""
+    from backend.ingestion.classification import invalidate_domain_cache
+
+    payload = json.dumps({"version": 1, "domains": domains}, ensure_ascii=False, indent=1) + "\n"
+    tmp_name = ""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=path.stem, suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(payload)
+        os.replace(tmp_name, path)
+    except OSError as exc:
+        if tmp_name:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+        logger.error(
+            "cannot write legal domains file",
+            extra={"path": str(path), "error": str(exc)},
+        )
+        raise HTTPException(
+            status_code=500, detail=f"cannot write legal domains file: {exc}"
+        ) from exc
+    invalidate_domain_cache()
+
+
+def _domains_write_path(request: Request) -> Path:
+    """The file ``load_domain_keywords`` resolves for this app's settings."""
+    from backend.ingestion.classification import resolve_domains_path
+
+    return resolve_domains_path(getattr(get_ctx(request).settings, "legal_domains_path", None))
+
+
+@router.get("/domains", response_model=DomainsResponse)
+async def list_domains() -> DomainsResponse:
+    """Legal-domain taxonomy (slug, French label, keywords), sorted by slug."""
+    return DomainsResponse(domains=_list_domains())
+
+
+@router.post("/domains", response_model=DomainInfo)
+async def create_domain(payload: DomainCreateRequest, request: Request) -> DomainInfo:
+    """Add a legal domain to the taxonomy (persisted, cache invalidated)."""
+    slug = payload.slug.strip()
+    label = payload.label.strip()
+    if not _DOMAIN_SLUG_RE.match(slug):
+        raise HTTPException(status_code=400, detail=f"invalid domain slug: {payload.slug!r}")
+    if not label:
+        raise HTTPException(status_code=400, detail="label is required")
+    keywords = [str(kw).strip() for kw in payload.keywords if str(kw).strip()]
+
+    path = _domains_write_path(request)
+    domains = _read_domains_file(path)
+    if slug in domains:
+        raise HTTPException(status_code=409, detail=f"domain already exists: {slug}")
+    domains[slug] = {"label": label, "keywords": keywords}
+    _write_domains_file(path, domains)
+    return DomainInfo(slug=slug, label=label, keywords=keywords)
+
+
+@router.delete("/domains/{slug}", response_model=DomainsResponse)
+async def delete_domain(slug: str, request: Request) -> DomainsResponse:
+    """Remove a legal domain; refused while a legal_docs folder with that name
+    still holds documents."""
+    from backend.ingestion.pipeline import SUPPORTED_EXTENSIONS
+
+    path = _domains_write_path(request)
+    domains = _read_domains_file(path)
+    if slug not in domains:
+        raise HTTPException(status_code=404, detail=f"unknown domain: {slug}")
+
+    folder = get_ctx(request).settings.ensure_data_dir() / "legal_docs" / slug
+    try:
+        has_documents = folder.is_dir() and any(
+            p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS for p in folder.iterdir()
+        )
+    except OSError:
+        has_documents = False
+    if has_documents:
+        raise HTTPException(
+            status_code=409,
+            detail=f"domain '{slug}' still has documents in legal_docs/{slug}",
+        )
+
+    del domains[slug]
+    _write_domains_file(path, domains)
+    return DomainsResponse(domains=_list_domains())
+
+
 @router.post("/documents/metadata-suggestion", response_model=MetadataSuggestionResponse)
 async def metadata_suggestion(
     request: Request,
@@ -548,6 +771,7 @@ async def metadata_suggestion(
         infer_document_type,
         infer_legal_domains,
         load_domain_keywords,
+        load_domain_labels,
     )
     from backend.ingestion.loaders import ExtractedDocument, load_any
     from backend.ingestion.pipeline import IngestionPipeline, _coerce_authority
@@ -603,6 +827,7 @@ async def metadata_suggestion(
         return MetadataSuggestionResponse(
             suggestion=suggestion,
             available_domains=sorted(load_domain_keywords().keys()),
+            domain_labels=load_domain_labels(),
         )
     finally:
         try:
@@ -626,6 +851,20 @@ async def admin_upload_document(
     """
     from backend.ingestion.pipeline import IngestionPipeline, _coerce_authority, _coerce_date
 
+    ctx = get_ctx(request)
+    max_bytes = ctx.settings.max_upload_bytes_admin
+    too_large = f"Fichier trop volumineux (max {max_bytes // (1024 * 1024)} Mo)"
+    # Cheap early reject: the multipart body is already over the cap. Allow a
+    # small overhead for the multipart framing itself (boundaries, headers);
+    # the post-read check on the actual file bytes below stays exact.
+    content_length = request.headers.get("content-length")
+    if (
+        content_length
+        and content_length.isdigit()
+        and int(content_length) > max_bytes + _MULTIPART_OVERHEAD_BYTES
+    ):
+        raise HTTPException(status_code=413, detail=too_large)
+
     root = _legal_docs_dir(request)
     folder = folder.strip().strip("/")
     target_dir = _resolve_folder(root, folder) if folder else root
@@ -647,13 +886,16 @@ async def admin_upload_document(
         meta["authority"] = _coerce_authority(meta["authority"])
 
     dest = target_dir / safe_name
-    dest.write_bytes(await file.read())
+    content = await file.read()
+    if len(content) > max_bytes:
+        raise HTTPException(status_code=413, detail=too_large)
+    dest.write_bytes(content)
     logger.info(
         "admin document uploaded",
         extra={"path": str(dest), "bytes": dest.stat().st_size},
     )
 
-    pipeline = IngestionPipeline(get_ctx(request))
+    pipeline = IngestionPipeline(ctx)
     try:
         return await pipeline.ingest_path(dest, **meta)
     except Exception as exc:

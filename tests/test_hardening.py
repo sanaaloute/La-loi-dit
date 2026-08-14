@@ -178,6 +178,47 @@ def test_dev_users_setting_drives_dev_store(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Token refresh (sliding session)
+# ---------------------------------------------------------------------------
+
+
+def test_refresh_token_renews_session(client):
+    """A valid token is exchanged for a fresh one that keeps working."""
+    token = _register(client)
+
+    response = client.post("/api/v1/auth/refresh", headers=_headers(token))
+    assert response.status_code == 200, response.text
+    renewed = response.json()["access_token"]
+    assert renewed != token
+    assert response.json()["expires_in"] > 0
+
+    me = client.get("/api/v1/auth/me", headers=_headers(renewed))
+    assert me.status_code == 200
+
+
+def test_refresh_token_requires_bearer(client):
+    assert client.post("/api/v1/auth/refresh").status_code == 401
+
+
+def test_refresh_token_rejects_expired(client):
+    """An expired token cannot be refreshed — the user must log in again."""
+    settings = get_settings()
+    expired = create_access_token("someone@example.com", Role.USER, settings, expires_minutes=-1)
+    assert client.post("/api/v1/auth/refresh", headers=_headers(expired)).status_code == 401
+
+
+def test_refresh_token_rejected_after_login_elsewhere(client):
+    """Single-session: a new login invalidates the previous token's refresh."""
+    email = f"user-{uuid.uuid4().hex[:8]}@example.com"
+    first = client.post(
+        "/api/v1/auth/register", json={"email": email, "password": PASSWORD, "name": "Awa"}
+    ).json()["access_token"]
+    client.post("/api/v1/auth/token", json={"username": email, "password": PASSWORD})
+
+    assert client.post("/api/v1/auth/refresh", headers=_headers(first)).status_code == 401
+
+
+# ---------------------------------------------------------------------------
 # Per-tier rate limits
 # ---------------------------------------------------------------------------
 

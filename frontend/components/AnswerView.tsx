@@ -35,6 +35,9 @@ function ConfidenceBadge({ confidence }: { confidence: number }) {
 }
 
 export default function AnswerView({ answer }: AnswerViewProps) {
+  // Direct-route answers (casual conversation, no legal retrieval): render
+  // the reply plainly — a confidence score is meaningless there.
+  const isDirect = answer.metadata?.route === "direct";
   if (answer.refused) {
     return (
       <div className="rounded-xl border border-red-700/30 bg-red-700/10 p-4">
@@ -54,15 +57,17 @@ export default function AnswerView({ answer }: AnswerViewProps) {
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <ConfidenceBadge confidence={answer.confidence} />
-        {answer.requires_human_review && (
-          <span className="inline-flex items-center gap-1 rounded-full border border-red-700/30 bg-red-700/10 px-2.5 py-0.5 text-xs font-semibold text-red-700">
-            <ShieldAlert className="h-3 w-3" />
-            Révision humaine requise
-          </span>
-        )}
-      </div>
+      {!isDirect && (
+        <div className="flex flex-wrap items-center gap-2">
+          <ConfidenceBadge confidence={answer.confidence} />
+          {answer.requires_human_review && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-red-700/30 bg-red-700/10 px-2.5 py-0.5 text-xs font-semibold text-red-700">
+              <ShieldAlert className="h-3 w-3" />
+              Révision humaine requise
+            </span>
+          )}
+        </div>
+      )}
 
       {answer.requires_human_review && (
         <div className="rounded-xl border border-red-700/20 bg-red-700/10 px-3 py-2 text-xs text-red-800">

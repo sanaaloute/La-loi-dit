@@ -1,10 +1,13 @@
 # System Architecture
 
 The system is a multi-agent legal research pipeline built on **LangGraph**.
-A single user question flows through 13 nodes — safety checks, planning,
-memory, retrieval, ranking, reasoning, verification and generation — before
-an answer is returned. The guiding constraint: **an answer may only contain
-claims that trace to retrieved evidence**.
+A single user question flows through 18 nodes — safety checks, query
+routing, planning, memory, retrieval, ranking, reasoning, verification and
+generation — before an answer is returned. Right after the input guardrail,
+a `query_router` node decides whether the question needs retrieval at all:
+direct (small-talk / meta) questions short-circuit straight to the response
+generator, skipping the whole retrieval pipeline. The guiding constraint:
+**an answer may only contain claims that trace to retrieved evidence**.
 
 ```mermaid
 flowchart TB
@@ -15,8 +18,10 @@ flowchart TB
     end
 
     subgraph graph["LangGraph pipeline (backend/workflows/graph.py)"]
-        ig[input_guardrail] -->|allowed| pl[planner]
+        ig[input_guardrail] -->|allowed| qr[query_router]
         ig -->|blocked| ref[refusal]
+        qr -->|direct| rg[response_generator]
+        qr -->|retrieval| pl[planner]
         pl --> ca[context_agent]
         ca --> ma[memory_agent]
         ma --> fan{{"fan-out: one retrieval_branch per sub-question (parallel Send)"}}
@@ -30,6 +35,7 @@ flowchart TB
         ra --> rf[reflection]
         rf -->|retry retrieval<br/>max 1 iteration| fan
         rf --> rg[response_generator]
+        rg -->|direct| og
         rg --> clv[claim_verification]
         clv --> cv[citation_verification]
         cv --> og[output_guardrail]

@@ -164,6 +164,9 @@ async def check_budget(user_store: Any, user: Any, settings: Settings) -> None:
     """
     if user is None or not getattr(user, "user_id", None) or user_store is None:
         return
+    # Pick up admin budget changes made on another uvicorn worker (TTL-bound,
+    # never raises — see catalog.refresh_budget_overrides).
+    await catalog.refresh_budget_overrides(user_store)
     tier = _tier_of(user)
     tier_cfg = catalog.get_tier(tier, settings=settings)
     token_budget = tier_cfg.get("daily_token_budget")

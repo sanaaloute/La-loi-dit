@@ -236,6 +236,30 @@ class Settings(BaseSettings):
     sandbox_timeout_seconds: float = 5.0
     currency_tool_timeout_seconds: float = 5.0
 
+    # --- uploads ---
+    # Per-role upload caps, enforced by the API with HTTP 413. The admin cap
+    # must stay <= nginx's client_max_body_size (100m) or nginx rejects first.
+    max_upload_bytes_admin: int = 100 * 1024 * 1024
+    max_upload_bytes_user: int = 25 * 1024 * 1024
+
+    # --- speech-to-text (voice messages, POST /chat/transcribe) ---
+    # "litellm" (default: transcription via the LiteLLM gateway — OpenAI
+    # Whisper or any compatible endpoint, reusing the main LLM credentials) |
+    # "faster-whisper" (fully local; the package is import-guarded, so the
+    # platform runs unchanged without it and the endpoint reports 503).
+    stt_provider: str = "litellm"
+    stt_model: str = "whisper-1"  # LiteLLM transcription model
+    stt_language: str = "fr"
+    # Optional dedicated transcription endpoint credentials; when empty the
+    # main LLM api_key/api_base are reused (same convention as embeddings).
+    stt_api_key: str = ""
+    stt_api_base: str = ""
+    stt_timeout_seconds: float = 90.0
+    faster_whisper_model_size: str = "small"  # local Whisper model size
+    # Local Whisper model download cache; None = data_dir/"stt_models".
+    stt_models_dir: Optional[Path] = None
+    stt_max_audio_bytes: int = 25 * 1024 * 1024
+
     # --- chunking / ingestion ---
     # Legal docs use boundary-based parents (whole articles) with alinéa-based
     # children; ``chunk_parent_size`` only applies to the unstructured
@@ -249,6 +273,23 @@ class Settings(BaseSettings):
     ingestion_html_timeout_seconds: float = 30.0
     ingestion_freshness_timeout_seconds: float = 20.0
     pdf_parser_max_pages: int = 50
+    # --- OCR (scanned PDFs) ---
+    # PaddleOCR (French, CPU) behind backend.ingestion.ocr; import-guarded, so
+    # ingestion works normally without the OCR stack installed — scanned pages
+    # simply stay unrecovered instead of failing the loader.
+    ocr_enabled: bool = True
+    ocr_lang: str = "fr"  # PaddleOCR recognition language
+    # PaddleOCR/PaddleX model cache (PADDLE_PDX_CACHE_HOME); None = data_dir/"ocr_models".
+    ocr_models_dir: Optional[Path] = None
+    ocr_max_pages: int = 200  # per-document cap on OCR'd pages (CPU cost guard)
+    # Base budget (seconds) for one OCR batch subprocess; the effective
+    # timeout adds 30 s per page on top of this.
+    ocr_subprocess_timeout_seconds: int = 120
+    # Model directory names under <ocr_models_dir>/official_models used as
+    # explicit local paths (offline deployments); must match the pinned
+    # paddleocr release's default det/rec models for ocr_lang.
+    ocr_det_model_name: str = "PP-OCRv5_server_det"
+    ocr_rec_model_name: str = "latin_PP-OCRv5_mobile_rec"
     # Last-resort LLM classification at ingest: one completion, only when the
     # heuristics found neither legal domains nor authority (never runs on the
     # happy path for known documents, never with the mock provider).
@@ -397,6 +438,16 @@ class Settings(BaseSettings):
     @property
     def langfuse_enabled(self) -> bool:
         return bool(self.langfuse_public_key and self.langfuse_secret_key)
+
+    @property
+    def ocr_models_path(self) -> Path:
+        """Effective OCR model cache directory (``ocr_models_dir`` or the default)."""
+        return self.ocr_models_dir or (self.data_dir / "ocr_models")
+
+    @property
+    def stt_models_path(self) -> Path:
+        """Effective STT model cache directory (``stt_models_dir`` or the default)."""
+        return self.stt_models_dir or (self.data_dir / "stt_models")
 
     @property
     def is_production(self) -> bool:

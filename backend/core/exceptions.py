@@ -29,6 +29,10 @@ class CitationVerificationError(LegalAIError):
     """A citation could not be traced to verified evidence."""
 
 
+class STTError(LegalAIError):
+    """Audio transcription failed or the STT provider is misconfigured."""
+
+
 class AuthenticationError(LegalAIError):
     """JWT / credentials invalid."""
 

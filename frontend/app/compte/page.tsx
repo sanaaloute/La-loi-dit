@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Building2, UserCircle } from "lucide-react";
+import { ArrowRight, Building2, LogOut, UserCircle } from "lucide-react";
 import AppHeader from "@/components/AppHeader";
 import ErrorCard from "@/components/ui/ErrorCard";
 import GatePanel from "@/components/ui/GatePanel";
@@ -148,13 +148,23 @@ export default function ComptePage() {
                       )}
                     </div>
                   </div>
-                  {tierStyle && (
-                    <span
-                      className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium ${tierStyle.className}`}
+                  <div className="flex shrink-0 items-center gap-2">
+                    {tierStyle && (
+                      <span
+                        className={`rounded-full border px-2.5 py-1 text-xs font-medium ${tierStyle.className}`}
+                      >
+                        {tierStyle.label}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setToken(null)}
+                      className="flex items-center gap-1.5 rounded-lg border border-red-700/30 bg-red-700/10 px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-700/20"
                     >
-                      {tierStyle.label}
-                    </span>
-                  )}
+                      <LogOut className="h-3.5 w-3.5" />
+                      Se déconnecter
+                    </button>
+                  </div>
                 </div>
               </section>
             )}

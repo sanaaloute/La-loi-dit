@@ -2,7 +2,9 @@
 
 Enforces three deterministic rules:
   1. Refusal policy — an answer with zero evidence that does not already
-     declare insufficient evidence is refused outright.
+     declare insufficient evidence is refused outright.  Direct-route answers
+     (``route == "direct"``: greetings, meta questions, general conversation)
+     are exempt — they are conversational by design and carry no evidence.
   2. Unsafe legal advice — matching content is kept but gets a warning and
      is escalated for human review.
   3. Citation integrity — every citation must be ``verified=True`` and
@@ -64,13 +66,20 @@ def flag_unverified_article_citations(answer: FinalAnswer, evidence: list[Eviden
             answer.warnings.append(f"citation d'article non vérifiée : article {ref}")
 
 
-async def check_output(answer: FinalAnswer, evidence: list[EvidenceChunk], settings) -> FinalAnswer:
+async def check_output(
+    answer: FinalAnswer,
+    evidence: list[EvidenceChunk],
+    settings,
+    *,
+    route: str = "retrieval",
+) -> FinalAnswer:
     """Apply the output policies to ``answer`` and return the (possibly
     modified) answer. Never raises."""
     effective_evidence = evidence if evidence else answer.evidence
 
     # --- 1. refusal policy: no evidence and no honest declaration ---
-    if not effective_evidence and not answer.refused:
+    # Direct-route answers legitimately have no evidence (see module docstring).
+    if route != "direct" and not effective_evidence and not answer.refused:
         lowered = answer.answer.lower()
         declares_insufficient = any(p in lowered for p in _INSUFFICIENT_EVIDENCE_PHRASES)
         if not declares_insufficient:

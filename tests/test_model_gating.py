@@ -140,6 +140,121 @@ def test_catalog_env_override_invalid_falls_back(monkeypatch):
         get_settings.cache_clear()
 
 
+def test_default_daily_budgets_per_tier():
+    """The built-in catalog carries the real per-tier production quotas."""
+    assert catalog.get_tier("gratuit")["daily_token_budget"] == 1_000_000
+    assert catalog.get_tier("pro")["daily_token_budget"] == 10_000_000
+    assert catalog.get_tier("cabinet")["daily_token_budget"] == 100_000_000
+    assert catalog.get_tier("gratuit")["daily_request_budget"] == 50
+    assert catalog.get_tier("pro")["daily_request_budget"] == 500
+    assert catalog.get_tier("cabinet")["daily_request_budget"] == 10_000
+
+
+def test_budget_overrides_merge_into_get_tier():
+    """Admin overrides win over the defaults without mutating the catalog."""
+    try:
+        catalog.set_budget_overrides({"gratuit": {"daily_token_budget": 2_000_000}})
+        assert catalog.get_tier("gratuit")["daily_token_budget"] == 2_000_000
+        # Untouched fields and tiers keep their catalog values.
+        assert catalog.get_tier("gratuit")["daily_request_budget"] == 50
+        assert catalog.get_tier("pro")["daily_token_budget"] == 10_000_000
+        assert catalog.TIER_CATALOG["gratuit"]["daily_token_budget"] == 1_000_000
+        assert catalog.effective_tier_budgets()["gratuit"]["daily_token_budget"] == 2_000_000
+        assert catalog.default_tier_budgets()["gratuit"]["daily_token_budget"] == 1_000_000
+    finally:
+        catalog.set_budget_overrides({})
+    assert catalog.get_tier("gratuit")["daily_token_budget"] == 1_000_000
+
+
+def test_parse_budget_overrides_filters_garbage():
+    assert catalog.parse_budget_overrides(None) == {}
+    assert catalog.parse_budget_overrides("") == {}
+    assert catalog.parse_budget_overrides("{not json") == {}
+    assert catalog.parse_budget_overrides('["gratuit"]') == {}
+    parsed = catalog.parse_budget_overrides(
+        json.dumps(
+            {
+                "gratuit": {"daily_token_budget": 5, "rate_limit_per_minute": 1, "bad": True},
+                "gold": {"daily_token_budget": 5},
+                "pro": {"daily_token_budget": -3},
+            }
+        )
+    )
+    # Unknown tiers/fields and non-positive values are dropped.
+    assert parsed == {"gratuit": {"daily_token_budget": 5}}
+
+
+class _FakeSettingStore:
+    """Minimal async stand-in for UserStore.get_setting."""
+
+    def __init__(self, value: str | None = None, error: Exception | None = None):
+        self.value = value
+        self.error = error
+        self.reads = 0
+
+    async def get_setting(self, key: str):
+        self.reads += 1
+        if self.error is not None:
+            raise self.error
+        return self.value
+
+
+async def test_budget_overrides_refresh_after_ttl(monkeypatch):
+    """A stale override cache is re-read from the DB; a fresh one is not."""
+    store = _FakeSettingStore(json.dumps({"gratuit": {"daily_token_budget": 7}}))
+    try:
+        catalog.set_budget_overrides({})
+        # Fresh cache: no DB read at all.
+        await catalog.refresh_budget_overrides(store)
+        assert store.reads == 0
+        assert catalog.get_tier("gratuit")["daily_token_budget"] == 1_000_000
+        # Stale cache (TTL expired): one indexed read, overrides applied —
+        # this is how a PATCH served by another uvicorn worker propagates.
+        monkeypatch.setattr(catalog, "_budget_overrides_loaded_at", 0.0)
+        await catalog.refresh_budget_overrides(store)
+        assert store.reads == 1
+        assert catalog.get_tier("gratuit")["daily_token_budget"] == 7
+    finally:
+        catalog.set_budget_overrides({})
+
+
+async def test_budget_overrides_refresh_never_raises(monkeypatch):
+    """A DB outage keeps the last known values and resets the TTL clock."""
+    store = _FakeSettingStore(error=RuntimeError("db down"))
+    catalog.set_budget_overrides({"pro": {"daily_request_budget": 9}})
+    monkeypatch.setattr(catalog, "_budget_overrides_loaded_at", 0.0)
+    try:
+        await catalog.refresh_budget_overrides(store)  # must not raise
+        assert catalog.get_tier("pro")["daily_request_budget"] == 9
+        # The TTL clock was bumped too: no per-request retry storm.
+        assert not catalog.budget_overrides_stale()
+    finally:
+        catalog.set_budget_overrides({})
+
+
+def test_default_tier_budgets_reflect_env_catalog(monkeypatch):
+    """The admin UI "Par défaut" hints follow LEGAL_AI_TIER_CATALOG_JSON."""
+    override = {
+        "gratuit": {
+            "providers": ["mock"],
+            "models": [{"id": "mock/gratuit-model", "provider": "mock"}],
+            "features": {},
+            "daily_token_budget": 42,
+            "daily_request_budget": 3,
+        }
+    }
+    monkeypatch.setenv("LEGAL_AI_TIER_CATALOG_JSON", json.dumps(override))
+    get_settings.cache_clear()
+    try:
+        defaults = catalog.default_tier_budgets()
+        assert defaults["gratuit"] == {"daily_token_budget": 42, "daily_request_budget": 3}
+        # Tiers missing from the override fall back to its default tier,
+        # exactly like get_tier does.
+        assert defaults["pro"] == {"daily_token_budget": 42, "daily_request_budget": 3}
+    finally:
+        get_settings.cache_clear()
+
+
 # ---------------------------------------------------------------------------
 # LLMClient: OpenRouter + overrides
 # ---------------------------------------------------------------------------

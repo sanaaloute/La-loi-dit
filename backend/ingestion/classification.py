@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 from backend.core.models import AuthorityLevel, DocumentType
 
@@ -35,28 +36,52 @@ _AUTHORITY_RULES: list[tuple[list[tuple[str, ...]], AuthorityLevel]] = [
     ([("communiqué", "communique", "presse")], AuthorityLevel.OFFICIAL_PRESS_RELEASE),
 ]
 
-_DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "constitution": ("constitution", "transition"),
-    "criminal_law": ("pénal", "penal", "infraction", "crime", "délit", "criminal"),
-    "civil_law": ("civil", "contrat", "responsabilité civile", "droit commercial général"),
-    "family_code": ("famille", "mariage", "divorce", "filiation"),
-    # Stems ("licenci", "salari", "preavis") cover inflected forms
-    # (licencié/licenciement, salarié/salarial); the haystack is accent-folded,
-    # so keywords must be unaccented to match.
-    "labor_code": ("travail", "licenci", "salaire", "salari", "employeur", "preavis"),
-    "tax_law": ("impôt", "impots", "fiscal", "taxe", "tva"),
-    "commercial_law": ("commercial", "société", "commerce", "ohada", "sarl", "sa ", "sociétés commerciales"),
-    "ohada_law": ("ohada", "acte uniforme"),
-    "administrative_law": ("administratif", "administration", "fonction publique"),
-    "land_law": ("foncier", "terrain", "propriété"),
-    "procurement_law": ("marchés publics", "appel d'offres"),
-    "environmental_law": ("environnement", "pollution"),
-    "immigration": ("immigration", "visa", "titre de séjour", "étranger"),
-    "public_service": ("fonction publique", "fonctionnaire"),
-    "elections": ("élection", "élections", "ceni", "vote"),
-    "health_regulations": ("santé", "hôpital"),
-    "education_regulations": ("éducation", "école", "université"),
-    "government_procedures": ("procédure", "guichet"),
+# Embedded fallback taxonomy, used only when the JSON file is missing/corrupt.
+# Same per-entry shape as data/legal_domains.json: a French display "label"
+# (admin UI) plus "keywords" — matched against an accent-folded haystack (see
+# :func:`_normalize`), so they are accent-folded once at load time; stems like
+# "licenci"/"salari"/"preavis" cover inflected forms
+# (licencié/licenciement, salarié/salarial).
+_DOMAIN_KEYWORDS: dict[str, dict[str, Any]] = {
+    "constitution": {"label": "Constitution", "keywords": ("constitution", "transition")},
+    "criminal_law": {
+        "label": "Droit pénal",
+        "keywords": ("pénal", "penal", "infraction", "crime", "délit", "criminal"),
+    },
+    "civil_law": {
+        "label": "Droit civil",
+        "keywords": ("civil", "contrat", "responsabilité civile", "droit commercial général"),
+    },
+    "family_code": {"label": "Droit de la famille", "keywords": ("famille", "mariage", "divorce", "filiation")},
+    "labor_code": {
+        "label": "Droit du travail",
+        "keywords": ("travail", "licenci", "salaire", "salari", "employeur", "preavis"),
+    },
+    "tax_law": {"label": "Droit fiscal", "keywords": ("impôt", "impots", "fiscal", "taxe", "tva")},
+    "commercial_law": {
+        "label": "Droit commercial",
+        "keywords": ("commercial", "société", "commerce", "ohada", "sarl", "sa ", "sociétés commerciales"),
+    },
+    "ohada_law": {"label": "Droit OHADA", "keywords": ("ohada", "acte uniforme")},
+    "administrative_law": {
+        "label": "Droit administratif",
+        "keywords": ("administratif", "administration", "fonction publique"),
+    },
+    "land_law": {"label": "Droit foncier", "keywords": ("foncier", "terrain", "propriété")},
+    "procurement_law": {"label": "Marchés publics", "keywords": ("marchés publics", "appel d'offres")},
+    "environmental_law": {"label": "Droit de l'environnement", "keywords": ("environnement", "pollution")},
+    "immigration": {
+        "label": "Immigration",
+        "keywords": ("immigration", "visa", "titre de séjour", "étranger"),
+    },
+    "public_service": {"label": "Fonction publique", "keywords": ("fonction publique", "fonctionnaire")},
+    "elections": {"label": "Élections", "keywords": ("élection", "élections", "ceni", "vote")},
+    "health_regulations": {"label": "Réglementation sanitaire", "keywords": ("santé", "hôpital")},
+    "education_regulations": {
+        "label": "Droit de l'éducation",
+        "keywords": ("éducation", "école", "université"),
+    },
+    "government_procedures": {"label": "Démarches administratives", "keywords": ("procédure", "guichet")},
 }
 
 
@@ -89,20 +114,12 @@ def domain_slug(name: str) -> str:
 #: Bundled domain-taxonomy file shipped with the repository.
 _DEFAULT_DOMAINS_PATH = Path(__file__).resolve().parents[2] / "data" / "legal_domains.json"
 
-_DOMAINS_CACHE: dict[str, dict[str, list[str]]] = {}
+_DOMAINS_CACHE: dict[str, tuple[dict[str, dict[str, Any]], Optional[float]]] = {}
 
 
-def load_domain_keywords(path: Optional[Union[str, Path]] = None) -> dict[str, list[str]]:
-    """Resolve the domain-keyword taxonomy (jurisdiction-configurable).
-
-    Resolution order: explicit ``path`` → ``settings.legal_domains_path`` →
-    the bundled ``data/legal_domains.json``.  The file shape is
-    ``{"version": 1, "domains": {"<domain_slug>": ["unaccented stem", ...]}}``;
-    stems must be UNACCENTED because they are matched against an accent-folded
-    haystack (see :func:`_normalize`).  A missing/corrupt file falls back to
-    the embedded :data:`_DOMAIN_KEYWORDS` with a structured warning — never
-    raises.  Results are cached per resolved path.
-    """
+def resolve_domains_path(path: Optional[Union[str, Path]] = None) -> Path:
+    """Taxonomy file resolution: explicit ``path`` → ``settings.legal_domains_path``
+    → the bundled ``data/legal_domains.json``."""
     resolved = path
     if resolved is None:
         try:
@@ -111,25 +128,112 @@ def load_domain_keywords(path: Optional[Union[str, Path]] = None) -> dict[str, l
             resolved = getattr(get_settings(), "legal_domains_path", None)
         except Exception:  # settings unavailable: stay on the bundled default
             resolved = None
-    resolved = resolved or _DEFAULT_DOMAINS_PATH
-    key = f"{resolved}#domain_keywords"
-    if key not in _DOMAINS_CACHE:
-        try:
-            data = json.loads(Path(resolved).read_text(encoding="utf-8"))
-            raw = data.get("domains") if isinstance(data, dict) else None
-            if not isinstance(raw, dict):
-                raise ValueError("domain keywords file must hold a 'domains' object")
-            _DOMAINS_CACHE[key] = {
-                str(domain): [str(kw) for kw in (keywords or [])]
-                for domain, keywords in raw.items()
-            }
-        except Exception as exc:
-            logger.warning(
-                "domain_keywords_load_failed",
-                extra={"path": str(resolved), "error": str(exc), "fallback": "embedded_domain_keywords"},
-            )
-            _DOMAINS_CACHE[key] = {d: list(kws) for d, kws in _DOMAIN_KEYWORDS.items()}
-    return _DOMAINS_CACHE[key]
+    return Path(resolved or _DEFAULT_DOMAINS_PATH)
+
+
+def _humanize_domain_slug(slug: str) -> str:
+    """Fallback label for an entry without one ("civil_law" -> "Civil law")."""
+    return slug.replace("_", " ").capitalize() or slug
+
+
+def _embedded_domain_entries() -> dict[str, dict[str, Any]]:
+    """The embedded fallback taxonomy in parsed-entries shape."""
+    return {
+        domain: {"label": entry["label"], "keywords": [_normalize(kw) for kw in entry["keywords"]]}
+        for domain, entry in _DOMAIN_KEYWORDS.items()
+    }
+
+
+def _read_domain_entries(resolved: Path) -> dict[str, dict[str, Any]]:
+    """Parse the taxonomy file into slug -> {"label": str, "keywords": [...]}.
+
+    Accepts both the current shape (``{"label": ..., "keywords": [...]}``) and
+    the legacy bare keyword list (``"slug": [...]`` — label left empty, the
+    humanized slug is used at display time). Raises on a missing/corrupt
+    file; callers fall back to the embedded taxonomy.
+
+    Keywords are accent-folded with :func:`_normalize` here (once, at load
+    time) so accented admin-added keywords ("préavis", "société") match the
+    accent-folded haystack exactly like the bundled stems.
+    """
+    data = json.loads(Path(resolved).read_text(encoding="utf-8"))
+    raw = data.get("domains") if isinstance(data, dict) else None
+    if not isinstance(raw, dict):
+        raise ValueError("domain keywords file must hold a 'domains' object")
+    entries: dict[str, dict[str, Any]] = {}
+    for domain, value in raw.items():
+        if isinstance(value, dict):
+            keywords = value.get("keywords") or []
+            label = str(value.get("label") or "").strip()
+        else:  # legacy shape: bare keyword list
+            keywords = value or []
+            label = ""
+        entries[str(domain)] = {"label": label, "keywords": [_normalize(str(kw)) for kw in keywords]}
+    return entries
+
+
+def _domain_entries(resolved: Path, kind: str) -> dict[str, dict[str, Any]]:
+    """Taxonomy entries for ``resolved``, cached per path — never raises.
+
+    The cache entry carries the file's mtime; when the mtime changes (admin
+    edit written by another process/worker), the file is re-read. A missing
+    file counts as "no mtime change": the last known entries keep being
+    served.
+    """
+    key = f"{resolved}#{kind}"
+    try:
+        mtime: Optional[float] = os.stat(resolved).st_mtime
+    except OSError:
+        mtime = None
+    cached = _DOMAINS_CACHE.get(key)
+    if cached is not None and (mtime is None or mtime == cached[1]):
+        return cached[0]
+    try:
+        entries = _read_domain_entries(resolved)
+    except Exception as exc:
+        logger.warning(
+            f"{kind}_load_failed",
+            extra={"path": str(resolved), "error": str(exc), "fallback": "embedded_domain_keywords"},
+        )
+        entries = _embedded_domain_entries()
+    _DOMAINS_CACHE[key] = (entries, mtime)
+    return entries
+
+
+def invalidate_domain_cache() -> None:
+    """Drop every cached taxonomy (called after the admin API rewrites the file)."""
+    _DOMAINS_CACHE.clear()
+
+
+def load_domain_keywords(path: Optional[Union[str, Path]] = None) -> dict[str, list[str]]:
+    """Resolve the domain-keyword taxonomy (jurisdiction-configurable).
+
+    The file shape is ``{"version": 1, "domains": {"<domain_slug>": {"label":
+    "Droit civil", "keywords": ["unaccented stem", ...]}}}``; the legacy shape
+    ``{"<domain_slug>": ["stem", ...]}`` is still accepted.  Keywords are
+    accent-folded at load time (see :func:`_normalize`) because they are
+    matched against an accent-folded haystack — accented keywords work too.
+    A missing/corrupt file falls back to the embedded
+    :data:`_DOMAIN_KEYWORDS` with a structured warning — never raises.
+    Results are cached per resolved path and re-read when the file's mtime
+    changes.
+    """
+    entries = _domain_entries(resolve_domains_path(path), "domain_keywords")
+    return {domain: entry["keywords"] for domain, entry in entries.items()}
+
+
+def load_domain_labels(path: Optional[Union[str, Path]] = None) -> dict[str, str]:
+    """Resolve the domain display labels (slug -> French label).
+
+    Same resolution/caching as :func:`load_domain_keywords`. Entries without
+    an explicit label (legacy files) fall back to a humanized slug
+    ("civil_law" -> "Civil law").
+    """
+    entries = _domain_entries(resolve_domains_path(path), "domain_labels")
+    return {
+        domain: entry["label"] or _humanize_domain_slug(domain)
+        for domain, entry in entries.items()
+    }
 
 
 def _matches_rule(haystack: str, groups: list[tuple[str, ...]]) -> bool:

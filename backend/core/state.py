@@ -52,6 +52,7 @@ class GraphState(TypedDict, total=False):
 
     # --- pipeline artefacts ---
     guardrail: GuardrailResult
+    route: str  # "retrieval" (default) or "direct" — set by the query router
     plan: RetrievalPlan
     conversation_context: list[dict[str, Any]]
     memories: list[dict[str, Any]]

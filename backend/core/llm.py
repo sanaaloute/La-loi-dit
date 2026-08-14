@@ -560,6 +560,17 @@ class LLMClient:
         """
         s = system.lower()
         top_k = self.settings.default_top_k
+        if "conversation directe" in s:
+            # Direct-route conversational answer (query router short-circuit,
+            # RESPONSE_DIRECT_SYSTEM): a canned polite reply keeps offline
+            # runs deterministic without inventing legal content.
+            return (
+                "Bonjour ! Je suis votre assistant de recherche juridique pour le "
+                "Burkina Faso. Posez-moi une question juridique et je chercherai la "
+                "réponse dans les sources officielles indexées (Constitution, codes, "
+                "lois, Journal Officiel, OHADA). Mes réponses sont fournies à titre "
+                "informatif et ne constituent pas un avis juridique."
+            )
         if "retrieval plan" in s or "plan the searches" in s:
             return json.dumps(
                 {

@@ -118,6 +118,7 @@ def test_role_model_override_reads_settings():
 _AGENT_NODES = {
     "input_guardrail": ("input_guardrail", "input_guardrail_node"),
     "refusal": ("refusal", "refusal_node"),
+    "query_router": ("query_router", "query_router_node"),
     "context_agent": ("context_agent", "context_agent_node"),
     "memory_agent": ("memory_agent", "memory_agent_node"),
     "retrieval_branch": ("retrieval_node", "retrieval_branch_node"),
@@ -176,6 +177,7 @@ async def test_graph_wiring_binds_role_models(monkeypatch):
     )
     seen = await _run_stubbed_graph(monkeypatch, settings)
     assert seen["planner"] == "cheap-planner"
+    assert seen["query_router"] == "cheap-classify"
     assert seen["context_agent"] == "cheap-classify"
     assert seen["memory_agent"] == "cheap-classify"
     assert seen["reasoning_agent"] == "mid-analysis"

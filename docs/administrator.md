@@ -17,6 +17,17 @@ Operational tasks for users with the `admin` (and where noted,
 - Rotate `LEGAL_AI_SECRET_KEY` only with a planned token-invalidation
   window (all JWTs become invalid).
 
+## Tier quotas
+
+- Each tier has a default daily token budget: `gratuit` 1 000 000,
+  `pro` 10 000 000, `cabinet` 100 000 000 (`backend/core/catalog.py`).
+- Adjust them from the **Quotas** admin tab, or via the API:
+  `GET /api/v1/admin/settings/tier-budgets` returns the effective budgets
+  plus the built-in defaults; `PATCH /api/v1/admin/settings/tier-budgets`
+  merges overrides, e.g. `{"pro": {"daily_token_budget": 20000000}}`.
+  Omitted tiers/fields keep their current value; non-positive values are
+  rejected. Overrides are persisted as an app setting and survive restarts.
+
 ## Ingestion operations
 
 ```bash
@@ -34,6 +45,27 @@ and canonical URL at ingest time, and make sure authority/dates are
 attached in the metadata — they drive conflict resolution and timeline
 reasoning. Verify with `GET /api/v1/documents/{document_id}` and a
 spot-check search (`GET /api/v1/search?q=…`).
+
+## Legal domain management
+
+- The legal-domain taxonomy (slug → French label + keywords) lives in
+  `data/legal_domains.json`; the French labels are what the UI displays.
+- Add or delete domains from the admin UI (Documents tab, « Domaines
+  juridiques ») or via the API: `GET /api/v1/admin/domains`,
+  `POST /api/v1/admin/domains`, `DELETE /api/v1/admin/domains/{slug}`.
+  Slugs must match `[a-z0-9_]+`; deleting a domain is refused while a
+  `legal_docs/{slug}` folder still holds documents.
+
+## Upload limits
+
+- Upload size caps: 100 MB for admins, 25 MB for regular users
+  (`max_upload_bytes_admin` / `max_upload_bytes_user` in
+  `backend/core/config.py`).
+- nginx must accept those bodies: `client_max_body_size 100m` in
+  `docker/nginx/nginx.conf` and in the host config
+  `docker/host-nginx/yawoto.neobytech.net.conf`. On the server, (re)install
+  and reload the host config with `scripts/install-nginx-config.sh` after
+  any change.
 
 ## Version & freshness management
 

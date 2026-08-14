@@ -50,10 +50,10 @@ export default function CitationPanel({ citations }: CitationPanelProps) {
                   href={citation.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="mt-2 inline-flex items-center gap-1 truncate text-xs text-accent hover:text-accent/80 hover:underline"
+                  className="mt-2 inline-flex max-w-full items-center gap-1 text-xs text-accent hover:text-accent/80 hover:underline"
                 >
-                  <ExternalLink className="h-3 w-3" />
-                  {citation.url}
+                  <ExternalLink className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{citation.url}</span>
                 </a>
               )}
             </li>

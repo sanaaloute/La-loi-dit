@@ -2,7 +2,9 @@
 
 Pipeline (see docs/architecture.md for the Mermaid diagram):
 
-    user -> input_guardrail -> planner -> context_agent -> memory_agent
+    user -> input_guardrail -> query_router
+         -> (direct) response_generator -> output_guardrail
+         -> (retrieval) planner -> context_agent -> memory_agent
          -> [fan-out: one retrieval_branch per sub-question, in parallel]
          -> retrieval_merge -> conflict_resolver -> evidence_ranking
          -> coverage_auditor -> reasoning_agent -> reflection_agent
@@ -44,6 +46,7 @@ from backend.agents import (
     memory_agent,
     output_guardrail,
     parent_expansion,
+    query_router,
     reasoning_agent,
     reflection_agent,
     refusal,
@@ -85,7 +88,11 @@ def build_graph(ctx: AppContext):
 
     def _route_after_guardrail(state: GraphState) -> str:
         guardrail = state.get("guardrail")
-        return "refusal" if guardrail and not guardrail.allowed else "planner"
+        return "refusal" if guardrail and not guardrail.allowed else "query_router"
+
+    def _route_after_router(state: GraphState) -> str:
+        """Direct answers short-circuit the whole retrieval pipeline."""
+        return "response_generator" if state.get("route") == "direct" else "planner"
 
     def _fanout_retrieval(state: GraphState) -> list[Send]:
         """Fan out one parallel retrieval branch per decomposed sub-question.
@@ -141,9 +148,15 @@ def build_graph(ctx: AppContext):
             return _fanout_retrieval(state)
         return "response_generator"
 
+    def _route_after_response(state: GraphState) -> str:
+        """Direct answers skip claim/citation verification (no evidence to
+        verify against) but still pass through the output guardrail."""
+        return "output_guardrail" if state.get("route") == "direct" else "claim_verification"
+
     g = StateGraph(GraphState)
     g.add_node("input_guardrail", bind(input_guardrail.input_guardrail_node))
     g.add_node("refusal", bind(refusal.refusal_node))
+    g.add_node("query_router", bind(query_router.query_router_node, role="classification"))
     g.add_node("planner", bind(planner_node, role="planner"))
     g.add_node("context_agent", bind(context_agent.context_agent_node, role="classification"))
     g.add_node("memory_agent", bind(memory_agent.memory_agent_node, role="classification"))
@@ -163,6 +176,7 @@ def build_graph(ctx: AppContext):
     g.add_edge(START, "input_guardrail")
     g.add_conditional_edges("input_guardrail", _route_after_guardrail)
     g.add_edge("refusal", END)
+    g.add_conditional_edges("query_router", _route_after_router)
     g.add_edge("planner", "context_agent")
     g.add_edge("context_agent", "memory_agent")
     g.add_conditional_edges("memory_agent", _fanout_retrieval)
@@ -174,7 +188,7 @@ def build_graph(ctx: AppContext):
     g.add_conditional_edges("coverage_auditor", _route_after_coverage)
     g.add_conditional_edges("reasoning_agent", _route_after_reasoning)
     g.add_conditional_edges("reflection_agent", _route_after_reflection)
-    g.add_edge("response_generator", "claim_verification")
+    g.add_conditional_edges("response_generator", _route_after_response)
     g.add_edge("claim_verification", "citation_verification")
     g.add_edge("citation_verification", "output_guardrail")
     g.add_edge("output_guardrail", END)

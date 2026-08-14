@@ -16,8 +16,13 @@ data/*.bak*
 data/ingestion_results.json
 data/versions.json
 data/freshness_state.json
+data/.ingest-on-startup.lock
 data/tmp/
 data/eval/**
+
+# Downloaded OCR/STT model caches (re-download on deploy; do not commit).
+data/ocr_models/
+data/stt_models/
 
 # Uploaded source documents (re-ingest after deploy; do not commit).
 data/legal_docs/**
@@ -65,4 +70,3 @@ nul
 /test.md
 /*_tmp.py
 /embed_benchmark*.txt
-tests

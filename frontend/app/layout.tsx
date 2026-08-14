@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import AuthGate from "@/components/AuthGate";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -24,7 +25,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }}
         />
       </head>
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        <AuthGate>{children}</AuthGate>
+      </body>
     </html>
   );
 }

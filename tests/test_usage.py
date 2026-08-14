@@ -199,8 +199,8 @@ def test_refusal_is_not_cached(tmp_path, monkeypatch):
 
     original_check_output = og.check_output
 
-    async def _force_refuse(answer, evidence, settings):
-        answer = await original_check_output(answer, evidence, settings)
+    async def _force_refuse(answer, evidence, settings, **kwargs):
+        answer = await original_check_output(answer, evidence, settings, **kwargs)
         if not evidence:
             answer.refused = True
             answer.refusal_reason = "Forced refusal for cache test"
@@ -260,15 +260,15 @@ def test_usage_me_shape_and_remaining_math(client):
     _, token = _register(client)
     usage = client.get("/api/v1/usage/me", headers=_headers(token)).json()
     assert usage["tier"] == "gratuit"
-    assert usage["daily_budget"] == 100_000_000  # dev mode: effectively unlimited
+    assert usage["daily_budget"] == 1_000_000  # gratuit tier default
     assert usage["today"] == {"tokens_in": 0, "tokens_out": 0, "requests": 0}
-    assert usage["remaining_tokens"] == 100_000_000
+    assert usage["remaining_tokens"] == 1_000_000
     assert usage["history"] == []
 
     _chat(client, "Quel est le préavis de licenciement au Burkina Faso ?", token)
     usage = client.get("/api/v1/usage/me", headers=_headers(token)).json()
     consumed = usage["today"]["tokens_in"] + usage["today"]["tokens_out"]
-    assert usage["remaining_tokens"] == 100_000_000 - consumed
+    assert usage["remaining_tokens"] == 1_000_000 - consumed
     assert usage["history"][0]["requests"] == 1
 
 

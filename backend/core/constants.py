@@ -182,8 +182,23 @@ def load_official_domains(path: Optional[Union[str, Path]] = None) -> tuple[str,
 
 
 def load_legal_domains(path: Optional[Union[str, Path]] = None) -> tuple[str, ...]:
-    """:data:`LEGAL_DOMAINS`, replaced by any ``legal_domains`` override."""
+    """:data:`LEGAL_DOMAINS`, replaced by any ``legal_domains`` override.
+
+    Without an override, slugs from the ingestion taxonomy
+    (``data/legal_domains.json``) not already listed are merged in, so domains
+    added through the admin API are known to retrieval planning.
+    """
     domains = load_authority_config(path).get("legal_domains")
-    if not domains:
-        return LEGAL_DOMAINS
-    return tuple(str(d) for d in domains)
+    if domains:
+        return tuple(str(d) for d in domains)
+    # Lazy import: backend.ingestion's package __init__ pulls in modules that
+    # depend on constants, so a module-level import would be circular.
+    try:
+        from backend.ingestion.classification import load_domain_keywords
+
+        taxonomy = load_domain_keywords()
+    except Exception:  # taxonomy unavailable: module defaults only
+        taxonomy = {}
+    merged = list(LEGAL_DOMAINS)
+    merged.extend(slug for slug in taxonomy if slug not in LEGAL_DOMAINS)
+    return tuple(merged)

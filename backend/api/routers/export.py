@@ -19,7 +19,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from backend.api.deps import get_ctx
-from backend.core.models import Citation, EvidenceChunk, FinalAnswer
+from backend.core.models import Citation, FinalAnswer
 
 router = APIRouter(tags=["export"])
 
@@ -107,24 +107,6 @@ def _citation_label(citation: Citation, ref: str) -> str:
     """Descriptive label when it is not already the bare ``[n]`` marker."""
     label = _strip_markdown(citation.label or "").strip()
     return "" if not label or re.fullmatch(r"\[\d+\]", label) else label
-
-
-def _clean_evidence(evidence: list[EvidenceChunk]) -> list[EvidenceChunk]:
-    """Deduplicate evidence by document and article.
-
-    Retrieval returns parent/child duplicates of the same passage; only the
-    first occurrence of each (document, article) pair is kept. Exports list
-    the source titles only, never the raw chunk content.
-    """
-    seen: set[tuple[str, str]] = set()
-    cleaned: list[EvidenceChunk] = []
-    for ev in evidence:
-        key = (ev.document_name, ev.article or "")
-        if key in seen:
-            continue
-        seen.add(key)
-        cleaned.append(ev)
-    return cleaned
 
 
 # ---------------------------------------------------------------------------
@@ -238,16 +220,6 @@ def _build_pdf(data: ExportRequest, title: str = "Réponse juridique") -> bytes:
                 story.append(Paragraph(line, small_style))
                 story.append(Spacer(1, 4))
 
-        evidence = _clean_evidence(answer.evidence)
-        if evidence:
-            story.append(Paragraph("Preuves", heading_style))
-            for i, ev in enumerate(evidence, 1):
-                header = f"[{i}] <b>{_strip_markdown(ev.document_name)}</b>"
-                if ev.article:
-                    header += f" — art. {ev.article}"
-                story.append(Paragraph(header, small_style))
-                story.append(Spacer(1, 4))
-
         if answer.warnings:
             story.append(Paragraph("Avertissements", heading_style))
             for warning in answer.warnings:
@@ -338,15 +310,6 @@ def _build_docx(data: ExportRequest, title: str = "Réponse juridique") -> bytes
                 if citation.url:
                     p.add_run(f" — {citation.url}")
 
-        evidence = _clean_evidence(answer.evidence)
-        if evidence:
-            doc.add_heading("Preuves", level=2 if multiple else 1)
-            for i, ev in enumerate(evidence, 1):
-                p = doc.add_paragraph()
-                p.add_run(f"[{i}] {_strip_markdown(ev.document_name)}").bold = True
-                if ev.article:
-                    p.add_run(f" — art. {ev.article}")
-
         if answer.warnings:
             doc.add_heading("Avertissements", level=2 if multiple else 1)
             for warning in answer.warnings:
@@ -404,18 +367,6 @@ def _build_csv(data: ExportRequest, title: str = "Réponse juridique") -> bytes:
                     citation.article or "",
                     "Oui" if citation.verified else "Non",
                     citation.url or "",
-                ]
-            )
-        writer.writerow(["Preuves"])
-        writer.writerow(["#", "Document", "Article", "Section", "Source"])
-        for i, ev in enumerate(_clean_evidence(answer.evidence), 1):
-            writer.writerow(
-                [
-                    i,
-                    ev.document_name,
-                    ev.article or "",
-                    ev.section or "",
-                    ev.source_kind,
                 ]
             )
         if answer.warnings:

@@ -9,6 +9,7 @@ fallback.
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -16,9 +17,11 @@ import backend.ingestion.classification as classification
 from backend.core.models import AuthorityLevel, DocumentType
 from backend.ingestion.classification import (
     _DOMAIN_KEYWORDS,
+    _normalize,
     domain_slug,
     infer_legal_domains,
     load_domain_keywords,
+    load_domain_labels,
 )
 from backend.ingestion.loaders import ExtractedDocument
 from backend.ingestion.pipeline import IngestionPipeline
@@ -63,13 +66,115 @@ def test_load_domain_keywords_corrupt_falls_back_to_builtin(tmp_path):
     corrupt = tmp_path / "legal_domains.json"
     corrupt.write_text("{not json", encoding="utf-8")
     loaded = load_domain_keywords(corrupt)
-    assert loaded == {d: list(kws) for d, kws in _DOMAIN_KEYWORDS.items()}
+    # The embedded fallback is accent-folded at load time, like the file.
+    assert loaded == {
+        d: [_normalize(kw) for kw in e["keywords"]] for d, e in _DOMAIN_KEYWORDS.items()
+    }
 
 
 def test_load_domain_keywords_missing_falls_back_to_builtin(tmp_path):
     missing = tmp_path / "does-not-exist.json"
     loaded = load_domain_keywords(missing)
-    assert loaded == {d: list(kws) for d, kws in _DOMAIN_KEYWORDS.items()}
+    assert loaded == {
+        d: [_normalize(kw) for kw in e["keywords"]] for d, e in _DOMAIN_KEYWORDS.items()
+    }
+
+
+def test_load_domain_keywords_labeled_shape(tmp_path):
+    """The labeled shape loads with keywords unchanged (labels ignored here)."""
+    taxonomy = tmp_path / "legal_domains.json"
+    taxonomy.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "domains": {
+                    "space_law": {"label": "Droit spatial", "keywords": ["satellite", "orbite"]}
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert load_domain_keywords(taxonomy) == {"space_law": ["satellite", "orbite"]}
+
+
+def test_load_domain_labels_both_shapes(tmp_path):
+    """Labels come from the file; legacy entries fall back to a humanized slug."""
+    taxonomy = tmp_path / "legal_domains.json"
+    taxonomy.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "domains": {
+                    "civil_law": {"label": "Droit civil", "keywords": ["civil"]},
+                    "space_law": ["satellite"],  # legacy shape: no label
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert load_domain_labels(taxonomy) == {
+        "civil_law": "Droit civil",
+        "space_law": "Space law",
+    }
+
+
+def test_load_domain_labels_corrupt_falls_back_to_builtin(tmp_path):
+    corrupt = tmp_path / "legal_domains.json"
+    corrupt.write_text("{not json", encoding="utf-8")
+    assert load_domain_labels(corrupt) == {
+        d: e["label"] for d, e in _DOMAIN_KEYWORDS.items()
+    }
+
+
+def test_invalidate_domain_cache_forces_reload(tmp_path):
+    taxonomy = tmp_path / "legal_domains.json"
+    taxonomy.write_text(
+        json.dumps({"version": 1, "domains": {"space_law": ["satellite"]}}),
+        encoding="utf-8",
+    )
+    assert load_domain_keywords(taxonomy) == {"space_law": ["satellite"]}
+    first_mtime = os.stat(taxonomy).st_mtime
+    taxonomy.write_text(
+        json.dumps({"version": 1, "domains": {"sea_law": ["navire"]}}),
+        encoding="utf-8",
+    )
+    # Pin the mtime back to the cached value so only the explicit
+    # invalidation can trigger a reload.
+    os.utime(taxonomy, (first_mtime, first_mtime))
+    # Still cached until invalidated.
+    assert load_domain_keywords(taxonomy) == {"space_law": ["satellite"]}
+    classification.invalidate_domain_cache()
+    try:
+        assert load_domain_keywords(taxonomy) == {"sea_law": ["navire"]}
+    finally:
+        classification.invalidate_domain_cache()
+
+
+def test_domain_cache_reloads_on_mtime_change(tmp_path):
+    """A taxonomy rewrite by another process is picked up via the file mtime."""
+    taxonomy = tmp_path / "legal_domains.json"
+    taxonomy.write_text(
+        json.dumps({"version": 1, "domains": {"space_law": ["satellite"]}}),
+        encoding="utf-8",
+    )
+    try:
+        assert load_domain_keywords(taxonomy) == {"space_law": ["satellite"]}
+        taxonomy.write_text(
+            json.dumps({"version": 1, "domains": {"sea_law": ["navire"]}}),
+            encoding="utf-8",
+        )
+        # Bump the mtime explicitly (fast successive writes may share one).
+        bumped = os.stat(taxonomy).st_mtime + 1
+        os.utime(taxonomy, (bumped, bumped))
+        # No invalidate_domain_cache() call: the mtime change is enough.
+        assert load_domain_keywords(taxonomy) == {"sea_law": ["navire"]}
+        # Labels share the cache mechanism.
+        assert load_domain_labels(taxonomy) == {"sea_law": "Sea law"}
+        # A deleted file is "no mtime change": the last known entries are served.
+        taxonomy.unlink()
+        assert load_domain_keywords(taxonomy) == {"sea_law": ["navire"]}
+    finally:
+        classification.invalidate_domain_cache()
 
 
 def test_infer_legal_domains_recognizes_brand_new_domain(monkeypatch, tmp_path):
@@ -93,6 +198,79 @@ def test_infer_legal_domains_recognizes_brand_new_domain(monkeypatch, tmp_path):
         assert infer_legal_domains("contrat de travail") == ["labor_code"]
     finally:
         classification._DOMAINS_CACHE.pop(f"{taxonomy}#domain_keywords", None)
+
+
+def test_accented_keywords_are_folded_at_load(tmp_path):
+    """Admin-added accented keywords are stored accent-folded (haystack side too)."""
+    taxonomy = tmp_path / "legal_domains.json"
+    taxonomy.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "domains": {
+                    "labor_code": {"label": "Droit du travail", "keywords": ["préavis"]},
+                    "commercial_law": ["société"],  # legacy shape
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    try:
+        assert load_domain_keywords(taxonomy) == {
+            "labor_code": ["preavis"],
+            "commercial_law": ["societe"],
+        }
+    finally:
+        classification.invalidate_domain_cache()
+
+
+def test_infer_legal_domains_matches_accented_keywords(monkeypatch, tmp_path):
+    """An accented keyword matches accented AND unaccented document text."""
+    taxonomy = tmp_path / "legal_domains.json"
+    taxonomy.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "domains": {
+                    "labor_code": ["préavis"],
+                    "commercial_law": ["société"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(classification, "_DEFAULT_DOMAINS_PATH", taxonomy)
+    try:
+        assert infer_legal_domains("rupture du contrat avec preavis") == ["labor_code"]
+        assert infer_legal_domains("rupture du contrat avec préavis") == ["labor_code"]
+        assert infer_legal_domains("constitution d une societe") == ["commercial_law"]
+        assert infer_legal_domains("constitution d'une société") == ["commercial_law"]
+    finally:
+        classification.invalidate_domain_cache()
+
+
+def test_load_legal_domains_picks_up_taxonomy_change(monkeypatch, tmp_path):
+    """constants.load_legal_domains re-derives from the taxonomy on each call,
+    so an mtime-detected reload propagates without a restart."""
+    from backend.core.constants import load_legal_domains
+
+    taxonomy = tmp_path / "legal_domains.json"
+    taxonomy.write_text(
+        json.dumps({"version": 1, "domains": {"civil_law": ["civil"]}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(classification, "_DEFAULT_DOMAINS_PATH", taxonomy)
+    try:
+        assert "space_law" not in load_legal_domains()
+        taxonomy.write_text(
+            json.dumps({"version": 1, "domains": {"space_law": ["satellite"]}}),
+            encoding="utf-8",
+        )
+        bumped = os.stat(taxonomy).st_mtime + 1
+        os.utime(taxonomy, (bumped, bumped))
+        assert "space_law" in load_legal_domains()
+    finally:
+        classification.invalidate_domain_cache()
 
 
 # ---------------------------------------------------------------------------

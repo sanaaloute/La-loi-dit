@@ -17,7 +17,7 @@ dependencies. Loaders raise `IngestionError` on unreadable files and return an
 
 | Format | Extensions | Loader | Notes |
 |---|---|---|---|
-| PDF | `.pdf` | `pypdf` | Per-page text; textless pages recorded in `metadata["ocr_needed_pages"]`; best-effort OCR over embedded page images when pytesseract+Pillow are importable (never fatal). |
+| PDF | `.pdf` | PyMuPDF | Per-page text; pages with little/no text (scanned pages) recorded in `metadata["ocr_needed_pages"]` and OCR'd via PaddleOCR when available (best-effort, never fatal — see "Scanned PDFs (OCR)" below). |
 | DOCX | `.docx` | `python-docx` | Paragraphs + table cells (`a | b | c` lines). |
 | HTML | `.html`, `.htm`, or `http(s)://` URL | BeautifulSoup + httpx | script/style/nav/header/footer stripped; page title kept in metadata. |
 | Text | `.txt` | stdlib | Encoding-tolerant (UTF-8, UTF-8-BOM, cp1252, latin-1). |
@@ -147,11 +147,54 @@ when `legal_graph_enabled` is off. See
   actualités feed, LégiBurkina, Assemblée Nationale, Portail du Gouvernement.
   Fully offline-safe.
 
+## Scanned PDFs (OCR)
+
+Pages whose extracted text is empty or below 20 characters are treated as
+scanned: `load_pdf` re-renders them at 300 dpi with PyMuPDF and recognizes
+them with **PaddleOCR** (French, CPU). Outcomes land in metadata:
+`ocr_needed_pages`, `ocr_available`, `ocr_recovered_pages`,
+`ocr_skipped_pages`.
+
+**Process isolation:** paddle runs only in a child process
+(`python -m backend.ingestion.ocr_worker`, one batch per document), driven by
+`backend/ingestion/ocr.py::ocr_images`. paddlepaddle and ctranslate2
+(faster-whisper STT) segfault the interpreter when their native stacks share
+a process — observed in production killing uvicorn workers mid-request — so
+the API/worker processes must never import paddle. A crashed, timed-out or
+missing OCR child is non-fatal: text PDFs extract normally and scanned PDFs
+keep failing with the clear `No extractable text` error at ingest.
+
+Settings (env prefix `LEGAL_AI_`):
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `ocr_enabled` | `True` | Master switch for the OCR path. |
+| `ocr_lang` | `fr` | PaddleOCR recognition language. |
+| `ocr_models_dir` | `data_dir/ocr_models` | Model cache, exported as `PADDLE_PDX_CACHE_HOME` in the OCR child process. |
+| `ocr_max_pages` | `200` | Per-document cap on OCR'd pages (CPU cost guard). |
+| `ocr_subprocess_timeout_seconds` | `120` | Base budget for one OCR batch subprocess; the effective timeout adds 30 s per page. |
+| `ocr_det_model_name` | `PP-OCRv5_server_det` | Detection model dir under `<ocr_models_dir>/official_models`; passed explicitly (name + dir) so OCR works fully offline. |
+| `ocr_rec_model_name` | `latin_PP-OCRv5_mobile_rec` | Recognition model dir, same offline mechanism (must match `ocr_lang`). |
+
+Deployment (offline-first):
+
+1. Re-run `scripts/download_wheels.sh` after pulling this change — it fetches
+   the cp312 linux wheels for the new requirements (PyMuPDF, paddlepaddle,
+   paddleocr, Pillow, opencv-contrib-python-headless and their deps).
+2. Pre-download the OCR models (once, on a networked machine) into the models
+   dir so the container initializes offline:
+   `PADDLE_PDX_CACHE_HOME=data/ocr_models python -c "from paddleocr import PaddleOCR; PaddleOCR(lang='fr', device='cpu')"`
+   The compose stack mounts `./data` at `/app/data`, so the default dir is
+   already persistent.
+3. The Docker build installs `libgomp1` (OpenMP runtime paddlepaddle needs)
+   and swaps paddlex's pinned `opencv-contrib-python` for the headless build
+   (same cv2 API, no libgl system dependency).
+
+The agent-facing `ocr` tool (`backend/tools/ocr.py`) uses the same wrapper for
+image files and reports a graceful error when OCR is unavailable.
+
 ## Known limitations (documented future work)
 
-- **OCR path is dormant**: `pytesseract` and `Pillow` are not in
-  `requirements.txt`; PDF pages with no extractable text are recorded
-  (`ocr_needed_pages`) but not OCR'd unless both packages are installed.
 - **`.doc` unsupported** (only `.docx`); no image loaders.
 - **No layout-aware parser** (no Docling/Unstructured): two-column layouts,
   scanned gazettes and complex tables extract as flat text.

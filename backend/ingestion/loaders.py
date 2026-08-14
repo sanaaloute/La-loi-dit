@@ -1,8 +1,8 @@
 """Document loaders: PDF, DOCX, HTML, plain text, Markdown and CSV.
 
-All third-party imports (pypdf, python-docx, BeautifulSoup, pytesseract,
-Pillow, httpx) happen lazily inside the loader functions so this module
-imports cleanly even when optional dependencies are missing. Loaders raise
+All third-party imports (PyMuPDF, python-docx, BeautifulSoup, Pillow, httpx)
+happen lazily inside the loader functions so this module imports cleanly even
+when optional dependencies are missing. Loaders raise
 :class:`backend.core.exceptions.IngestionError` on unreadable files.
 """
 
@@ -11,7 +11,10 @@ from __future__ import annotations
 import asyncio
 import csv
 import io
+import logging
 import re
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -19,7 +22,12 @@ from pydantic import BaseModel, Field
 
 from backend.core.exceptions import IngestionError
 
+logger = logging.getLogger(__name__)
+
 _URL_RE = re.compile(r"^https?://", re.IGNORECASE)
+
+#: Pages with less extracted text than this are treated as scanned and OCR'd.
+_OCR_TEXT_THRESHOLD = 20
 
 #: Extensions dispatched by :func:`load_any`.
 SUPPORTED_EXTENSIONS = {
@@ -54,80 +62,85 @@ def _read_text_file(path: Path) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
-def _ocr_available() -> bool:
-    """True when pytesseract and Pillow are both importable."""
-    try:
-        import pytesseract  # noqa: F401
-        from PIL import Image  # noqa: F401
-    except ImportError:
-        return False
-    return True
-
-
 def load_pdf(path: Union[str, Path]) -> ExtractedDocument:
-    """Extract per-page text from a PDF via pypdf.
+    """Extract per-page text from a PDF via PyMuPDF.
 
-    Pages that yield no text are recorded in ``metadata["ocr_needed_pages"]``.
-    When pytesseract and Pillow are importable, OCR over embedded page images
-    is attempted best-effort (never fatal) and the outcome noted in metadata.
+    Pages yielding little or no text (scanned pages) are recorded in
+    ``metadata["ocr_needed_pages"]``; when OCR is available and enabled they
+    are re-rendered at 300 dpi and recognized with PaddleOCR (best-effort,
+    never fatal), with the outcome noted in ``metadata["ocr_recovered_pages"]``
+    / ``metadata["ocr_skipped_pages"]``.
     """
     p = Path(path)
     if not p.is_file():
         raise IngestionError(f"PDF not found: {p}")
     try:
-        from pypdf import PdfReader
-    except ImportError as exc:
-        raise IngestionError("pypdf is required to load PDF files") from exc
+        import pymupdf
+    except ImportError:
+        try:
+            import fitz as pymupdf  # older PyMuPDF exposes only the fitz module
+        except ImportError as exc:
+            raise IngestionError("PyMuPDF is required to load PDF files") from exc
 
     try:
-        reader = PdfReader(str(p))
-        pages: list[str] = []
-        for page in reader.pages:
-            try:
-                pages.append((page.extract_text() or "").strip())
-            except Exception:
-                pages.append("")  # a broken page must not kill the document
+        with pymupdf.open(str(p)) as pdf:
+            pages: list[str] = []
+            for page in pdf:
+                try:
+                    pages.append((page.get_text() or "").strip())
+                except Exception:
+                    pages.append("")  # a broken page must not kill the document
+
+            metadata: dict[str, Any] = {"loader": "pdf", "page_count": len(pages), "path": str(p)}
+            ocr_needed = [i + 1 for i, text in enumerate(pages) if len(text) < _OCR_TEXT_THRESHOLD]
+            if ocr_needed:
+                metadata["ocr_needed_pages"] = ocr_needed
+                _ocr_scanned_pages(pdf, pages, ocr_needed, metadata)
     except IngestionError:
         raise
     except Exception as exc:
         raise IngestionError(f"Failed to read PDF {p}: {exc}") from exc
 
-    metadata: dict[str, Any] = {"loader": "pdf", "page_count": len(pages), "path": str(p)}
-    ocr_needed = [i + 1 for i, text in enumerate(pages) if not text]
-    if ocr_needed:
-        metadata["ocr_needed_pages"] = ocr_needed
-        metadata["ocr_available"] = _ocr_available()
-        if metadata["ocr_available"]:
-            _best_effort_ocr(reader, pages, ocr_needed, metadata)
-
     return ExtractedDocument(name=p.name, text="\n\n".join(pages), pages=pages, metadata=metadata)
 
 
-def _best_effort_ocr(reader: Any, pages: list[str], ocr_needed: list[int], metadata: dict[str, Any]) -> None:
-    """OCR images embedded in textless pages. Never raises."""
-    try:
-        import pytesseract
-    except ImportError:
+def _ocr_scanned_pages(pdf: Any, pages: list[str], ocr_needed: list[int], metadata: dict[str, Any]) -> None:
+    """OCR textless pages with PaddleOCR. Best-effort, never raises."""
+    from backend.ingestion import ocr as ocr_engine
+
+    metadata["ocr_available"] = ocr_engine.ocr_available()
+    if not metadata["ocr_available"]:
         return
-    metadata["ocr_attempted"] = True
-    ocr_ok: list[int] = []
-    for page_no in ocr_needed:
-        try:
-            fragments = []
-            for image_file in reader.pages[page_no - 1].images:
-                image = image_file.image  # PIL Image (Pillow present, checked earlier)
-                try:
-                    fragments.append(pytesseract.image_to_string(image, lang="fra"))
-                except Exception:
-                    fragments.append(pytesseract.image_to_string(image))
-            text = "\n".join(f for f in fragments if f and f.strip()).strip()
-            if text:
+    from backend.core.config import get_settings
+
+    max_pages = get_settings().ocr_max_pages
+    to_process, skipped = ocr_needed[:max_pages], ocr_needed[max_pages:]
+    if skipped:
+        logger.warning("OCR page cap (%d) reached; skipping pages %s", max_pages, skipped)
+        metadata["ocr_skipped_pages"] = skipped
+    # Render the pages to PNG files, then OCR the whole batch in a single
+    # child process (paddle never loads in this process — see ingestion/ocr.py).
+    tmp_dir = Path(tempfile.mkdtemp(prefix="ocr_pages_"))
+    try:
+        rendered: list[tuple[int, Path]] = []
+        for page_no in to_process:
+            try:
+                image_path = tmp_dir / f"page_{page_no}.png"
+                image_path.write_bytes(pdf[page_no - 1].get_pixmap(dpi=300).tobytes("png"))
+                rendered.append((page_no, image_path))
+            except Exception:
+                continue  # a broken page must not kill the document
+        results = ocr_engine.ocr_images([image_path for _, image_path in rendered])
+        recovered: list[int] = []
+        for page_no, image_path in rendered:
+            text = results.get(str(image_path), "").strip()
+            if len(text) > len(pages[page_no - 1]):
                 pages[page_no - 1] = text
-                ocr_ok.append(page_no)
-        except Exception:
-            continue
-    if ocr_ok:
-        metadata["ocr_recovered_pages"] = ocr_ok
+                recovered.append(page_no)
+        if recovered:
+            metadata["ocr_recovered_pages"] = recovered
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def load_docx(path: Union[str, Path]) -> ExtractedDocument:

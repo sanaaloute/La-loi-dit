@@ -102,6 +102,8 @@ body {
 /* Markdown body for assistant answers */
 .markdown-body {
   @apply text-sm leading-relaxed text-gray-700;
+  /* Long URLs / citations must wrap inside chat bubbles on small screens. */
+  overflow-wrap: anywhere;
 }
 
 .markdown-body p {

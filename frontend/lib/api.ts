@@ -259,6 +259,7 @@ export interface PipelineNode {
 export const PIPELINE_NODES: PipelineNode[] = [
   { id: "input_guardrail", label: "Garde-fou d'entrée" },
   { id: "refusal", label: "Refus" },
+  { id: "query_router", label: "Analyse de la question" },
   { id: "planner", label: "Planificateur" },
   { id: "context_agent", label: "Agent de contexte" },
   { id: "memory_agent", label: "Agent mémoire" },
@@ -378,12 +379,77 @@ function authHeaders(token?: string | null): Record<string, string> {
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
+// ---------------------------------------------------------------------------
+// Token renewal (sliding session via POST /auth/refresh)
+// ---------------------------------------------------------------------------
+
+// Renew the token when it has less than this many seconds left.
+const REFRESH_THRESHOLD_S = 5 * 60;
+
+function tokenSecondsLeft(token: string): number | null {
+  const payload = parseJwtPayload(token);
+  if (!payload?.exp) return null;
+  return payload.exp - Date.now() / 1000;
+}
+
+let refreshInFlight: Promise<string | null> | null = null;
+
+async function requestRefresh(token: string): Promise<string | null> {
+  try {
+    const res = await fetch(apiUrl("/auth/refresh"), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      // 401: the session is over (expired or displaced by another login).
+      if (res.status === 401) clearToken();
+      return null;
+    }
+    const data = (await res.json()) as TokenResponse;
+    setToken(data.access_token);
+    return data.access_token;
+  } catch {
+    // Network error: keep the current token, it is still valid for a while.
+    return null;
+  }
+}
+
+/**
+ * Return a valid token, renewing it through `/auth/refresh` when it is about
+ * to expire. Returns null when no token is stored or the session is over
+ * (the user must log in again).
+ */
+export function ensureFreshToken(): Promise<string | null> {
+  if (typeof window === "undefined") return Promise.resolve(null);
+  const token = window.localStorage.getItem(TOKEN_KEY);
+  if (!token) return Promise.resolve(null);
+  const secondsLeft = tokenSecondsLeft(token);
+  if (secondsLeft === null || secondsLeft > REFRESH_THRESHOLD_S) {
+    return Promise.resolve(getToken());
+  }
+  if (secondsLeft <= 0) {
+    clearToken();
+    return Promise.resolve(null);
+  }
+  if (!refreshInFlight) {
+    refreshInFlight = requestRefresh(token).finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+}
+
 interface ApiFetchOptions extends RequestInit {
   token?: string | null;
 }
 
 async function apiFetch(path: string, options: ApiFetchOptions = {}): Promise<Response> {
   const { token, ...fetchOptions } = options;
+  // Renew a soon-to-expire token before the request so a valid session never
+  // dies mid-call (auth endpoints are excluded: they manage tokens directly).
+  if (!path.startsWith("/auth/") && (token ?? getToken())) {
+    await ensureFreshToken();
+  }
   const headers: Record<string, string> = {
     ...(fetchOptions.headers as Record<string, string> ?? {}),
     ...authHeaders(token),
@@ -655,6 +721,52 @@ export async function cancelChat(sessionId: string, token?: string | null): Prom
   }
 }
 
+/**
+ * Transcribe a recorded audio blob (voice input for the chat composer).
+ * The returned text is meant to be reviewed by the user before sending.
+ */
+export async function transcribeAudio(blob: Blob, token?: string | null): Promise<{ text: string }> {
+  // Give the file a real extension: the backend sniffs the audio format
+  // from the filename (MediaRecorder blobs have none).
+  const ext = blob.type.includes("ogg") ? "ogg" : blob.type.includes("mp4") ? "m4a" : "webm";
+  const form = new FormData();
+  form.append("file", blob, `vocal.${ext}`);
+  let res: Response;
+  try {
+    // A misconfigured STT provider can hang — fail visibly instead of
+    // leaving the "Transcription en cours…" state forever. Manual fallback:
+    // AbortSignal.timeout is missing on older mobile browsers.
+    res = await apiFetch("/chat/transcribe", {
+      method: "POST",
+      body: form,
+      token,
+      signal: timeoutSignal(120_000),
+    });
+  } catch (err) {
+    if (err instanceof DOMException && (err.name === "TimeoutError" || err.name === "AbortError")) {
+      throw new Error("La transcription a expiré. Réessayez avec un extrait plus court.");
+    }
+    console.error("Transcription request failed", err);
+    throw new Error("Impossible de joindre le serveur de transcription. Vérifiez votre connexion puis réessayez.");
+  }
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `La transcription a échoué (${res.status})`, res.status);
+  }
+  return (await res.json()) as { text: string };
+}
+
+/** AbortSignal.timeout with a fallback for browsers that lack it. */
+function timeoutSignal(ms: number): AbortSignal | undefined {
+  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+    return AbortSignal.timeout(ms);
+  }
+  if (typeof AbortController === "undefined") return undefined;
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(new DOMException("Transcription timeout", "TimeoutError")), ms);
+  return controller.signal;
+}
+
 export class ApiError extends Error {
   status: number;
 
@@ -800,6 +912,19 @@ export interface AdminUsageResponse {
   totals: Record<string, number>;
 }
 
+export interface TierBudgets {
+  daily_token_budget: number;
+  daily_request_budget: number;
+}
+
+export interface TierBudgetsResponse {
+  effective: Record<Tier, TierBudgets>;
+  defaults: Record<Tier, TierBudgets>;
+}
+
+/** PATCH body: per tier, only the fields to change. */
+export type TierBudgetsPatch = Partial<Record<Tier, Partial<TierBudgets>>>;
+
 export interface ProviderModelInfo {
   id: string;
   label: string;
@@ -835,6 +960,17 @@ export interface FolderCreateResponse {
   created: boolean;
 }
 
+/** One legal-domain taxonomy entry (slug, French label, keyword stems). */
+export interface DomainInfo {
+  slug: string;
+  label: string;
+  keywords: string[];
+}
+
+export interface DomainsResponse {
+  domains: DomainInfo[];
+}
+
 export interface MetadataSuggestion {
   document_name: string;
   authority: string;
@@ -850,6 +986,7 @@ export interface MetadataSuggestion {
 export interface MetadataSuggestionResponse {
   suggestion: MetadataSuggestion;
   available_domains: string[];
+  domain_labels: Record<string, string>; // slug -> French display label
 }
 
 /** Editable ingestion metadata sent with the upload (empty fields omitted). */
@@ -958,10 +1095,21 @@ export const adminApi = {
       json: body,
     }),
   usage: (days = 30) => adminRequest<AdminUsageResponse>(`/usage?days=${days}`),
+  tierBudgets: () => adminRequest<TierBudgetsResponse>("/settings/tier-budgets"),
+  patchTierBudgets: (body: TierBudgetsPatch) =>
+    adminRequest<TierBudgetsResponse>("/settings/tier-budgets", {
+      method: "PATCH",
+      json: body,
+    }),
   providers: () => adminRequest<ProvidersResponse>("/providers"),
   folders: () => adminRequest<FoldersResponse>("/documents/folders"),
   createFolder: (name: string) =>
     adminRequest<FolderCreateResponse>("/documents/folders", { method: "POST", json: { name } }),
+  getDomains: () => adminRequest<DomainsResponse>("/domains"),
+  createDomain: (body: { slug: string; label: string; keywords: string[] }) =>
+    adminRequest<DomainInfo>("/domains", { method: "POST", json: body }),
+  deleteDomain: (slug: string) =>
+    adminRequest<DomainsResponse>(`/domains/${encodeURIComponent(slug)}`, { method: "DELETE" }),
   suggestMetadata: (file: File) => {
     const form = new FormData();
     form.append("file", file);

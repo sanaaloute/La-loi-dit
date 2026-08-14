@@ -381,6 +381,8 @@ NEW_ADMIN_ROUTES = [
     ("get", "/api/v1/admin/users"),
     ("get", "/api/v1/admin/usage"),
     ("get", "/api/v1/admin/providers"),
+    ("get", "/api/v1/admin/settings/tier-budgets"),
+    ("patch", "/api/v1/admin/settings/tier-budgets"),
     ("get", "/api/v1/admin/documents/folders"),
     ("post", "/api/v1/admin/documents/folders"),
     ("post", "/api/v1/admin/documents/metadata-suggestion"),
@@ -396,6 +398,8 @@ def _route_kwargs(method: str, path: str) -> dict:
         return {"files": {"file": ("note.txt", b"bonjour le monde", "text/plain")}}
     if method == "post" and path.endswith("/folders"):
         return {"json": {"name": "travail"}}
+    if method == "patch" and path.endswith("tier-budgets"):
+        return {"json": {"gratuit": {"daily_token_budget": 2_000_000}}}
     if method == "patch":
         return {"json": {"tier": "pro"}}
     return {}
@@ -497,6 +501,102 @@ def test_admin_usage_aggregates_window(client):
     assert data["totals"]["tokens_in"] >= 120
     assert data["totals"]["tokens_out"] >= 60
     assert data["totals"]["requests"] >= 2
+
+
+# ---------------------------------------------------------------------------
+# GET/PATCH /api/v1/admin/settings/tier-budgets
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def clean_budget_overrides():
+    """The catalog override cache is module-level: never leak it across tests."""
+    from backend.core import catalog
+
+    yield
+    catalog.set_budget_overrides({})
+
+
+def test_admin_tier_budgets_returns_defaults(client, clean_budget_overrides):
+    response = client.get("/api/v1/admin/settings/tier-budgets", headers=_headers(Role.ADMIN))
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["defaults"]["gratuit"] == {
+        "daily_token_budget": 1_000_000,
+        "daily_request_budget": 50,
+    }
+    assert data["defaults"]["pro"]["daily_token_budget"] == 10_000_000
+    assert data["defaults"]["cabinet"]["daily_token_budget"] == 100_000_000
+    # No overrides persisted yet: effective == defaults.
+    assert data["effective"] == data["defaults"]
+
+
+def test_admin_tier_budgets_patch_updates_effective_budget(client, clean_budget_overrides):
+    from backend.core import catalog
+
+    headers = _headers(Role.ADMIN)
+    response = client.patch(
+        "/api/v1/admin/settings/tier-budgets",
+        json={"gratuit": {"daily_token_budget": 2_000_000}},
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["effective"]["gratuit"]["daily_token_budget"] == 2_000_000
+    # Untouched fields and tiers keep their defaults.
+    assert data["effective"]["gratuit"]["daily_request_budget"] == 50
+    assert data["effective"]["pro"]["daily_token_budget"] == 10_000_000
+    assert data["defaults"]["gratuit"]["daily_token_budget"] == 1_000_000
+
+    # The hot path (catalog.get_tier) sees the override without a restart.
+    assert catalog.get_tier("gratuit")["daily_token_budget"] == 2_000_000
+
+    # Persisted in app_settings.
+    store = client.app.state.ctx.user_store
+    stored = asyncio.run(store.get_setting(catalog.TIER_BUDGETS_SETTING_KEY))
+    assert json.loads(stored) == {"gratuit": {"daily_token_budget": 2_000_000}}
+
+    # /usage/me reports the overridden budget for a gratuit user.
+    record = _create_db_user(client)
+    token = create_access_token(
+        record.email, Role.USER, get_settings(), user_id=record.id, tier="gratuit"
+    )
+    usage = client.get("/api/v1/usage/me", headers={"Authorization": f"Bearer {token}"})
+    assert usage.status_code == 200, usage.text
+    assert usage.json()["daily_budget"] == 2_000_000
+
+    # A second PATCH merges instead of replacing.
+    response = client.patch(
+        "/api/v1/admin/settings/tier-budgets",
+        json={"gratuit": {"daily_request_budget": 25}},
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    effective = response.json()["effective"]["gratuit"]
+    assert effective == {"daily_token_budget": 2_000_000, "daily_request_budget": 25}
+
+
+def test_admin_tier_budgets_rejects_invalid_payloads(client, clean_budget_overrides):
+    headers = _headers(Role.ADMIN)
+    path = "/api/v1/admin/settings/tier-budgets"
+    # Unknown tier.
+    assert client.patch(
+        path, json={"gold": {"daily_token_budget": 5}}, headers=headers
+    ).status_code == 400
+    # Non-positive values.
+    assert client.patch(
+        path, json={"gratuit": {"daily_token_budget": 0}}, headers=headers
+    ).status_code == 400
+    assert client.patch(
+        path, json={"pro": {"daily_request_budget": -10}}, headers=headers
+    ).status_code == 400
+    # Empty body.
+    assert client.patch(path, json={}, headers=headers).status_code == 400
+    # Nothing was persisted.
+    from backend.core import catalog
+
+    store = client.app.state.ctx.user_store
+    assert asyncio.run(store.get_setting(catalog.TIER_BUDGETS_SETTING_KEY)) is None
 
 
 # ---------------------------------------------------------------------------
@@ -666,6 +766,22 @@ def test_admin_upload_rejects_invalid_metadata_json(client):
     assert response.status_code == 400
 
 
+def test_admin_upload_rejects_oversized_file(tmp_path, monkeypatch):
+    # Shrink the admin cap so the test stays small; a file past it must get a
+    # 413 before anything is written or ingested.
+    monkeypatch.setenv("LEGAL_AI_MAX_UPLOAD_BYTES_ADMIN", "64")
+    with _make_client(tmp_path, monkeypatch) as client:
+        response = client.post(
+            "/api/v1/admin/documents/upload",
+            files={"file": ("gros.txt", "Article 1: " + "x" * 1024, "text/plain")},
+            headers=_headers(Role.ADMIN),
+        )
+        assert response.status_code == 413
+        assert "volumineux" in response.json()["detail"]
+        data_dir = client.app.state.ctx.settings.data_dir
+        assert not (data_dir / "legal_docs" / "gros.txt").exists()
+
+
 # ---------------------------------------------------------------------------
 # POST /api/v1/admin/documents/metadata-suggestion
 # ---------------------------------------------------------------------------
@@ -730,6 +846,8 @@ def test_metadata_suggestion_merges_llm_classification(client):
     # Domains are filtered to the known taxonomy.
     assert suggestion["legal_domains"] == ["labor_code"]
     assert "labor_code" in data["available_domains"]
+    # Slug -> French label map ships with the suggestion.
+    assert data["domain_labels"]["labor_code"] == "Droit du travail"
     _assert_nothing_ingested(client)
 
 
@@ -788,3 +906,138 @@ def test_admin_delete_document_forwards_to_pipeline(client):
 
     # The document is gone from the registry and the store.
     assert client.get(f"/api/v1/documents/{result.document_id}").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# GET/POST/DELETE /api/v1/admin/domains
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def _make_domains_client(tmp_path, monkeypatch, taxonomy):
+    """Client whose legal-domain taxonomy is a tmp file (never the bundled one)."""
+    domains_path = tmp_path / "legal_domains.json"
+    domains_path.write_text(
+        json.dumps({"version": 1, "domains": taxonomy}), encoding="utf-8"
+    )
+    monkeypatch.setenv("LEGAL_AI_LEGAL_DOMAINS_PATH", str(domains_path))
+    with _make_client(tmp_path, monkeypatch) as test_client:
+        yield test_client, domains_path
+
+
+@pytest.fixture
+def domains_client(tmp_path, monkeypatch):
+    taxonomy = {
+        "civil_law": {"label": "Droit civil", "keywords": ["civil", "contrat"]},
+        "legacy_law": ["coutume"],  # legacy shape: bare keyword list
+    }
+    with _make_domains_client(tmp_path, monkeypatch, taxonomy) as pair:
+        yield pair
+
+
+def test_list_domains_returns_labels(client):
+    response = client.get("/api/v1/admin/domains", headers=_headers(Role.ADMIN))
+    assert response.status_code == 200, response.text
+    domains = response.json()["domains"]
+    by_slug = {d["slug"]: d for d in domains}
+    # Bundled taxonomy: French labels and keywords are exposed.
+    assert by_slug["civil_law"]["label"] == "Droit civil"
+    assert by_slug["traffic_law"]["label"] == "Droit de la circulation"
+    assert by_slug["civil_law"]["keywords"]
+    assert [d["slug"] for d in domains] == sorted(by_slug)
+
+
+def test_list_domains_humanizes_legacy_entries(domains_client):
+    client, _ = domains_client
+    response = client.get("/api/v1/admin/domains", headers=_headers(Role.ADMIN))
+    assert response.status_code == 200, response.text
+    by_slug = {d["slug"]: d for d in response.json()["domains"]}
+    assert by_slug["civil_law"]["label"] == "Droit civil"
+    assert by_slug["legacy_law"]["label"] == "Legacy law"  # no label: humanized slug
+
+
+def test_create_domain_persists(domains_client):
+    client, path = domains_client
+    response = client.post(
+        "/api/v1/admin/domains",
+        json={"slug": "droit_social", "label": "Droit social", "keywords": ["social", " syndicat "]},
+        headers=_headers(Role.ADMIN),
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "slug": "droit_social",
+        "label": "Droit social",
+        "keywords": ["social", "syndicat"],
+    }
+    # Persisted in the labeled shape; existing entries preserved.
+    written = json.loads(path.read_text(encoding="utf-8"))["domains"]
+    assert written["droit_social"] == {"label": "Droit social", "keywords": ["social", "syndicat"]}
+    assert written["civil_law"]["label"] == "Droit civil"
+    # Cache invalidated: immediately visible.
+    again = client.get("/api/v1/admin/domains", headers=_headers(Role.ADMIN))
+    assert "droit_social" in {d["slug"] for d in again.json()["domains"]}
+
+
+def test_create_domain_duplicate_rejected(domains_client):
+    client, _ = domains_client
+    response = client.post(
+        "/api/v1/admin/domains",
+        json={"slug": "civil_law", "label": "Droit civil", "keywords": []},
+        headers=_headers(Role.ADMIN),
+    )
+    assert response.status_code == 409
+
+
+def test_create_domain_invalid_slug_rejected(domains_client):
+    client, _ = domains_client
+    for bad in ("Droit civil", "droit-civil", "droit/civil", ""):
+        response = client.post(
+            "/api/v1/admin/domains",
+            json={"slug": bad, "label": "X", "keywords": []},
+            headers=_headers(Role.ADMIN),
+        )
+        assert response.status_code == 400, bad
+
+
+def test_create_domain_requires_label(domains_client):
+    client, _ = domains_client
+    response = client.post(
+        "/api/v1/admin/domains",
+        json={"slug": "droit_social", "label": "  ", "keywords": []},
+        headers=_headers(Role.ADMIN),
+    )
+    assert response.status_code == 400
+
+
+def test_delete_domain_removes_it(domains_client):
+    client, path = domains_client
+    response = client.delete("/api/v1/admin/domains/legacy_law", headers=_headers(Role.ADMIN))
+    assert response.status_code == 200, response.text
+    assert "legacy_law" not in {d["slug"] for d in response.json()["domains"]}
+    written = json.loads(path.read_text(encoding="utf-8"))["domains"]
+    assert "legacy_law" not in written
+    assert "civil_law" in written
+
+
+def test_delete_domain_unknown_is_404(domains_client):
+    client, _ = domains_client
+    response = client.delete("/api/v1/admin/domains/nope", headers=_headers(Role.ADMIN))
+    assert response.status_code == 404
+
+
+def test_delete_domain_with_documents_rejected(domains_client):
+    client, _ = domains_client
+    data_dir = client.app.state.ctx.settings.data_dir
+    folder = data_dir / "legal_docs" / "civil_law"
+    folder.mkdir(parents=True)
+    (folder / "code-civil.txt").write_text("Article 1: ...", encoding="utf-8")
+    response = client.delete("/api/v1/admin/domains/civil_law", headers=_headers(Role.ADMIN))
+    assert response.status_code == 409
+
+
+def test_delete_domain_with_empty_folder_allowed(domains_client):
+    client, _ = domains_client
+    data_dir = client.app.state.ctx.settings.data_dir
+    (data_dir / "legal_docs" / "civil_law").mkdir(parents=True)
+    response = client.delete("/api/v1/admin/domains/civil_law", headers=_headers(Role.ADMIN))
+    assert response.status_code == 200, response.text

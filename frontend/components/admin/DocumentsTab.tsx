@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FolderPlus, Loader2, Sparkles, Trash2, Upload } from "lucide-react";
+import { FolderPlus, Loader2, Plus, Sparkles, Trash2, Upload, X } from "lucide-react";
 import ErrorCard from "@/components/ui/ErrorCard";
 import LoadingState from "@/components/ui/LoadingState";
 import {
   adminApi,
   type DocumentIngestResult,
   type DocumentMetadata,
+  type DomainInfo,
   type FolderInfo,
   type IngestionStatusResponse,
   type MetadataSuggestion,
@@ -15,6 +16,9 @@ import {
 import { EmptyState, INPUT_CLASS, PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS, SectionCard, StatusBadge, TableShell, Td, Th, THead, formatDateTime, formatNumber } from "./ui";
 
 const ACCEPTED_EXTENSIONS = ".pdf,.txt,.md,.markdown,.html,.htm";
+
+/** Admin upload cap — mirrors the backend's max_upload_bytes_admin (100 MB). */
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
 const AUTHORITY_OPTIONS: { value: string; label: string }[] = [
   { value: "", label: "—" },
@@ -81,6 +85,7 @@ export default function DocumentsTab() {
   const [newFolder, setNewFolder] = useState("");
   const [suggestion, setSuggestion] = useState<MetadataSuggestion | null>(null);
   const [availableDomains, setAvailableDomains] = useState<string[]>([]);
+  const [domainLabels, setDomainLabels] = useState<Record<string, string>>({});
   const [suggesting, setSuggesting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [creatingFolder, setCreatingFolder] = useState(false);
@@ -88,13 +93,35 @@ export default function DocumentsTab() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [result, setResult] = useState<DocumentIngestResult | null>(null);
 
+  // Legal-domain taxonomy management
+  const [domains, setDomains] = useState<DomainInfo[]>([]);
+  const [showDomainForm, setShowDomainForm] = useState(false);
+  const [newDomainSlug, setNewDomainSlug] = useState("");
+  const [newDomainLabel, setNewDomainLabel] = useState("");
+  const [newDomainKeywords, setNewDomainKeywords] = useState("");
+  const [creatingDomain, setCreatingDomain] = useState(false);
+  const [deletingDomain, setDeletingDomain] = useState<string | null>(null);
+  const [domainNotice, setDomainNotice] = useState<string | null>(null);
+
+  /** Apply a fresh taxonomy: chips, available slugs and slug -> label map. */
+  function applyDomains(list: DomainInfo[]) {
+    setDomains(list);
+    setAvailableDomains(list.map((d) => d.slug));
+    setDomainLabels(Object.fromEntries(list.map((d) => [d.slug, d.label])));
+  }
+
   async function load() {
     setLoading(true);
     setError(null);
     try {
-      const [s, f] = await Promise.all([adminApi.ingestionStatus(), adminApi.folders()]);
+      const [s, f, d] = await Promise.all([
+        adminApi.ingestionStatus(),
+        adminApi.folders(),
+        adminApi.getDomains(),
+      ]);
       setStatus(s);
       setFolders(f.folders);
+      applyDomains(d.domains);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Une erreur est survenue.");
     } finally {
@@ -116,7 +143,17 @@ export default function DocumentsTab() {
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    setFile(e.target.files?.[0] ?? null);
+    const selected = e.target.files?.[0] ?? null;
+    if (selected && selected.size > MAX_UPLOAD_BYTES) {
+      // Reject before any upload starts; mirrors the backend admin limit.
+      setFile(null);
+      setSuggestion(null);
+      setResult(null);
+      setActionError("Fichier trop volumineux (max 100 Mo).");
+      e.target.value = ""; // allow re-selecting the same file afterwards
+      return;
+    }
+    setFile(selected);
     // A new file invalidates the previous suggestion and result.
     setSuggestion(null);
     setResult(null);
@@ -142,6 +179,52 @@ export default function DocumentsTab() {
     }
   }
 
+  async function handleCreateDomain(e: React.FormEvent) {
+    e.preventDefault();
+    const slug = newDomainSlug.trim();
+    const label = newDomainLabel.trim();
+    if (!slug || !label) return;
+    setCreatingDomain(true);
+    setActionError(null);
+    setDomainNotice(null);
+    try {
+      const keywords = newDomainKeywords
+        .split(",")
+        .map((k) => k.trim())
+        .filter(Boolean);
+      await adminApi.createDomain({ slug, label, keywords });
+      applyDomains((await adminApi.getDomains()).domains);
+      setNewDomainSlug("");
+      setNewDomainLabel("");
+      setNewDomainKeywords("");
+      setShowDomainForm(false);
+      setDomainNotice(`Domaine « ${label} » ajouté.`);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Échec de l'ajout du domaine.");
+    } finally {
+      setCreatingDomain(false);
+    }
+  }
+
+  async function handleDeleteDomain(slug: string) {
+    const label = domainLabels[slug] ?? slug;
+    if (!window.confirm(`Supprimer le domaine « ${label} » (${slug}) ?`)) {
+      return;
+    }
+    setDeletingDomain(slug);
+    setActionError(null);
+    setDomainNotice(null);
+    try {
+      const res = await adminApi.deleteDomain(slug);
+      applyDomains(res.domains);
+      setDomainNotice(`Domaine « ${label} » supprimé.`);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Échec de la suppression du domaine.");
+    } finally {
+      setDeletingDomain(null);
+    }
+  }
+
   async function handleSuggest() {
     if (!file) return;
     setSuggesting(true);
@@ -150,6 +233,9 @@ export default function DocumentsTab() {
       const res = await adminApi.suggestMetadata(file);
       setSuggestion({ ...EMPTY_SUGGESTION, ...res.suggestion });
       setAvailableDomains(res.available_domains);
+      // The suggestion response carries the same slug -> label map; merge it
+      // so labels stay right even if the taxonomy changed since load().
+      setDomainLabels((prev) => ({ ...prev, ...res.domain_labels }));
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Échec de la suggestion de métadonnées.");
     } finally {
@@ -337,6 +423,116 @@ export default function DocumentsTab() {
         </div>
       </SectionCard>
 
+      {/* Legal-domain taxonomy */}
+      <SectionCard
+        title="Domaines juridiques"
+        actions={
+          <button
+            type="button"
+            onClick={() => setShowDomainForm((v) => !v)}
+            className={SECONDARY_BUTTON_CLASS}
+          >
+            <Plus className="h-4 w-4 text-accent" />
+            Ajouter un domaine
+          </button>
+        }
+      >
+        {domainNotice && <p className="mb-3 text-xs font-medium text-accent">{domainNotice}</p>}
+        {domains.length === 0 ? (
+          <EmptyState message="Aucun domaine configuré." />
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {domains.map((d) => (
+              <span
+                key={d.slug}
+                title={d.slug}
+                className="inline-flex items-center gap-1 rounded-full border border-gray-300 bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-600"
+              >
+                {d.label}
+                <button
+                  type="button"
+                  onClick={() => void handleDeleteDomain(d.slug)}
+                  disabled={deletingDomain === d.slug}
+                  title={`Supprimer ${d.label}`}
+                  aria-label={`Supprimer ${d.label}`}
+                  className="text-gray-400 transition-colors hover:text-red-700 disabled:opacity-50"
+                >
+                  {deletingDomain === d.slug ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <X className="h-3 w-3" />
+                  )}
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        {showDomainForm && (
+          <form
+            onSubmit={handleCreateDomain}
+            className="mt-4 grid gap-3 border-t border-gray-200 pt-4 sm:grid-cols-3"
+          >
+            <div>
+              <label htmlFor="admin-new-domain-slug" className="mb-1 block text-xs font-medium text-gray-600">
+                Identifiant (slug)
+              </label>
+              <input
+                id="admin-new-domain-slug"
+                type="text"
+                value={newDomainSlug}
+                onChange={(e) => setNewDomainSlug(e.target.value)}
+                placeholder="ex. droit_social"
+                pattern="[a-z0-9_]+"
+                className={INPUT_CLASS}
+              />
+              <p className="mt-1 text-[11px] text-gray-500">
+                Minuscules, chiffres et « _ » uniquement.
+              </p>
+            </div>
+            <div>
+              <label htmlFor="admin-new-domain-label" className="mb-1 block text-xs font-medium text-gray-600">
+                Libellé affiché
+              </label>
+              <input
+                id="admin-new-domain-label"
+                type="text"
+                value={newDomainLabel}
+                onChange={(e) => setNewDomainLabel(e.target.value)}
+                placeholder="ex. Droit social"
+                className={INPUT_CLASS}
+              />
+            </div>
+            <div>
+              <label htmlFor="admin-new-domain-keywords" className="mb-1 block text-xs font-medium text-gray-600">
+                Mots-clés (séparés par des virgules)
+              </label>
+              <input
+                id="admin-new-domain-keywords"
+                type="text"
+                value={newDomainKeywords}
+                onChange={(e) => setNewDomainKeywords(e.target.value)}
+                placeholder="ex. social, syndicat, convention collective"
+                className={INPUT_CLASS}
+              />
+            </div>
+            <div className="sm:col-span-3">
+              <button
+                type="submit"
+                disabled={creatingDomain || !newDomainSlug.trim() || !newDomainLabel.trim()}
+                className={PRIMARY_BUTTON_CLASS}
+              >
+                {creatingDomain ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Plus className="h-4 w-4" />
+                )}
+                {creatingDomain ? "Ajout en cours…" : "Ajouter"}
+              </button>
+            </div>
+          </form>
+        )}
+      </SectionCard>
+
       {/* Editable metadata form (after a suggestion) */}
       {suggestion && (
         <SectionCard title="Métadonnées du document">
@@ -460,13 +656,14 @@ export default function DocumentsTab() {
                         type="button"
                         onClick={() => toggleDomain(domain)}
                         aria-pressed={active}
+                        title={domain}
                         className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
                           active
                             ? "border-accent/40 bg-accent/10 text-accent"
                             : "border-gray-300 bg-gray-50 text-gray-500 hover:text-gray-700"
                         }`}
                       >
-                        {domain}
+                        {domainLabels[domain] ?? domain}
                       </button>
                     );
                   })}

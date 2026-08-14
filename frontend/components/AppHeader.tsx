@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FilePenLine, Gauge, Menu, MessageSquare, Scale, Settings, ShieldCheck, Tag } from "lucide-react";
+import { FilePenLine, Gauge, Menu, MessageSquare, Scale, ShieldCheck, Tag, UserCircle } from "lucide-react";
 import SettingsPopover from "@/components/SettingsPopover";
 import ThemeToggle from "@/components/ThemeToggle";
 import { useAuthToken } from "@/lib/useAuth";
@@ -112,7 +112,9 @@ export default function AppHeader({ token: tokenProp, onTokenChange, leftSlot, c
           })}
         </nav>
       </div>
-      <div className="flex items-center gap-2 sm:gap-3">
+      {/* shrink-0: icon buttons keep their size; the min-w-0 left block
+          absorbs any squeeze on narrow screens. */}
+      <div className="flex shrink-0 items-center gap-2 sm:gap-3">
         {children}
         {/* Mobile nav */}
         <div ref={menuRef} className="relative md:hidden">
@@ -162,7 +164,7 @@ export default function AppHeader({ token: tokenProp, onTokenChange, leftSlot, c
             title="Compte et connexion"
             aria-label="Compte et connexion"
           >
-            <Settings className="h-4 w-4" />
+            <UserCircle className="h-4 w-4" />
           </button>
           {settingsOpen && (
             <SettingsPopover

@@ -38,6 +38,8 @@ USER_MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN subscription_status VARCHAR(32) DEFAULT 'none'",
     "ALTER TABLE users ADD COLUMN subscription_period_end VARCHAR(64) DEFAULT ''",
     "ALTER TABLE users ADD COLUMN subscription_cancel_at_period_end INTEGER DEFAULT 0",
+    # Key-value store for admin-adjustable settings (e.g. tier budgets).
+    "CREATE TABLE IF NOT EXISTS app_settings (key VARCHAR(128) PRIMARY KEY, value TEXT DEFAULT '')",
 ]
 
 workspaces = Table(
@@ -62,4 +64,14 @@ usage = Table(
     Column("requests", Integer, default=0),
 )
 
-TABLES = {"users": users, "workspaces": workspaces, "usage": usage}
+# Key-value store for admin-adjustable settings (e.g. the "tier_budgets"
+# overrides consumed by backend.core.catalog). Text values: JSON when
+# structured data is needed.
+app_settings = Table(
+    "app_settings",
+    metadata,
+    Column("key", String(128), primary_key=True),
+    Column("value", String, default=""),
+)
+
+TABLES = {"users": users, "workspaces": workspaces, "usage": usage, "app_settings": app_settings}

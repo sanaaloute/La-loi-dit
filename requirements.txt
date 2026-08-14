@@ -51,15 +51,34 @@ opentelemetry-instrumentation-fastapi==0.50b0
 langfuse==2.57.0
 
 # Ingestion
-pypdf==5.1.0
+pypdf==5.1.0  # still used by backend/tools/pdf_parser.py; loaders use PyMuPDF
 python-docx==1.1.2
 beautifulsoup4==4.12.3
 lxml==5.3.0
 Markdown==3.7
 feedparser==6.0.11
 
+# OCR for scanned PDFs: PyMuPDF rendering + PaddleOCR (French, CPU).
+# Import-guarded everywhere (backend/ingestion/ocr.py), so the platform runs
+# normally without these installed. paddlex (a paddleocr dep) hard-pins
+# opencv-contrib-python, which needs the libgl system library; the Docker
+# build swaps it for the pinned headless build below (same cv2 API, no libgl).
+PyMuPDF==1.28.2
+paddlepaddle==3.2.0
+paddleocr==3.2.0
+Pillow==11.3.0
+opencv-contrib-python-headless==4.10.0.84
+
 # Export (PDF/Word)
 reportlab==4.1.0
+
+# Speech-to-text (voice messages, POST /chat/transcribe). The default
+# stt_provider is "litellm" (no extra dependency); faster-whisper powers the
+# optional fully-local provider and is import-guarded in backend/core/stt.py.
+# Its dependency tree (ctranslate2, onnxruntime, av, tokenizers) resolves to
+# cp312 manylinux wheels — verified with pip download (see
+# scripts/download_wheels.sh).
+faster-whisper==1.2.1
 
 # Workflows / background tasks
 celery==5.4.0

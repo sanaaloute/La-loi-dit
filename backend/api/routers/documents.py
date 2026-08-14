@@ -25,6 +25,10 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
+#: Headroom for multipart framing (boundaries, part headers) when the early
+#: Content-Length check compares the whole request body to the file cap.
+_MULTIPART_OVERHEAD_BYTES = 64 * 1024
+
 
 @router.post("/reindex", response_model=ReindexSummary)
 async def reindex_documents(
@@ -86,6 +90,19 @@ async def upload_document(
     ctx = get_ctx(request)
     settings = ctx.settings
 
+    max_bytes = settings.max_upload_bytes_user
+    too_large = f"Fichier trop volumineux (max {max_bytes // (1024 * 1024)} Mo)"
+    # Cheap early reject: the multipart body is already over the cap. Allow a
+    # small overhead for the multipart framing itself (boundaries, headers);
+    # the post-read check on the actual file bytes below stays exact.
+    content_length = request.headers.get("content-length")
+    if (
+        content_length
+        and content_length.isdigit()
+        and int(content_length) > max_bytes + _MULTIPART_OVERHEAD_BYTES
+    ):
+        raise HTTPException(status_code=413, detail=too_large)
+
     upload_dir = settings.ensure_data_dir() / "uploads"
     upload_dir.mkdir(parents=True, exist_ok=True)
 
@@ -93,10 +110,12 @@ async def upload_document(
     safe_name = _SAFE_NAME.sub("_", file.filename or "document")
     dest = upload_dir / f"{document_id}_{safe_name}"
     content = await file.read()
+    if len(content) > max_bytes:
+        raise HTTPException(status_code=413, detail=too_large)
     dest.write_bytes(content)
     logger.info(
         "document uploaded",
-        extra={"document_id": document_id, "filename": safe_name, "bytes": len(content), "user": user.sub},
+        extra={"document_id": document_id, "file_name": safe_name, "bytes": len(content), "user": user.sub},
     )
 
     try:
@@ -106,32 +125,12 @@ async def upload_document(
 
     metadata: dict[str, Any] = {
         "document_id": document_id,
-        "title": title or safe_name,
+        "document_name": title or safe_name,
         "language": language,
         "uploaded_by": user.sub,
     }
     pipeline = IngestionPipeline(ctx)
-    ingest = getattr(pipeline, "ingest_file", None) or getattr(pipeline, "ingest", None)
-    if ingest is None:
-        raise HTTPException(status_code=503, detail="ingestion pipeline has no ingest entrypoint")
-
-    try:
-        result = await ingest(dest, metadata=metadata)
-    except TypeError:  # pipeline without metadata kwarg
-        result = await ingest(dest)
-
-    if isinstance(result, DocumentIngestResult):
-        return result
-    if isinstance(result, dict):
-        return DocumentIngestResult(**result)
-    # Unknown return shape: report a best-effort success.
-    return DocumentIngestResult(
-        document_id=document_id,
-        document_name=metadata["title"],
-        chunks_created=int(getattr(result, "chunks_created", 0) or 0),
-        version=int(getattr(result, "version", 1) or 1),
-        status="indexed",
-    )
+    return await pipeline.ingest_path(dest, **metadata)
 
 
 @router.get("/{document_id}")

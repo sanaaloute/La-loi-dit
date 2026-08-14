@@ -120,6 +120,73 @@ def test_reindex_ingests_legal_docs_directory(client):
 
 
 # ---------------------------------------------------------------------------
+# POST /api/v1/documents — LEGAL_EXPERT upload
+# ---------------------------------------------------------------------------
+
+
+def test_upload_rejects_plain_user(client):
+    # Dev-mode anonymous callers map to Role.USER: below LEGAL_EXPERT.
+    response = client.post(
+        "/api/v1/documents",
+        files={"file": ("doc.txt", "Article 1: texte.", "text/plain")},
+    )
+    assert response.status_code == 403
+
+
+def test_upload_rejects_oversized_file(tmp_path, monkeypatch):
+    # Shrink the user cap so the test stays small; a file past it must get a
+    # 413 before anything is written or ingested.
+    monkeypatch.setenv("LEGAL_AI_MAX_UPLOAD_BYTES_USER", "64")
+    with _make_client(tmp_path, monkeypatch) as client:
+        response = client.post(
+            "/api/v1/documents",
+            files={"file": ("gros.txt", "Article 1: " + "x" * 1024, "text/plain")},
+            headers=_headers(Role.LEGAL_EXPERT),
+        )
+        assert response.status_code == 413
+        assert "volumineux" in response.json()["detail"]
+        data_dir = client.app.state.ctx.settings.data_dir
+        uploads = data_dir / "uploads"
+        assert not uploads.exists() or not list(uploads.iterdir())
+
+
+def test_upload_ingests_via_ingest_path(client, monkeypatch):
+    from backend.core.models import DocumentIngestResult
+    from backend.ingestion.pipeline import IngestionPipeline
+
+    calls: dict = {}
+
+    async def fake_ingest_path(self, path, **metadata):
+        calls["path"] = path
+        calls["metadata"] = metadata
+        return DocumentIngestResult(
+            document_id=metadata["document_id"],
+            document_name=metadata["document_name"],
+            chunks_created=3,
+            version=1,
+            status="indexed",
+        )
+
+    monkeypatch.setattr(IngestionPipeline, "ingest_path", fake_ingest_path)
+    response = client.post(
+        "/api/v1/documents",
+        files={"file": ("loi.txt", "Article 1: texte.", "text/plain")},
+        data={"title": "Loi de test", "language": "fr"},
+        headers=_headers(Role.LEGAL_EXPERT),
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["status"] == "indexed"
+    assert data["chunks_created"] == 3
+    assert data["document_name"] == "Loi de test"
+    metadata = calls["metadata"]
+    assert metadata["document_name"] == "Loi de test"
+    assert metadata["language"] == "fr"
+    assert metadata["uploaded_by"] == f"test-{Role.LEGAL_EXPERT.value}"
+    assert str(calls["path"]).endswith("_loi.txt")
+
+
+# ---------------------------------------------------------------------------
 # GET /api/v1/articles/{document_id}/{article}
 # ---------------------------------------------------------------------------
 
