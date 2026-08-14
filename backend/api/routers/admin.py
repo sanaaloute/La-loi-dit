@@ -80,8 +80,12 @@ async def audit_log(
 async def ingestion_status(request: Request) -> IngestionStatusResponse:
     """Per-document version/hash/article counts from the version store.
 
-    ``failed_documents`` is filled from ``ingestion_results.json`` — the
-    latest persisted record per document (see ``note`` in the response).
+    Each row also carries the REAL chunk count from the vector store and the
+    latest ingestion outcome (``last_status``/``last_error`` from
+    ``ingestion_results.json``), so a document whose last ingest failed — or
+    whose chunks were dropped before a failed re-chunk — is not displayed
+    with stale, healthy-looking numbers.
+    ``failed_documents`` is the same records list filtered to failures.
     """
     from backend.ingestion.pipeline import load_ingestion_results
     from backend.ingestion.versioning import VersionStore
@@ -89,19 +93,34 @@ async def ingestion_status(request: Request) -> IngestionStatusResponse:
     ctx = get_ctx(request)
     store = VersionStore(ctx.settings.data_dir)
     state = store._load()
-    documents = [
-        IngestionDocumentStatus(
-            document_id=document_id,
-            version=int(entry.get("version", 1)),
-            content_hash=str(entry.get("hash", "")),
-            article_count=len(entry.get("articles") or {}),
+    results = load_ingestion_results(ctx.settings.data_dir)
+
+    async def _real_chunk_count(document_id: str) -> Optional[int]:
+        if ctx.vector_store is None:
+            return None
+        try:
+            return await ctx.vector_store.count_by_document_id(document_id)
+        except Exception:
+            return None  # a store outage must not break the status page
+
+    documents: list[IngestionDocumentStatus] = []
+    for document_id, entry in sorted(state.items()):
+        latest = results.get(document_id) or {}
+        documents.append(
+            IngestionDocumentStatus(
+                document_id=document_id,
+                version=int(entry.get("version", 1)),
+                content_hash=str(entry.get("hash", "")),
+                article_count=len(entry.get("articles") or {}),
+                chunk_count=await _real_chunk_count(document_id),
+                last_status=str(latest.get("status", "")),
+                last_error=str(latest.get("error", "") or latest.get("detail", "") or ""),
+            )
         )
-        for document_id, entry in sorted(state.items())
-    ]
     failed = sorted(
         (
             record
-            for record in load_ingestion_results(ctx.settings.data_dir).values()
+            for record in results.values()
             if record.get("status") == "failed"
         ),
         key=lambda record: str(record.get("document_id", "")),

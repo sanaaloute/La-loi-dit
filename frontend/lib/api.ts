@@ -997,6 +997,11 @@ export interface IngestionDocumentStatus {
   version: number;
   content_hash: string;
   article_count: number;
+  /** Real chunk count in the vector store; null when the store is unavailable. */
+  chunk_count?: number | null;
+  /** Latest ingestion outcome ("ingested", "failed", "skipped_duplicate", ...). */
+  last_status?: string;
+  last_error?: string;
 }
 
 export interface IngestionStatusResponse {

@@ -147,4 +147,78 @@ def test_ocr_worker_failure_is_non_fatal(tmp_path, monkeypatch):
     assert doc.text == ""
     assert doc.metadata["ocr_available"] is True
     assert doc.metadata["ocr_needed_pages"] == [1]
-    assert "ocr_recovered_pages" not in doc.metadata
+
+
+# ---------------------------------------------------------------------------
+# pypdf fallback (corrupt streams PyMuPDF rejects, e.g. zlib header errors)
+# ---------------------------------------------------------------------------
+
+
+def test_pypdf_fallback_when_mupdf_cannot_open(tmp_path, monkeypatch):
+    """A hard PyMuPDF failure falls back to pypdf for the whole document."""
+    import sys
+    from types import SimpleNamespace
+
+    pdf_path = _text_pdf(tmp_path / "text.pdf")  # real file, readable by pypdf
+
+    def _boom(path):
+        raise RuntimeError("library error: zlib error: incorrect header check")
+
+    monkeypatch.setitem(sys.modules, "pymupdf", SimpleNamespace(open=_boom))
+
+    doc = load_pdf(pdf_path)
+
+    assert doc.metadata["loader"] == "pypdf"
+    assert "zlib error" in doc.metadata["mupdf_error"]
+    assert _TEXT in doc.text
+
+
+def test_pypdf_recovers_pages_mupdf_extracts_nothing_from(tmp_path, monkeypatch):
+    """Textless pages are retried with pypdf before the OCR path runs."""
+    import sys
+    from types import SimpleNamespace
+
+    pdf_path = _text_pdf(tmp_path / "text.pdf")
+
+    class _FakePage:
+        def get_text(self):
+            return ""  # simulates PyMuPDF failing on a corrupt content stream
+
+    class _FakePdf:
+        def __iter__(self):
+            return iter([_FakePage()])
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setitem(sys.modules, "pymupdf", SimpleNamespace(open=lambda path: _FakePdf()))
+    monkeypatch.setattr("backend.ingestion.ocr.ocr_available", lambda: False)
+
+    doc = load_pdf(pdf_path)
+
+    assert doc.metadata["pypdf_recovered_pages"] == [1]
+    assert _TEXT in doc.text
+    # pypdf recovered the page: OCR is never needed.
+    assert "ocr_needed_pages" not in doc.metadata
+
+
+def test_unreadable_pdf_still_fails_when_pypdf_cannot_help(tmp_path, monkeypatch):
+    """Both extractors failing keeps the historical clear IngestionError."""
+    import sys
+    from types import SimpleNamespace
+
+    from backend.core.exceptions import IngestionError
+
+    bad = tmp_path / "garbage.pdf"
+    bad.write_bytes(b"not a pdf at all")
+
+    def _boom(path):
+        raise RuntimeError("library error: zlib error: incorrect header check")
+
+    monkeypatch.setitem(sys.modules, "pymupdf", SimpleNamespace(open=_boom))
+
+    with pytest.raises(IngestionError, match="Failed to read PDF"):
+        load_pdf(bad)

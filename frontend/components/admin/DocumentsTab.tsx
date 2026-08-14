@@ -710,7 +710,8 @@ export default function DocumentsTab() {
                 <Th>Document</Th>
                 <Th>Version</Th>
                 <Th>Hachage</Th>
-                <Th>Articles</Th>
+                <Th>Chunks</Th>
+                <Th>Statut</Th>
                 <Th />
               </tr>
             </THead>
@@ -722,7 +723,33 @@ export default function DocumentsTab() {
                   <Td className="font-mono text-xs" title={doc.content_hash}>
                     {doc.content_hash ? `${doc.content_hash.slice(0, 12)}…` : "—"}
                   </Td>
-                  <Td>{formatNumber(doc.article_count)}</Td>
+                  {/* Real chunk count in the vector store (not versions.json). */}
+                  <Td title={`${formatNumber(doc.article_count)} articles dans versions.json`}>
+                    {doc.chunk_count === null || doc.chunk_count === undefined
+                      ? "—"
+                      : formatNumber(doc.chunk_count)}
+                  </Td>
+                  <Td>
+                    {doc.last_status === "failed" ? (
+                      <span
+                        className="inline-flex items-center rounded-full border border-red-700/30 bg-red-700/10 px-2 py-0.5 text-[10px] font-medium text-red-700"
+                        title={doc.last_error || "Dernière ingestion en échec"}
+                      >
+                        échec
+                      </span>
+                    ) : doc.chunk_count === 0 ? (
+                      <span
+                        className="inline-flex items-center rounded-full border border-warn-border/60 bg-warn-bg px-2 py-0.5 text-[10px] font-medium text-warn-text"
+                        title="Aucun chunk dans le vector store pour ce document"
+                      >
+                        0 chunk
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent">
+                        indexé
+                      </span>
+                    )}
+                  </Td>
                   <Td>
                     <button
                       type="button"

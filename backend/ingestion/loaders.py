@@ -94,13 +94,89 @@ def load_pdf(path: Union[str, Path]) -> ExtractedDocument:
             metadata: dict[str, Any] = {"loader": "pdf", "page_count": len(pages), "path": str(p)}
             ocr_needed = [i + 1 for i, text in enumerate(pages) if len(text) < _OCR_TEXT_THRESHOLD]
             if ocr_needed:
+                # PyMuPDF gives up on some corrupt streams ("zlib error:
+                # incorrect header check"); pypdf's parser is more tolerant,
+                # so retry textless pages with it before paying for OCR.
+                _pypdf_recover_pages(p, pages, ocr_needed, metadata)
+                ocr_needed = [
+                    i + 1 for i, text in enumerate(pages) if len(text) < _OCR_TEXT_THRESHOLD
+                ]
+            if ocr_needed:
                 metadata["ocr_needed_pages"] = ocr_needed
                 _ocr_scanned_pages(pdf, pages, ocr_needed, metadata)
     except IngestionError:
         raise
     except Exception as exc:
-        raise IngestionError(f"Failed to read PDF {p}: {exc}") from exc
+        # Hard PyMuPDF failure (file unopenable/uniterable): try pypdf on the
+        # whole document before declaring it unreadable.
+        return _load_pdf_pypdf(p, exc)
 
+    return ExtractedDocument(name=p.name, text="\n\n".join(pages), pages=pages, metadata=metadata)
+
+
+def _pypdf_reader(p: Path) -> Any:
+    """Open ``p`` with pypdf; None when unavailable or unreadable."""
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return None
+    try:
+        return PdfReader(str(p))
+    except Exception:
+        return None
+
+
+def _pypdf_recover_pages(
+    p: Path, pages: list[str], candidate_pages: list[int], metadata: dict[str, Any]
+) -> None:
+    """Retry textless pages with pypdf (tolerates streams PyMuPDF rejects).
+
+    Best-effort, never raises; recovered page numbers are noted in
+    ``metadata["pypdf_recovered_pages"]``.
+    """
+    if not candidate_pages:
+        return
+    reader = _pypdf_reader(p)
+    if reader is None:
+        return
+    recovered: list[int] = []
+    for page_no in candidate_pages:
+        if page_no > len(reader.pages):
+            continue
+        try:
+            text = (reader.pages[page_no - 1].extract_text() or "").strip()
+        except Exception:
+            continue  # a broken page must not kill the document
+        if len(text) > len(pages[page_no - 1]):
+            pages[page_no - 1] = text
+            recovered.append(page_no)
+    if recovered:
+        metadata["pypdf_recovered_pages"] = recovered
+
+
+def _load_pdf_pypdf(p: Path, mupdf_error: Exception) -> ExtractedDocument:
+    """Whole-document pypdf fallback when PyMuPDF cannot open/read the file."""
+    reader = _pypdf_reader(p)
+    if reader is None:
+        raise IngestionError(f"Failed to read PDF {p}: {mupdf_error}") from mupdf_error
+    logger.warning("PyMuPDF failed on %s (%s); using pypdf fallback", p, mupdf_error)
+    try:
+        pages: list[str] = []
+        for page in reader.pages:
+            try:
+                pages.append((page.extract_text() or "").strip())
+            except Exception:
+                pages.append("")  # a broken page must not kill the document
+    except Exception as pypdf_error:
+        raise IngestionError(
+            f"Failed to read PDF {p}: {mupdf_error}; pypdf fallback also failed: {pypdf_error}"
+        ) from mupdf_error
+    metadata: dict[str, Any] = {
+        "loader": "pypdf",
+        "page_count": len(pages),
+        "path": str(p),
+        "mupdf_error": str(mupdf_error),
+    }
     return ExtractedDocument(name=p.name, text="\n\n".join(pages), pages=pages, metadata=metadata)
 
 

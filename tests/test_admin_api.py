@@ -253,6 +253,47 @@ def test_admin_ingestion_status_omits_recovered_documents(client, tmp_path):
     assert ok_result.document_id not in failed_ids
 
 
+def test_admin_ingestion_status_reports_real_chunk_counts(client, tmp_path):
+    """Rows carry the vector store's real chunk count + the latest outcome."""
+    from backend.ingestion.pipeline import IngestionPipeline
+
+    ctx = client.app.state.ctx
+    pipeline = IngestionPipeline(ctx)
+
+    ok_result = asyncio.run(
+        pipeline.ingest_text(
+            "code-du-travail.txt",
+            "Article 1: Tout travailleur a droit à un salaire équitable. "
+            "Article 2: Toute discrimination est interdite.",
+        )
+    )
+    assert ok_result.status == "indexed"
+    assert ok_result.chunks_created > 0
+
+    missing = tmp_path / "broken.txt"
+    failed_result = asyncio.run(pipeline.ingest_path(missing))
+    assert failed_result.status == "failed"
+
+    response = client.get("/api/v1/admin/ingestion/status", headers=_headers(Role.ADMIN))
+    assert response.status_code == 200, response.text
+    rows = {d["document_id"]: d for d in response.json()["documents"]}
+
+    ok_row = rows[ok_result.document_id]
+    # The real count from the vector store, not versions.json article hashes.
+    assert ok_row["chunk_count"] == ok_result.chunks_created
+    assert ok_row["last_status"] == "indexed"
+    assert ok_row["last_error"] == ""
+
+    # A document whose latest ingest failed is flagged on its row — even if a
+    # stale versions.json entry keeps it in the list.
+    failed_row = rows.get(failed_result.document_id)
+    if failed_row is not None:  # present only if a previous version committed
+        assert failed_row["last_status"] == "failed"
+        assert failed_row["last_error"]
+        assert failed_row["chunk_count"] == 0
+
+
+
 def test_admin_evaluation_latest_404_without_report(client):
     response = client.get("/api/v1/admin/evaluation/latest", headers=_headers(Role.ADMIN))
     assert response.status_code == 404

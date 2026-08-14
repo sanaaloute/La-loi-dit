@@ -401,6 +401,20 @@ class MilvusVectorStore:
             results.append(chunk)
         return results
 
+    async def count_by_document_id(self, document_id: str) -> int:
+        """Number of chunks belonging to a logical document (ids only, no payloads)."""
+        client = self._require_client()
+        try:
+            hits = await asyncio.to_thread(
+                client.query,
+                collection_name=self._collection,
+                filter=f"document_id == '{document_id}'",
+                output_fields=["chunk_id"],
+            )
+        except Exception as exc:
+            raise RetrievalError(f"Milvus count_by_document_id failed: {exc}") from exc
+        return len(hits or [])
+
     async def delete(self, chunk_ids: list[str]) -> None:
         """Delete chunks by primary key."""
         if not chunk_ids:

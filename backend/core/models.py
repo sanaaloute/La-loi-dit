@@ -533,6 +533,14 @@ class IngestionDocumentStatus(BaseModel):
     version: int
     content_hash: str
     article_count: int
+    # Real chunk count in the vector store (None when the store is
+    # unavailable); versions.json's article count alone could be stale —
+    # e.g. chunks deleted before a failed re-chunk.
+    chunk_count: Optional[int] = None
+    # Latest ingestion outcome from ingestion_results.json ("ingested",
+    # "failed", "skipped_duplicate", ...); "" when no record exists.
+    last_status: str = ""
+    last_error: str = ""
 
 
 class IngestionStatusResponse(BaseModel):

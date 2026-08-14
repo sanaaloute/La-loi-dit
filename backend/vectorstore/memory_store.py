@@ -138,6 +138,13 @@ class InMemoryVectorStore:
                 chunk for chunk, _ in self._items.values() if chunk.document_id == document_id
             ]
 
+    async def count_by_document_id(self, document_id: str) -> int:
+        """Number of chunks belonging to a logical document."""
+        async with self._lock:
+            return sum(
+                1 for chunk, _ in self._items.values() if chunk.document_id == document_id
+            )
+
     async def delete(self, chunk_ids: list[str]) -> None:
         """Remove chunks by id; unknown ids are ignored."""
         async with self._lock:
