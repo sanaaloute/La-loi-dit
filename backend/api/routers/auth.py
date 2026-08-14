@@ -54,7 +54,8 @@ class TokenResponse(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    email: str = Field(min_length=3, max_length=320)
+    email: str = Field(default="", max_length=320)
+    phone: str = Field(default="", max_length=32)
     password: str = Field(min_length=8, max_length=200)
     name: str = Field(default="", max_length=200)
 
@@ -62,6 +63,7 @@ class RegisterRequest(BaseModel):
 class MeResponse(BaseModel):
     id: str
     email: str = ""
+    phone: str = ""
     name: str = ""
     role: Role
     tier: str = "gratuit"
@@ -158,31 +160,45 @@ async def _token_response(
 
 @router.post("/register", response_model=TokenResponse, status_code=201)
 async def register(payload: RegisterRequest, request: Request) -> TokenResponse:
-    """Create an account (role USER, tier gratuit, personal workspace)."""
+    """Create an account (role USER, tier gratuit, personal workspace).
+
+    The login identifier is an email address OR a phone number — at least
+    one of the two is required; both may be provided.
+    """
     from backend.api.deps import get_ctx
+    from backend.users.service import normalize_phone
 
     settings = get_ctx(request).settings
     user_store = _db_user_store(request)
     if user_store is None:
         raise HTTPException(status_code=503, detail="user registration unavailable")
     email = payload.email.lower().strip()
-    if "@" not in email:
+    phone = normalize_phone(payload.phone) if payload.phone.strip() else ""
+    if not email and not phone:
+        raise HTTPException(status_code=422, detail="email or phone number required")
+    if email and "@" not in email:
         raise HTTPException(status_code=422, detail="invalid email address")
+    if payload.phone.strip() and not phone:
+        raise HTTPException(status_code=422, detail="invalid phone number")
     try:
-        record = await user_store.create_user(email, payload.password, payload.name)
+        record = await user_store.create_user(email, payload.password, payload.name, phone=phone)
     except RuntimeError as exc:  # DB down -> dev-user-only mode
         raise HTTPException(status_code=503, detail="user registration unavailable") from exc
     except UserAlreadyExistsError:
         raise
-    return await _token_response(record.id, record.email, record.role, settings, request, user_id=record.id, tier=record.tier)
+    return await _token_response(
+        record.id, record.email or record.phone, record.role, settings, request,
+        user_id=record.id, tier=record.tier,
+    )
 
 
 @router.post("/token", response_model=TokenResponse)
 async def issue_token(payload: TokenRequest, request: Request) -> TokenResponse:
     """Exchange username/password for a signed JWT.
 
-    DB users authenticate by email first; the env-var dev store (legacy
-    usernames) is the fallback, keeping the admin/admin123 dev flow alive.
+    DB users authenticate by email or phone first; the env-var dev store
+    (legacy usernames) is the fallback, keeping the admin/admin123 dev flow
+    alive.
     """
     from backend.api.deps import get_ctx
 
@@ -195,7 +211,10 @@ async def issue_token(payload: TokenRequest, request: Request) -> TokenResponse:
         except Exception:
             record = None
         if record is not None:
-            return await _token_response(record.id, record.email, record.role, settings, request, user_id=record.id, tier=record.tier)
+            return await _token_response(
+                record.id, record.email or record.phone, record.role, settings, request,
+                user_id=record.id, tier=record.tier,
+            )
 
     record = _user_store(request).get(payload.username)
     if record is None or not verify_password(payload.password, record["password_hash"]):
@@ -279,6 +298,7 @@ async def whoami(request: Request) -> MeResponse:
             return MeResponse(
                 id=record.id,
                 email=record.email,
+                phone=record.phone,
                 name=record.name,
                 role=record.role,
                 tier=record.tier,

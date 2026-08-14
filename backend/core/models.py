@@ -530,6 +530,9 @@ class AuditLogResponse(BaseModel):
 
 class IngestionDocumentStatus(BaseModel):
     document_id: str
+    # Display name from the latest ingestion record ("" when unknown —
+    # the frontend falls back to the document id).
+    document_name: str = ""
     version: int
     content_hash: str
     article_count: int

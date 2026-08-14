@@ -709,7 +709,6 @@ export default function DocumentsTab() {
               <tr>
                 <Th>Document</Th>
                 <Th>Version</Th>
-                <Th>Hachage</Th>
                 <Th>Chunks</Th>
                 <Th>Statut</Th>
                 <Th />
@@ -718,11 +717,10 @@ export default function DocumentsTab() {
             <tbody>
               {status.documents.map((doc) => (
                 <tr key={doc.document_id}>
-                  <Td className="font-mono text-xs">{doc.document_id}</Td>
-                  <Td>{doc.version}</Td>
-                  <Td className="font-mono text-xs" title={doc.content_hash}>
-                    {doc.content_hash ? `${doc.content_hash.slice(0, 12)}…` : "—"}
+                  <Td title={doc.document_id}>
+                    {doc.document_name || <span className="font-mono text-xs">{doc.document_id}</span>}
                   </Td>
+                  <Td>{doc.version}</Td>
                   {/* Real chunk count in the vector store (not versions.json). */}
                   <Td title={`${formatNumber(doc.article_count)} articles dans versions.json`}>
                     {doc.chunk_count === null || doc.chunk_count === undefined

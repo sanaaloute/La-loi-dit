@@ -16,6 +16,10 @@ users = Table(
     metadata,
     Column("id", String(64), primary_key=True),
     Column("email", String(320), unique=True, index=True),  # stored lowercased (CI)
+    # Optional login identifier alongside email. Not DB-unique on purpose:
+    # multiple accounts may leave it empty (""); uniqueness of non-empty
+    # numbers is enforced in create_user.
+    Column("phone", String(32), default="", index=True),
     Column("name", String(200), default=""),
     Column("password_hash", String(128)),
     Column("role", String(32), default="user"),
@@ -38,6 +42,7 @@ USER_MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN subscription_status VARCHAR(32) DEFAULT 'none'",
     "ALTER TABLE users ADD COLUMN subscription_period_end VARCHAR(64) DEFAULT ''",
     "ALTER TABLE users ADD COLUMN subscription_cancel_at_period_end INTEGER DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN phone VARCHAR(32) DEFAULT ''",
     # Key-value store for admin-adjustable settings (e.g. tier budgets).
     "CREATE TABLE IF NOT EXISTS app_settings (key VARCHAR(128) PRIMARY KEY, value TEXT DEFAULT '')",
 ]

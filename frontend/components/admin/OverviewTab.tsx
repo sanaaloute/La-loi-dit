@@ -136,26 +136,6 @@ export default function OverviewTab() {
                 icon={Activity}
               />
             </div>
-            <TableShell>
-              <THead>
-                <tr>
-                  <Th>Chemin</Th>
-                  <Th>Requêtes</Th>
-                  <Th>Erreurs</Th>
-                  <Th>Latence moy.</Th>
-                </tr>
-              </THead>
-              <tbody>
-                {analytics.by_path.map((p) => (
-                  <tr key={p.path}>
-                    <Td className="font-mono text-xs">{p.path}</Td>
-                    <Td>{formatNumber(p.requests)}</Td>
-                    <Td className={p.errors > 0 ? "text-red-700" : ""}>{formatNumber(p.errors)}</Td>
-                    <Td>{p.avg_latency_ms.toLocaleString("fr-FR")} ms</Td>
-                  </tr>
-                ))}
-              </tbody>
-            </TableShell>
             {analytics.by_user.length > 0 && (
               <TableShell>
                 <THead>

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -24,6 +25,16 @@ from backend.security.passwords import hash_password, verify_password
 from backend.users.models import TABLES, USER_MIGRATIONS, metadata
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_phone(raw: str) -> str:
+    """Canonical phone form (E.164-ish): optional leading ``+`` then 6-15 digits.
+
+    Spaces, dashes, dots and parentheses are stripped. Returns "" when the
+    input is not a plausible phone number.
+    """
+    cleaned = re.sub(r"[\s.\-()]", "", raw.strip())
+    return cleaned if re.fullmatch(r"\+?\d{6,15}", cleaned) else ""
 
 
 async def probe_database(settings: Settings, timeout: float = 3.0) -> bool:
@@ -60,6 +71,7 @@ class UserRecord(BaseModel):
 
     id: str
     email: str
+    phone: str = ""
     name: str = ""
     role: Role = Role.USER
     tier: str = "gratuit"
@@ -156,7 +168,9 @@ class UserStore:
     def _row_to_record(row: Any) -> UserRecord:
         return UserRecord(
             id=row.id,
-            email=row.email,
+            email=row.email or "",
+            # getattr: rows from a not-yet-migrated database lack this column
+            phone=getattr(row, "phone", "") or "",
             name=row.name or "",
             role=Role(row.role or Role.USER.value),
             tier=row.tier or "gratuit",
@@ -178,19 +192,33 @@ class UserStore:
             row = (await session.execute(select(t).where(t.c.email == email.lower().strip()))).first()
         return self._row_to_record(row) if row else None
 
-    async def create_user(self, email: str, password: str, name: str = "") -> UserRecord:
+    async def _get_by_phone(self, phone: str) -> Optional[UserRecord]:
+        from sqlalchemy import select
+
+        t = TABLES["users"]
+        async with self._session_factory() as session:
+            row = (await session.execute(select(t).where(t.c.phone == phone))).first()
+        return self._row_to_record(row) if row else None
+
+    async def create_user(self, email: str, password: str, name: str = "", phone: str = "") -> UserRecord:
         """Create an account plus its personal workspace.
 
         Always creates a ``Role.USER`` account; admin accounts cannot be
-        registered through the public API. Raises ``UserAlreadyExistsError``
-        when the email is taken and ``RuntimeError`` when no database is
+        registered through the public API. At least one login identifier
+        (email or phone) is required. Raises ``UserAlreadyExistsError`` when
+        the email or phone is taken and ``RuntimeError`` when no database is
         available.
         """
         if not await self._ensure_db():
             raise RuntimeError("user store unavailable")
         email = email.lower().strip()
-        if await self._get_by_email(email) is not None:
+        phone = normalize_phone(phone) if phone else ""
+        if not email and not phone:
+            raise ValueError("email or phone number required")
+        if email and await self._get_by_email(email) is not None:
             raise UserAlreadyExistsError(f"an account already exists for '{email}'")
+        if phone and await self._get_by_phone(phone) is not None:
+            raise UserAlreadyExistsError(f"an account already exists for '{phone}'")
 
         user_id = uuid.uuid4().hex
         workspace_id = uuid.uuid4().hex
@@ -200,7 +228,7 @@ class UserStore:
                 TABLES["workspaces"].insert(),
                 {
                     "id": workspace_id,
-                    "name": f"Espace {name.strip() or email}",
+                    "name": f"Espace {name.strip() or email or phone}",
                     "owner_id": user_id,
                     "created_at": now,
                 },
@@ -209,7 +237,10 @@ class UserStore:
                 TABLES["users"].insert(),
                 {
                     "id": user_id,
-                    "email": email,
+                    # NULL (not "") for phone-only accounts: the UNIQUE
+                    # constraint on email must not collide across them.
+                    "email": email or None,
+                    "phone": phone,
                     "name": name.strip(),
                     "password_hash": hash_password(password),
                     "role": Role.USER.value,
@@ -222,6 +253,7 @@ class UserStore:
         return UserRecord(
             id=user_id,
             email=email,
+            phone=phone,
             name=name.strip(),
             role=Role.USER,
             tier="gratuit",
@@ -229,15 +261,24 @@ class UserStore:
             created_at=now,
         )
 
-    async def authenticate(self, email: str, password: str) -> Optional[UserRecord]:
-        """Return the user when email+password match, else None."""
+    async def authenticate(self, identifier: str, password: str) -> Optional[UserRecord]:
+        """Return the user when identifier+password match, else None.
+
+        The identifier is the account's email or phone number (the login
+        form accepts both).
+        """
         if not await self._ensure_db():
             return None
-        from sqlalchemy import select
+        from sqlalchemy import or_, select
 
+        email = identifier.lower().strip()
+        phone = normalize_phone(identifier)
+        conditions = [TABLES["users"].c.email == email]
+        if phone:
+            conditions.append(TABLES["users"].c.phone == phone)
         t = TABLES["users"]
         async with self._session_factory() as session:
-            row = (await session.execute(select(t).where(t.c.email == email.lower().strip()))).first()
+            row = (await session.execute(select(t).where(or_(*conditions)))).first()
         if row is None or not verify_password(password, row.password_hash or ""):
             return None
         return self._row_to_record(row)

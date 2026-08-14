@@ -281,6 +281,7 @@ def test_admin_ingestion_status_reports_real_chunk_counts(client, tmp_path):
     ok_row = rows[ok_result.document_id]
     # The real count from the vector store, not versions.json article hashes.
     assert ok_row["chunk_count"] == ok_result.chunks_created
+    assert ok_row["document_name"] == "code-du-travail.txt"
     assert ok_row["last_status"] == "indexed"
     assert ok_row["last_error"] == ""
 
@@ -338,6 +339,30 @@ def test_admin_retrieval_analytics_aggregates_audit_log(client):
     assert health["requests"] >= 1
     assert health["avg_latency_ms"] >= 0.0
     assert any(u["user"] == "test-admin" for u in data["by_user"])
+
+
+def test_admin_retrieval_analytics_resolves_user_display_names(client):
+    """Audit subjects resolve to name > email > phone instead of raw subs."""
+    import uuid as _uuid
+
+    ctx = client.app.state.ctx
+    named = asyncio.run(
+        ctx.user_store.create_user(f"named-{_uuid.uuid4().hex[:6]}@example.com", "password123", "Jurist")
+    )
+    unnamed_email = f"plain-{_uuid.uuid4().hex[:6]}@example.com"
+    asyncio.run(ctx.user_store.create_user(unnamed_email, "password123"))
+
+    for identifier in (named.email, unnamed_email):
+        token = client.post(
+            "/api/v1/auth/token", json={"username": identifier, "password": "password123"}
+        ).json()["access_token"]
+        client.get("/api/v1/models", headers={"Authorization": f"Bearer {token}"})
+
+    response = client.get("/api/v1/admin/retrieval/analytics", headers=_headers(Role.ADMIN))
+    users = [u["user"] for u in response.json()["by_user"]]
+    assert "Jurist" in users  # name wins over the raw email subject
+    assert unnamed_email in users  # no name: the email is shown
+
 
 
 # ---------------------------------------------------------------------------

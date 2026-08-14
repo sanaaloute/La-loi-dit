@@ -109,6 +109,7 @@ async def ingestion_status(request: Request) -> IngestionStatusResponse:
         documents.append(
             IngestionDocumentStatus(
                 document_id=document_id,
+                document_name=str(latest.get("document_name", "") or ""),
                 version=int(entry.get("version", 1)),
                 content_hash=str(entry.get("hash", "")),
                 article_count=len(entry.get("articles") or {}),
@@ -188,8 +189,9 @@ async def retrieval_analytics(request: Request) -> RetrievalAnalyticsResponse:
         )
         for path, s in sorted(paths.items(), key=lambda kv: -kv[1]["requests"])
     ]
+    display_names = await _user_display_map(request)
     by_user = [
-        UserRequestStats(user=user, requests=count)
+        UserRequestStats(user=display_names.get(user, user), requests=count)
         for user, count in sorted(users.items(), key=lambda kv: -kv[1])
     ]
     return RetrievalAnalyticsResponse(
@@ -197,6 +199,32 @@ async def retrieval_analytics(request: Request) -> RetrievalAnalyticsResponse:
         by_path=by_path,
         by_user=by_user,
     )
+
+
+async def _user_display_map(request: Request) -> dict[str, str]:
+    """Map audit-log subjects (token sub: email/phone/user id) to display names.
+
+    Resolution order per account: name, then email, then phone. Subjects with
+    no matching account ("anonymous", dev-store usernames) are left as-is —
+    there is no identity to show for them.
+    """
+    ctx = get_ctx(request)
+    user_store = getattr(ctx, "user_store", None)
+    if user_store is None:
+        return {}
+    try:
+        records = await user_store.list_users()
+    except Exception:
+        return {}
+    mapping: dict[str, str] = {}
+    for record in records:
+        display = record.name or record.email or record.phone
+        if not display:
+            continue
+        for key in (record.id, record.email, record.phone):
+            if key:
+                mapping.setdefault(key, display)
+    return mapping
 
 
 # ---------------------------------------------------------------------------

@@ -220,6 +220,71 @@ def test_refresh_token_rejected_after_login_elsewhere(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Registration / login with phone number OR email
+# ---------------------------------------------------------------------------
+
+
+def test_register_and_login_with_phone(client):
+    phone = f"+22670{uuid.uuid4().int % 10**6:06d}"
+    response = client.post(
+        "/api/v1/auth/register",
+        json={"phone": phone, "password": PASSWORD, "name": "Awa"},
+    )
+    assert response.status_code == 201, response.text
+
+    me = client.get("/api/v1/auth/me", headers=_headers(response.json()["access_token"]))
+    assert me.json()["phone"] == phone
+    assert me.json()["email"] == ""
+
+    login = client.post("/api/v1/auth/token", json={"username": phone, "password": PASSWORD})
+    assert login.status_code == 200, login.text
+
+
+def test_register_with_phone_and_email(client):
+    phone = f"+22671{uuid.uuid4().int % 10**6:06d}"
+    email = f"user-{uuid.uuid4().hex[:8]}@example.com"
+    response = client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "phone": phone, "password": PASSWORD},
+    )
+    assert response.status_code == 201, response.text
+    # Both identifiers authenticate the same account.
+    for identifier in (email, phone):
+        login = client.post("/api/v1/auth/token", json={"username": identifier, "password": PASSWORD})
+        assert login.status_code == 200, (identifier, login.text)
+
+
+def test_two_phone_only_accounts_do_not_collide(client):
+    """Phone-only accounts store email as NULL: the UNIQUE constraint holds."""
+    for _ in range(2):
+        phone = f"+22672{uuid.uuid4().int % 10**6:06d}"
+        response = client.post(
+            "/api/v1/auth/register", json={"phone": phone, "password": PASSWORD}
+        )
+        assert response.status_code == 201, response.text
+
+
+def test_register_requires_an_identifier(client):
+    response = client.post("/api/v1/auth/register", json={"password": PASSWORD})
+    assert response.status_code == 422
+
+
+def test_register_rejects_invalid_phone(client):
+    response = client.post(
+        "/api/v1/auth/register", json={"phone": "abc-not-a-number", "password": PASSWORD}
+    )
+    assert response.status_code == 422
+
+
+def test_register_rejects_duplicate_phone(client):
+    phone = f"+22673{uuid.uuid4().int % 10**6:06d}"
+    first = client.post("/api/v1/auth/register", json={"phone": phone, "password": PASSWORD})
+    assert first.status_code == 201, first.text
+    second = client.post("/api/v1/auth/register", json={"phone": phone, "password": PASSWORD})
+    assert second.status_code in (400, 409, 422)
+
+
+# ---------------------------------------------------------------------------
 # Per-tier rate limits
 # ---------------------------------------------------------------------------
 

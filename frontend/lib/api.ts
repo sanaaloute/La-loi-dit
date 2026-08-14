@@ -114,6 +114,7 @@ export interface UserFeatures {
 export interface UserProfile {
   id: string;
   email: string;
+  phone?: string;
   name?: string | null;
   role: string;
   tier: Tier;
@@ -481,11 +482,20 @@ export async function login(username: string, password: string): Promise<TokenRe
   return (await res.json()) as TokenResponse;
 }
 
-export async function register(email: string, password: string, name?: string): Promise<TokenResponse> {
+export async function register(
+  identifier: { email?: string; phone?: string },
+  password: string,
+  name?: string,
+): Promise<TokenResponse> {
   const res = await apiFetch("/auth/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, ...(name ? { name } : {}) }),
+    body: JSON.stringify({
+      ...(identifier.email ? { email: identifier.email } : {}),
+      ...(identifier.phone ? { phone: identifier.phone } : {}),
+      password,
+      ...(name ? { name } : {}),
+    }),
   });
   if (!res.ok) {
     const detail = await safeDetail(res);
@@ -994,6 +1004,8 @@ export type DocumentMetadata = Record<string, string | string[]>;
 
 export interface IngestionDocumentStatus {
   document_id: string;
+  /** Display name from the latest ingestion record ("" when unknown). */
+  document_name?: string;
   version: number;
   content_hash: string;
   article_count: number;

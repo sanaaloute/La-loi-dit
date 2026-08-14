@@ -16,7 +16,7 @@ interface AuthCardProps {
 export default function AuthCard({ onSuccess, idPrefix = "auth" }: AuthCardProps) {
   const [mode, setMode] = useState<AuthMode>("login");
   const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -43,7 +43,14 @@ export default function AuthCard({ onSuccess, idPrefix = "auth" }: AuthCardProps
     setBusy(true);
     setError(null);
     try {
-      const res = await register(email, password, name.trim() || undefined);
+      // One field for both: an identifier containing "@" is an email,
+      // anything else is treated as a phone number (validated server-side).
+      const id = identifier.trim();
+      const res = await register(
+        id.includes("@") ? { email: id } : { phone: id },
+        password,
+        name.trim() || undefined,
+      );
       setToken(res.access_token);
       setPassword("");
       onSuccess?.();
@@ -88,7 +95,7 @@ export default function AuthCard({ onSuccess, idPrefix = "auth" }: AuthCardProps
         <form onSubmit={handleLogin} className="space-y-3">
           <div>
             <label htmlFor={`${idPrefix}-username`} className={labelClass}>
-              E-mail ou nom d&apos;utilisateur
+              E-mail, téléphone ou nom d&apos;utilisateur
             </label>
             <input
               id={`${idPrefix}-username`}
@@ -126,15 +133,16 @@ export default function AuthCard({ onSuccess, idPrefix = "auth" }: AuthCardProps
       ) : (
         <form onSubmit={handleRegister} className="space-y-3">
           <div>
-            <label htmlFor={`${idPrefix}-email`} className={labelClass}>
-              Adresse e-mail
+            <label htmlFor={`${idPrefix}-identifier`} className={labelClass}>
+              E-mail ou numéro de téléphone
             </label>
             <input
-              id={`${idPrefix}-email`}
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              autoComplete="email"
+              id={`${idPrefix}-identifier`}
+              type="text"
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
+              autoComplete="username"
+              placeholder="awa@example.com ou +226 70 00 00 00"
               className={inputClass}
               required
             />

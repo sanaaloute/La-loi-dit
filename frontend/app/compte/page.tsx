@@ -135,10 +135,10 @@ export default function ComptePage() {
                     <UserCircle className="h-9 w-9 shrink-0 text-gray-500" />
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-gray-900">
-                        {profile.name || profile.email}
+                        {profile.name || profile.email || profile.phone}
                       </p>
-                      {profile.name && (
-                        <p className="truncate text-xs text-gray-500">{profile.email}</p>
+                      {profile.name && (profile.email || profile.phone) && (
+                        <p className="truncate text-xs text-gray-500">{profile.email || profile.phone}</p>
                       )}
                       {profile.workspace_name && (
                         <p className="mt-0.5 flex items-center gap-1.5 text-xs text-gray-500">
