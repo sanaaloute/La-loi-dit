@@ -228,6 +228,7 @@ class Settings(BaseSettings):
     memory_recall_limit: int = 5
     answer_max_evidence: int = 10  # evidence chunks attached to the FinalAnswer
     input_max_chars: int = 8000  # user queries longer than this is truncated
+    input_max_words: int = 200  # user queries longer than this are rejected (HTTP 400)
     evidence_injection_screening: bool = True  # scan retrieved chunks for embedded instructions before prompting
     # --- chat streaming / run bounds ---
     chat_heartbeat_seconds: float = 10.0  # SSE keepalive frame interval

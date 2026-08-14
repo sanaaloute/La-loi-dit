@@ -3,8 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FilePenLine, Gauge, Menu, MessageSquare, Scale, ShieldCheck, Tag, UserCircle } from "lucide-react";
-import SettingsPopover from "@/components/SettingsPopover";
+import { FilePenLine, Menu, MessageSquare, Scale, ShieldCheck, Tag, UserCircle } from "lucide-react";
 import ThemeToggle from "@/components/ThemeToggle";
 import { useAuthToken } from "@/lib/useAuth";
 import { me } from "@/lib/api";
@@ -12,10 +11,9 @@ import { me } from "@/lib/api";
 interface AppHeaderProps {
   /** Controlled token state; when omitted the header manages it internally. */
   token?: string | null;
-  onTokenChange?: (token: string | null) => void;
   /** Extra content at the far left (e.g. the chat history drawer button). */
   leftSlot?: React.ReactNode;
-  /** Right-side slot, rendered before the settings button. */
+  /** Right-side slot, rendered before the theme toggle. */
   children?: React.ReactNode;
 }
 
@@ -23,14 +21,13 @@ const NAV_LINKS = [
   { href: "/", label: "Assistant", icon: MessageSquare },
   { href: "/redaction", label: "Rédaction", icon: FilePenLine },
   { href: "/tarifs", label: "Tarifs", icon: Tag },
-  { href: "/compte", label: "Compte", icon: Gauge },
+  { href: "/compte", label: "Compte", icon: UserCircle },
 ];
 
 const ADMIN_LINK = { href: "/admin", label: "Admin", icon: ShieldCheck };
 
-export default function AppHeader({ token: tokenProp, onTokenChange, leftSlot, children }: AppHeaderProps) {
-  const [internalToken, setInternalToken] = useAuthToken();
-  const [settingsOpen, setSettingsOpen] = useState(false);
+export default function AppHeader({ token: tokenProp, leftSlot, children }: AppHeaderProps) {
+  const [internalToken] = useAuthToken();
   const [menuOpen, setMenuOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const pathname = usePathname();
@@ -52,7 +49,6 @@ export default function AppHeader({ token: tokenProp, onTokenChange, leftSlot, c
   }, []);
 
   const token = tokenProp !== undefined ? tokenProp : internalToken;
-  const handleTokenChange = onTokenChange ?? setInternalToken;
 
   // The "Admin" entry is only shown to logged-in administrators.
   useEffect(() => {
@@ -151,29 +147,6 @@ export default function AppHeader({ token: tokenProp, onTokenChange, leftSlot, c
         </div>
         {/* Theme */}
         <ThemeToggle />
-        {/* Account */}
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => setSettingsOpen((v) => !v)}
-            className={`flex h-10 w-10 items-center justify-center rounded-lg border text-xs font-medium transition-colors ${
-              token
-                ? "border-accent/40 bg-accent/10 text-accent hover:bg-accent/20"
-                : "border-gray-300 bg-gray-50 text-gray-600 hover:bg-gray-100"
-            }`}
-            title="Compte et connexion"
-            aria-label="Compte et connexion"
-          >
-            <UserCircle className="h-4 w-4" />
-          </button>
-          {settingsOpen && (
-            <SettingsPopover
-              token={token}
-              onTokenChange={handleTokenChange}
-              onClose={() => setSettingsOpen(false)}
-            />
-          )}
-        </div>
       </div>
     </header>
   );

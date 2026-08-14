@@ -111,7 +111,7 @@ function FieldInput({
 }
 
 export default function RedactionPage() {
-  const [token, setToken] = useAuthToken();
+  const [token] = useAuthToken();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [templates, setTemplates] = useState<DraftTemplate[] | null>(null);
   const [forbidden, setForbidden] = useState(false);
@@ -240,7 +240,7 @@ export default function RedactionPage() {
 
   return (
     <PageShell
-      header={<AppHeader token={token} onTokenChange={setToken} />}
+      header={<AppHeader token={token} />}
       disclaimer="Avertissement : les documents générés sont des aides à la rédaction. Ils ne constituent pas un conseil juridique."
     >
       {!token ? (

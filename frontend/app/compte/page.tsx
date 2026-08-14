@@ -108,11 +108,11 @@ export default function ComptePage() {
 
   return (
     <PageShell
-      header={<AppHeader token={token} onTokenChange={setToken} />}
+      header={<AppHeader token={token} />}
       disclaimer="Les compteurs sont remis à zéro chaque jour à minuit (UTC)."
     >
       {!token ? (
-        <GatePanel body="Connectez-vous depuis l'icône de compte en haut à droite pour consulter votre profil et votre usage." />
+        <GatePanel body="Connectez-vous pour consulter votre profil et votre usage." />
       ) : error ? (
         <ErrorCard message={error}>
           <button

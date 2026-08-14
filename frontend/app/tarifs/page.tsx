@@ -76,7 +76,7 @@ const TIER_CARDS: TierCard[] = [
 const TIER_RANK: Record<string, number> = { gratuit: 0, pro: 1, cabinet: 2 };
 
 export default function TarifsPage() {
-  const [token, setToken] = useAuthToken();
+  const [token] = useAuthToken();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [, setSubscription] = useState<SubscriptionInfo | null>(null);
   const [config, setConfig] = useState<BillingConfig | null>(null);
@@ -211,7 +211,7 @@ export default function TarifsPage() {
 
   return (
     <PageShell
-      header={<AppHeader token={token} onTokenChange={setToken} />}
+      header={<AppHeader token={token} />}
       disclaimer="Paiement sécurisé par Paddle — résiliable à tout moment."
     >
       <div className="mx-auto max-w-5xl">

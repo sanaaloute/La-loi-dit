@@ -42,3 +42,22 @@ def test_node_start_handler_ignores_non_node_chain_events():
     asyncio.run(handler.on_chain_start({}, {}, metadata={"langgraph_node": "planner"}))
     assert queue.qsize() == 1
     assert queue.get_nowait() == ("node_start", "planner")
+
+
+def test_enforce_word_limit():
+    """Questions over input_max_words are rejected with a French 400."""
+    from fastapi import HTTPException
+
+    from backend.api.routers.chat import _enforce_word_limit
+    from backend.core.config import get_settings
+
+    settings = get_settings()
+    limit = settings.input_max_words
+    _enforce_word_limit("mot " * (limit - 1), settings)  # under: no raise
+    _enforce_word_limit("mot " * limit, settings)  # exactly at: no raise
+    try:
+        _enforce_word_limit("mot " * (limit + 1), settings)
+        raise AssertionError("expected HTTPException over the word limit")
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert str(limit) in exc.detail

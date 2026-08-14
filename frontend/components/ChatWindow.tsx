@@ -61,6 +61,14 @@ type PanelTab = "agents" | "citations" | "preuves";
 /** Voice notes are capped: short clips transcribe faster and cost less. */
 const MAX_REC_SECONDS = 30;
 
+/** Questions are capped in words (matches backend input_max_words). */
+const MAX_WORDS = 200;
+
+function countWords(text: string): number {
+  const trimmed = text.trim();
+  return trimmed ? trimmed.split(/\s+/).length : 0;
+}
+
 let msgCounter = 0;
 function nextId(): string {
   msgCounter += 1;
@@ -76,9 +84,10 @@ function emptyStatuses(): Record<string, NodeStatus> {
 export default function ChatWindow() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  const wordCount = countWords(input);
   const [busy, setBusy] = useState(false);
   const [sessionId, setSessionIdState] = useState<string | null>(null);
-  const [token, setToken] = useAuthToken();
+  const [token] = useAuthToken();
   const [statuses, setStatuses] = useState<Record<string, NodeStatus>>(emptyStatuses);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tab, setTab] = useState<PanelTab>("agents");
@@ -343,8 +352,9 @@ export default function ChatWindow() {
 
   const send = useCallback(async () => {
     const query = input.trim();
-    // A prompt can never be submitted without an authenticated session.
-    if (!query || busy || !token) return;
+    // A prompt can never be submitted without an authenticated session, nor
+    // beyond the word limit.
+    if (!query || busy || !token || countWords(query) > MAX_WORDS) return;
 
     // Ensure a session id exists up front so the run can be cancelled
     // server-side (the backend keys in-flight runs by session_id).
@@ -482,7 +492,6 @@ export default function ChatWindow() {
       {/* Header */}
       <AppHeader
         token={token}
-        onTokenChange={setToken}
         leftSlot={
           token ? (
             <button
@@ -782,11 +791,11 @@ export default function ChatWindow() {
                   <button
                     type="button"
                     onClick={() => void send()}
-                    disabled={input.trim().length === 0}
-                    title="Envoyer"
+                    disabled={input.trim().length === 0 || wordCount > MAX_WORDS}
+                    title={wordCount > MAX_WORDS ? `Limite de ${MAX_WORDS} mots dépassée` : "Envoyer"}
                     aria-label="Envoyer"
                     className={`absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full transition-colors ${
-                      input.trim().length === 0
+                      input.trim().length === 0 || wordCount > MAX_WORDS
                         ? "cursor-not-allowed bg-gray-200 text-gray-400"
                         : "bg-accent text-white hover:bg-accent-hover"
                     }`}
@@ -796,6 +805,16 @@ export default function ChatWindow() {
                 </>
               )}
               </div>
+              {wordCount > 0 && (
+                <p
+                  className={`mt-1 text-right text-xs ${
+                    wordCount > MAX_WORDS ? "font-semibold text-red-700" : "text-gray-400"
+                  }`}
+                >
+                  {wordCount}/{MAX_WORDS} mots
+                  {wordCount > MAX_WORDS ? " — raccourcissez votre question" : ""}
+                </p>
+              )}
             </div>
           </div>
         </main>

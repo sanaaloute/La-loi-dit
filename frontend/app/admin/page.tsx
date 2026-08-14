@@ -26,7 +26,7 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: 
 ];
 
 export default function AdminPage() {
-  const [token, setToken] = useAuthToken();
+  const [token] = useAuthToken();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +56,7 @@ export default function AdminPage() {
 
   return (
     <PageShell
-      header={<AppHeader token={token} onTokenChange={setToken} />}
+      header={<AppHeader token={token} />}
       disclaimer="Administration — les actions effectuées ici (ingestion, suppression, rôles) sont immédiates."
     >
       {!token ? (

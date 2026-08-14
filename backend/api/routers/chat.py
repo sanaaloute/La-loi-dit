@@ -220,6 +220,19 @@ async def _meter(
         pass  # metering must never break the answer path
 
 
+def _enforce_word_limit(query: str, settings: Settings) -> None:
+    """Reject over-long questions (word count), matching the UI input limit."""
+    max_words = getattr(settings, "input_max_words", 0)
+    if max_words and len(query.split()) > max_words:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Votre question dépasse la limite de {max_words} mots. "
+                "Raccourcissez-la puis réessayez."
+            ),
+        )
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(
     payload: ChatRequest,
@@ -232,6 +245,7 @@ async def chat(
     ctx = get_ctx(request)
     graph = get_graph(request)
     settings: Settings = ctx.settings
+    _enforce_word_limit(payload.query, settings)
     state = _make_state(payload, _state_user_id(payload, user))
     await check_budget(ctx.user_store, user, settings)
     entry = resolve_model_entry(ctx, user, payload.model, query=payload.query)
@@ -488,6 +502,7 @@ async def chat_stream(
     state = _make_state(payload, _state_user_id(payload, user))
     ctx = get_ctx(request)
     settings = ctx.settings
+    _enforce_word_limit(query, settings)
     await check_budget(ctx.user_store, user, settings)
     entry = resolve_model_entry(ctx, user, model, query=query)
     model_id = entry.id if entry is not None else ""
@@ -558,6 +573,12 @@ async def ws_chat(ws: WebSocket) -> None:
             payload = ChatRequest(**data)
         except ValidationError as exc:
             await ws.send_json({"type": "error", "detail": exc.errors()})
+            await ws.close(code=4400)
+            return
+        try:
+            _enforce_word_limit(payload.query, settings)
+        except HTTPException as exc:
+            await ws.send_json({"type": "error", "detail": exc.detail})
             await ws.close(code=4400)
             return
 
