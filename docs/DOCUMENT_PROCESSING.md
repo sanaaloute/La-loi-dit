@@ -171,7 +171,10 @@ Settings (env prefix `LEGAL_AI_`):
 | `ocr_enabled` | `True` | Master switch for the OCR path. |
 | `ocr_lang` | `fr` | PaddleOCR recognition language. |
 | `ocr_models_dir` | `data_dir/ocr_models` | Model cache, exported as `PADDLE_PDX_CACHE_HOME` in the OCR child process. |
-| `ocr_max_pages` | `200` | Per-document cap on OCR'd pages (CPU cost guard). |
+| `ocr_max_pages` | `0` | Per-document OCR page cap; `0` = no cap — every page is OCR'd, in batches. Set a positive value to restore the old hard cap. |
+| `ocr_batch_pages` | `25` | Pages per OCR subprocess: bounds per-run memory and contains a crash/timeout to one batch instead of the whole document. |
+| `ocr_render_dpi` | `200` | Rendering DPI for scanned pages; 200 keeps printed text readable with ~2.25x less image memory than 300. |
+| `ocr_cpu_threads` | `4` | OMP/MKL thread-pool cap inside the OCR child process (RAM-spike guard on loaded hosts). |
 | `ocr_subprocess_timeout_seconds` | `120` | Base budget for one OCR batch subprocess; the effective timeout adds 30 s per page. |
 | `ocr_det_model_name` | `PP-OCRv5_mobile_det` | Detection model dir under `<ocr_models_dir>/official_models`; passed explicitly (name + dir) so OCR works fully offline. The mobile model is the default because the server variant is OOM-killed (SIGKILL, exit -9) on hosts/containers with limited RAM. |
 | `ocr_rec_model_name` | `latin_PP-OCRv5_mobile_rec` | Recognition model dir, same offline mechanism (must match `ocr_lang`). |

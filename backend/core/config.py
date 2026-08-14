@@ -285,7 +285,16 @@ class Settings(BaseSettings):
     ocr_lang: str = "fr"  # PaddleOCR recognition language
     # PaddleOCR/PaddleX model cache (PADDLE_PDX_CACHE_HOME); None = data_dir/"ocr_models".
     ocr_models_dir: Optional[Path] = None
-    ocr_max_pages: int = 200  # per-document cap on OCR'd pages (CPU cost guard)
+    ocr_max_pages: int = 0  # per-document OCR page cap; 0 = no cap (all pages, batched)
+    # Pages per OCR subprocess: bounds per-run memory and contains the damage
+    # of a crash/timeout to one batch instead of the whole document.
+    ocr_batch_pages: int = 25
+    # Rendering DPI for scanned pages: 200 keeps printed legal text readable
+    # for OCR while using ~2.25x less image memory than 300 dpi.
+    ocr_render_dpi: int = 200
+    # Thread-pool cap for the OCR child process (OMP/MKL): unbounded pools
+    # spike RAM hard enough to trigger the host OOM killer on loaded hosts.
+    ocr_cpu_threads: int = 4
     # Base budget (seconds) for one OCR batch subprocess; the effective
     # timeout adds 30 s per page on top of this.
     ocr_subprocess_timeout_seconds: int = 120

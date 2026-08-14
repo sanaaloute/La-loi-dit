@@ -72,11 +72,18 @@ def ocr_images(image_paths: Sequence[Path], timeout: Optional[int] = None) -> di
             ),
             encoding="utf-8",
         )
+        # Cap the child's BLAS/OMP thread pools: unbounded pools on a loaded
+        # host spike RAM hard enough to trigger the kernel OOM killer.
+        child_env = os.environ.copy()
+        threads = str(max(1, settings.ocr_cpu_threads))
+        child_env.setdefault("OMP_NUM_THREADS", threads)
+        child_env.setdefault("MKL_NUM_THREADS", threads)
         proc = subprocess.run(
             [sys.executable, "-m", "backend.ingestion.ocr_worker", str(manifest_path)],
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=child_env,
         )
         if proc.returncode != 0:
             logger.warning(

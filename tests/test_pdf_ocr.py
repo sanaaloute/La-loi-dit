@@ -135,6 +135,29 @@ def test_ocr_page_cap(tmp_path, monkeypatch):
     assert doc.pages[1:] == ["", ""]
 
 
+def test_ocr_no_cap_processes_all_pages_in_batches(tmp_path, monkeypatch):
+    """Default (uncapped): every page is OCR'd, split across batch subprocesses."""
+    from backend.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "ocr_max_pages", 0)
+    monkeypatch.setattr(settings, "ocr_batch_pages", 2)
+    monkeypatch.setattr("backend.ingestion.ocr.ocr_available", lambda: True)
+    batches: list[int] = []
+    monkeypatch.setattr(
+        "backend.ingestion.ocr.ocr_images",
+        lambda paths, timeout=None: (batches.append(len(paths)), {str(p): _SCANNED_TEXT for p in paths})[1],
+    )
+
+    doc = load_pdf(_scanned_pdf(tmp_path / "scanned.pdf", pages=5))
+
+    assert batches == [2, 2, 1]  # 5 pages in batches of 2
+    assert doc.metadata["ocr_recovered_pages"] == [1, 2, 3, 4, 5]
+    assert "ocr_skipped_pages" not in doc.metadata
+    assert all(page == _SCANNED_TEXT for page in doc.pages)
+
+
+
 def test_ocr_worker_failure_is_non_fatal(tmp_path, monkeypatch):
     """A crashed/failed OCR child process leaves pages empty, never raises."""
     monkeypatch.setattr("backend.ingestion.ocr.ocr_available", lambda: True)
@@ -222,3 +245,38 @@ def test_unreadable_pdf_still_fails_when_pypdf_cannot_help(tmp_path, monkeypatch
 
     with pytest.raises(IngestionError, match="Failed to read PDF"):
         load_pdf(bad)
+
+
+def test_ocr_child_env_caps_thread_pools(tmp_path, monkeypatch):
+    """The OCR child gets OMP/MKL thread caps from ocr_cpu_threads."""
+    import json
+    from pathlib import Path
+
+    import backend.ingestion.ocr as ocr
+    from backend.core.config import get_settings
+
+    class _Proc:
+        returncode = 0
+        stderr = ""
+        stdout = ""
+
+    captured: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        captured.update(kwargs)
+        manifest = json.loads(Path(cmd[-1]).read_text(encoding="utf-8"))
+        Path(manifest["out"]).write_text("{}", encoding="utf-8")
+        return _Proc()
+
+    monkeypatch.setattr(ocr.subprocess, "run", fake_run)
+    monkeypatch.delenv("OMP_NUM_THREADS", raising=False)
+    monkeypatch.delenv("MKL_NUM_THREADS", raising=False)
+    monkeypatch.setenv("LEGAL_AI_OCR_CPU_THREADS", "2")
+    get_settings.cache_clear()
+    try:
+        ocr.ocr_images([tmp_path / "page.png"])
+    finally:
+        get_settings.cache_clear()
+
+    assert captured["env"]["OMP_NUM_THREADS"] == "2"
+    assert captured["env"]["MKL_NUM_THREADS"] == "2"

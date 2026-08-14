@@ -67,9 +67,11 @@ def load_pdf(path: Union[str, Path]) -> ExtractedDocument:
 
     Pages yielding little or no text (scanned pages) are recorded in
     ``metadata["ocr_needed_pages"]``; when OCR is available and enabled they
-    are re-rendered at 300 dpi and recognized with PaddleOCR (best-effort,
-    never fatal), with the outcome noted in ``metadata["ocr_recovered_pages"]``
-    / ``metadata["ocr_skipped_pages"]``.
+    are re-rendered (``ocr_render_dpi``) and recognized with PaddleOCR
+    (best-effort, never fatal), with the outcome noted in
+    ``metadata["ocr_recovered_pages"]`` / ``metadata["ocr_skipped_pages"]``.
+    Before OCR, textless pages are retried with pypdf, which tolerates some
+    corrupt streams PyMuPDF rejects.
     """
     p = Path(path)
     if not p.is_file():
@@ -181,7 +183,14 @@ def _load_pdf_pypdf(p: Path, mupdf_error: Exception) -> ExtractedDocument:
 
 
 def _ocr_scanned_pages(pdf: Any, pages: list[str], ocr_needed: list[int], metadata: dict[str, Any]) -> None:
-    """OCR textless pages with PaddleOCR. Best-effort, never raises."""
+    """OCR textless pages with PaddleOCR. Best-effort, never raises.
+
+    Pages are processed in batches of ``ocr_batch_pages``: each batch runs in
+    its own child process, so a crash/timeout costs one batch — not the whole
+    document — and per-run memory stays bounded regardless of document length.
+    ``ocr_max_pages`` > 0 restores the old hard cap (skipped pages noted in
+    metadata); the default (0) OCRs every page.
+    """
     from backend.ingestion import ocr as ocr_engine
 
     metadata["ocr_available"] = ocr_engine.ocr_available()
@@ -189,34 +198,44 @@ def _ocr_scanned_pages(pdf: Any, pages: list[str], ocr_needed: list[int], metada
         return
     from backend.core.config import get_settings
 
-    max_pages = get_settings().ocr_max_pages
-    to_process, skipped = ocr_needed[:max_pages], ocr_needed[max_pages:]
-    if skipped:
-        logger.warning("OCR page cap (%d) reached; skipping pages %s", max_pages, skipped)
-        metadata["ocr_skipped_pages"] = skipped
-    # Render the pages to PNG files, then OCR the whole batch in a single
-    # child process (paddle never loads in this process — see ingestion/ocr.py).
+    settings = get_settings()
+    max_pages = settings.ocr_max_pages
+    if max_pages > 0:
+        to_process, skipped = ocr_needed[:max_pages], ocr_needed[max_pages:]
+        if skipped:
+            logger.warning("OCR page cap (%d) reached; skipping pages %s", max_pages, skipped)
+            metadata["ocr_skipped_pages"] = skipped
+    else:
+        to_process = list(ocr_needed)
+    batch_size = max(1, settings.ocr_batch_pages)
+    render_dpi = settings.ocr_render_dpi
+    # Render the pages to PNG files, then OCR each batch in a child process
+    # (paddle never loads in this process — see ingestion/ocr.py).
     tmp_dir = Path(tempfile.mkdtemp(prefix="ocr_pages_"))
+    recovered: list[int] = []
     try:
-        rendered: list[tuple[int, Path]] = []
-        for page_no in to_process:
-            try:
-                image_path = tmp_dir / f"page_{page_no}.png"
-                image_path.write_bytes(pdf[page_no - 1].get_pixmap(dpi=300).tobytes("png"))
-                rendered.append((page_no, image_path))
-            except Exception:
-                continue  # a broken page must not kill the document
-        results = ocr_engine.ocr_images([image_path for _, image_path in rendered])
-        recovered: list[int] = []
-        for page_no, image_path in rendered:
-            text = results.get(str(image_path), "").strip()
-            if len(text) > len(pages[page_no - 1]):
-                pages[page_no - 1] = text
-                recovered.append(page_no)
-        if recovered:
-            metadata["ocr_recovered_pages"] = recovered
+        for start in range(0, len(to_process), batch_size):
+            batch = to_process[start : start + batch_size]
+            rendered: list[tuple[int, Path]] = []
+            for page_no in batch:
+                try:
+                    image_path = tmp_dir / f"page_{page_no}.png"
+                    image_path.write_bytes(pdf[page_no - 1].get_pixmap(dpi=render_dpi).tobytes("png"))
+                    rendered.append((page_no, image_path))
+                except Exception:
+                    continue  # a broken page must not kill the document
+            results = ocr_engine.ocr_images([image_path for _, image_path in rendered])
+            for page_no, image_path in rendered:
+                text = results.get(str(image_path), "").strip()
+                if len(text) > len(pages[page_no - 1]):
+                    pages[page_no - 1] = text
+                    recovered.append(page_no)
+                # Delete rendered pages as we go: disk stays bounded on long documents.
+                image_path.unlink(missing_ok=True)
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+    if recovered:
+        metadata["ocr_recovered_pages"] = recovered
 
 
 def load_docx(path: Union[str, Path]) -> ExtractedDocument:
