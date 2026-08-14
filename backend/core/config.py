@@ -292,7 +292,7 @@ class Settings(BaseSettings):
     # Model directory names under <ocr_models_dir>/official_models used as
     # explicit local paths (offline deployments); must match the pinned
     # paddleocr release's default det/rec models for ocr_lang.
-    ocr_det_model_name: str = "PP-OCRv5_server_det"
+    ocr_det_model_name: str = "PP-OCRv5_mobile_det"  # mobile: server_det OOMs on small hosts
     ocr_rec_model_name: str = "latin_PP-OCRv5_mobile_rec"
     # Last-resort LLM classification at ingest: one completion, only when the
     # heuristics found neither legal domains nor authority (never runs on the

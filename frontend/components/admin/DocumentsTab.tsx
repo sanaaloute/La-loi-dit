@@ -15,7 +15,7 @@ import {
 } from "@/lib/api";
 import { EmptyState, INPUT_CLASS, PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS, SectionCard, StatusBadge, TableShell, Td, Th, THead, formatDateTime, formatNumber } from "./ui";
 
-const ACCEPTED_EXTENSIONS = ".pdf,.txt,.md,.markdown,.html,.htm";
+const ACCEPTED_EXTENSIONS = ".pdf,.docx,.csv,.txt,.md,.markdown,.html,.htm";
 
 /** Admin upload cap — mirrors the backend's max_upload_bytes_admin (100 MB). */
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
