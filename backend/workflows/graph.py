@@ -225,7 +225,7 @@ def initial_state(
 
 async def run_query(graph, ctx: AppContext, state: GraphState, *, config: Optional[dict[str, Any]] = None) -> ChatResponse:
     started = time.perf_counter()
-    final_state = await graph.ainvoke(state, config=config)
+    final_state = await graph.ainvoke(state, config=_with_recursion_limit(config))
     latency_ms = (time.perf_counter() - started) * 1000
     answer: FinalAnswer = final_state["final_answer"]
 
@@ -263,9 +263,23 @@ async def run_query(graph, ctx: AppContext, state: GraphState, *, config: Option
     )
 
 
+# LangGraph's default recursion_limit (25) counts supersteps, and this graph's
+# legitimate worst case already sits at ~23-25: a full pass is ~16 nodes
+# (including query_router and parent_expansion), plus one bounded retrieval
+# retry pass (+5), plus the answer tail. 40 leaves headroom without enabling
+# runaway loops — the retrieval retry budget remains the real guardrail.
+GRAPH_RECURSION_LIMIT = 40
+
+
+def _with_recursion_limit(config: Optional[dict[str, Any]]) -> dict[str, Any]:
+    merged = dict(config or {})
+    merged.setdefault("recursion_limit", GRAPH_RECURSION_LIMIT)
+    return merged
+
+
 async def stream_query(graph, state: GraphState, *, config: Optional[dict[str, Any]] = None) -> AsyncIterator[dict[str, Any]]:
     """Yields per-node events for SSE/WebSocket streaming."""
-    async for event in graph.astream(state, config=config, stream_mode="updates"):
+    async for event in graph.astream(state, config=_with_recursion_limit(config), stream_mode="updates"):
         for node_name, update in event.items():
             yield {"node": node_name, "update": _serialize(update)}
 
