@@ -3,8 +3,10 @@
 Streaming strategy: true token-level streaming is not exposed by the graph,
 so we stream real per-node graph updates (`stream_query`, stream_mode
 "updates") as they happen and reconstruct the final `ChatResponse` from the
-accumulated node updates — the graph runs exactly once. The final SSE/WS
-event carries the full ChatResponse. Memory persistence happens via the REST
+accumulated node updates — the graph runs exactly once. The verified answer
+text then streams as `delta` frames (typewriter playback of the final,
+post-verification answer), and a closing `final` event carries the full
+authoritative ChatResponse. Memory persistence happens via the REST
 endpoint's `run_query` and, for SSE, after the stream finishes successfully
 (`_stream_events` appends the same user/assistant turns); the WebSocket path
 stays unpersisted, matching `stream_query`'s original contract.)
@@ -348,6 +350,35 @@ class _NodeStartHandler(AsyncCallbackHandler):
             self._queue.put_nowait(("node_start", node))
 
 
+# Final-answer streaming: the VERIFIED answer text (post claim/citation
+# verification and output guardrail) is emitted as `delta` frames just ahead
+# of the authoritative `final` frame, so the UI types the answer out
+# progressively. Chunking is adaptive: about ANSWER_DELTA_TARGET_FRAMES frames
+# whatever the answer length, keeping playback around ~2 s.
+ANSWER_DELTA_MIN_CHARS = 12
+ANSWER_DELTA_TARGET_FRAMES = 80
+ANSWER_DELTA_DELAY_SECONDS = 0.025
+
+
+async def _answer_deltas(text: str) -> AsyncIterator[str]:
+    """Yield `text` in word-boundary chunks for SSE/WS typewriter playback."""
+    if not text:
+        return
+    size = max(ANSWER_DELTA_MIN_CHARS, (len(text) + ANSWER_DELTA_TARGET_FRAMES - 1) // ANSWER_DELTA_TARGET_FRAMES)
+    pos = 0
+    while pos < len(text):
+        end = min(pos + size, len(text))
+        if end < len(text):
+            # Cut right after the last space inside the window so a word is
+            # never split (hard cut only for pathologically long words).
+            space = text.rfind(" ", pos + 1, end + 1)
+            if space > pos:
+                end = space + 1
+        yield text[pos:end]
+        pos = end
+        await asyncio.sleep(ANSWER_DELTA_DELAY_SECONDS)
+
+
 async def _stream_events(
     graph: Any,
     state: GraphState,
@@ -473,6 +504,10 @@ async def _stream_events(
                     cache_payload = response.model_dump(mode="json")
                     cache_payload["trace"] = []
                     await answer_cache.set(payload.query, model_id, cache_payload)
+            # Verified-answer playback: `delta` frames type the text out in
+            # the UI; the `final` frame stays the authoritative payload.
+            async for _delta in _answer_deltas(response.answer.answer):
+                yield f"data: {json.dumps({'type': 'delta', 'text': _delta}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'type': 'final', 'response': response.model_dump(mode='json')}, ensure_ascii=False)}\n\n"
             logger.info(
                 "chat stream done",
@@ -489,11 +524,13 @@ async def _stream_events(
 
 
 async def _cached_stream_events(response: ChatResponse, include_trace: bool) -> AsyncIterator[str]:
-    """Synthetic SSE sequence for an answer-cache hit (update + final)."""
+    """Synthetic SSE sequence for an answer-cache hit (update + deltas + final)."""
     update: dict[str, Any] = {"node": "answer_cache", "update": {}}
     if include_trace:
         update["update"] = {"trace": ["answer_cache: hit"]}
     yield f"data: {json.dumps({'type': 'update', **update}, ensure_ascii=False)}\n\n"
+    async for _delta in _answer_deltas(response.answer.answer):
+        yield f"data: {json.dumps({'type': 'delta', 'text': _delta}, ensure_ascii=False)}\n\n"
     yield f"data: {json.dumps({'type': 'final', 'response': response.model_dump(mode='json')}, ensure_ascii=False)}\n\n"
 
 
@@ -617,6 +654,9 @@ async def ws_chat(ws: WebSocket) -> None:
                 if not include_trace:
                     response.trace = []
                 update_trace_output(trace, _trace_output_from_response(response), settings=settings)
+                # Same verified-answer playback as the SSE path.
+                async for _delta in _answer_deltas(response.answer.answer):
+                    await ws.send_json({"type": "delta", "text": _delta})
                 await ws.send_json(
                     {"type": "final", "response": response.model_dump(mode="json")}
                 )

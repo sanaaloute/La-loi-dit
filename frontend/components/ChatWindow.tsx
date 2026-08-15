@@ -50,6 +50,7 @@ interface Message {
   role: "user" | "assistant";
   text: string;
   response?: ChatResponse;
+  streaming?: boolean;
   error?: boolean;
   quota?: boolean;
   feedback?: "thumbs-up" | "thumbs-down";
@@ -99,6 +100,9 @@ export default function ChatWindow() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Id of the provisional assistant message receiving `delta` frames (the
+  // verified-answer playback), replaced by the full message on `final`.
+  const streamMsgIdRef = useRef<string | null>(null);
 
   // Voice input: MediaRecorder -> POST /chat/transcribe -> text inserted into
   // the composer (never auto-sent; the user reviews it first).
@@ -193,7 +197,7 @@ export default function ChatWindow() {
     });
   }, []);
 
-  const acceptResponse = useCallback((response: ChatResponse) => {
+  const acceptResponse = useCallback((response: ChatResponse, replaceId?: string | null) => {
     markAllDone();
     setSessionId(response.session_id);
     setSessionIdState(response.session_id);
@@ -203,11 +207,40 @@ export default function ChatWindow() {
       text: response.answer.answer,
       response,
     };
-    setMessages((prev) => [...prev, msg]);
+    // Delta playback: the provisional streaming message is REPLACED by the
+    // authoritative one (no duplicate bubble).
+    setMessages((prev) =>
+      replaceId && prev.some((m) => m.id === replaceId)
+        ? prev.map((m) => (m.id === replaceId ? msg : m))
+        : [...prev, msg],
+    );
     setSelectedId(msg.id);
     // Refresh the history list so the new/updated conversation appears.
     setHistoryRefresh((k) => k + 1);
   }, [markAllDone]);
+
+  // Verified-answer playback: `delta` frames type the final text out in a
+  // provisional plain-text message; the `final` frame swaps in the full one.
+  const appendDelta = useCallback((text: string) => {
+    let id = streamMsgIdRef.current;
+    if (!id) {
+      id = nextId();
+      streamMsgIdRef.current = id;
+    }
+    const msgId = id;
+    setMessages((prev) =>
+      prev.some((m) => m.id === msgId)
+        ? prev.map((m) => (m.id === msgId ? { ...m, text: m.text + text } : m))
+        : [...prev, { id: msgId, role: "assistant", text, streaming: true }],
+    );
+  }, []);
+
+  const discardStreamingMessage = useCallback(() => {
+    const id = streamMsgIdRef.current;
+    if (!id) return;
+    streamMsgIdRef.current = null;
+    setMessages((prev) => prev.filter((m) => m.id !== id));
+  }, []);
 
   const failWith = useCallback((detail: string) => {
     setMessages((prev) => [...prev, { id: nextId(), role: "assistant", text: detail, error: true }]);
@@ -276,6 +309,12 @@ export default function ChatWindow() {
   );
 
   const interrupted = useCallback(() => {
+    // Drop any half-streamed provisional bubble before the interrupt notice.
+    const streamId = streamMsgIdRef.current;
+    if (streamId) {
+      streamMsgIdRef.current = null;
+      setMessages((prev) => prev.filter((m) => m.id !== streamId));
+    }
     setMessages((prev) => [...prev, { id: nextId(), role: "assistant", text: "Génération interrompue par l'utilisateur." }]);
   }, []);
 
@@ -367,6 +406,7 @@ export default function ChatWindow() {
 
     const controller = new AbortController();
     abortRef.current = controller;
+    streamMsgIdRef.current = null;
 
     setInput("");
     setBusy(true);
@@ -389,12 +429,18 @@ export default function ChatWindow() {
             // Node started executing: show it as running in real time.
             streamed = true;
             markNode(event.node);
+          } else if (event.type === "delta") {
+            // Verified-answer playback: type the final text out progressively.
+            streamed = true;
+            appendDelta(event.text);
           } else if (event.type === "final") {
             streamed = true;
-            acceptResponse(event.response);
+            acceptResponse(event.response, streamMsgIdRef.current);
+            streamMsgIdRef.current = null;
           } else if (event.type === "cancelled") {
             streamed = true;
             cancelled = true;
+            discardStreamingMessage();
           } else if (event.type === "error") {
             throw new Error(event.detail || "Erreur pendant le traitement");
           }
@@ -426,13 +472,14 @@ export default function ChatWindow() {
           }
         }
       } else {
+        discardStreamingMessage();
         failWith(err instanceof Error ? `Erreur : ${err.message}` : "Une erreur est survenue.");
       }
     } finally {
       abortRef.current = null;
       setBusy(false);
     }
-  }, [input, busy, sessionId, token, model, markNode, acceptResponse, failWith, quotaReached, interrupted]);
+  }, [input, busy, sessionId, token, model, markNode, acceptResponse, appendDelta, discardStreamingMessage, failWith, quotaReached, interrupted]);
 
   function newConversation() {
     setMessages([]);
@@ -639,6 +686,11 @@ export default function ChatWindow() {
                           </div>
                         ) : msg.response ? (
                           <AnswerView answer={msg.response.answer} />
+                        ) : msg.streaming ? (
+                          <div className="whitespace-pre-wrap text-sm text-gray-700">
+                            {msg.text}
+                            <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-gray-400 align-text-bottom" />
+                          </div>
                         ) : (
                           <div className="markdown-body text-sm text-gray-700">
                             <ReactMarkdown>{msg.text}</ReactMarkdown>

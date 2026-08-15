@@ -238,6 +238,7 @@ export interface SubscriptionInfo {
 export type StreamEvent =
   | { type: "update"; node: string; update: Record<string, unknown> }
   | { type: "node_start"; node: string }
+  | { type: "delta"; text: string }
   | { type: "final"; response: ChatResponse }
   | { type: "cancelled" }
   | { type: "error"; detail: string };

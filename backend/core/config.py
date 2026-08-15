@@ -226,7 +226,7 @@ class Settings(BaseSettings):
     evidence_injection_screening: bool = True  # scan retrieved chunks for embedded instructions before prompting
     # --- chat streaming / run bounds ---
     chat_heartbeat_seconds: float = 10.0  # SSE keepalive frame interval
-    chat_run_timeout_seconds: float = 280.0  # hard cap per run (below nginx's 300s proxy_read_timeout)
+    chat_run_timeout_seconds: float = 280.0  # hard cap per run; the nginx chat locations allow 620s, so deploys can raise this up to 600s via env
     # tools
     sandbox_timeout_seconds: float = 5.0
     currency_tool_timeout_seconds: float = 5.0

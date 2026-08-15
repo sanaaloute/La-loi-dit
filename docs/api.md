@@ -86,6 +86,10 @@ data: {"type": "update", "node": "planner", "update": {…}}
 
 data: {"type": "update", "node": "retrieval_branch", "update": {…}}
 
+data: {"type": "delta", "text": "La création d'une SARL "}
+
+data: {"type": "delta", "text": "est régie par l'AUSCGIE…"}
+
 data: {"type": "final", "response": {"session_id": "…", "answer": {…}, "latency_ms": …}}
 ```
 
@@ -95,6 +99,14 @@ heartbeat comment frames (every `LEGAL_AI_CHAT_HEARTBEAT_SECONDS`, 10s by
 default), and a run is hard-capped at `LEGAL_AI_CHAT_RUN_TIMEOUT_SECONDS`
 (280s, below nginx's 300s `proxy_read_timeout`) — on timeout the pump task is
 cancelled and an error frame is emitted instead of hanging forever.
+
+`delta` frames carry chunks of the **final, verified** answer text (after
+claim/citation verification and the output guardrail — nothing unverified is
+ever streamed): they precede the `final` frame, concatenate exactly to
+`response.answer.answer`, and play back over ~2 s (word-boundary chunks).
+The `final` frame remains the authoritative payload (citations, confidence,
+metadata); clients that ignore `delta` behave exactly as before. The
+WebSocket endpoint (`/ws/chat`) emits the same `delta` → `final` sequence.
 
 Failures surface as `{"type": "error", "detail": "…"}` frames; a user stop
 surfaces as `{"type": "cancelled"}`. Responses carry `Cache-Control: no-cache`
