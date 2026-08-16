@@ -344,9 +344,10 @@ export default function ChatWindow() {
       .finally(() => setHistoryLoading(false));
   }, [token, sessionId]);
 
-  // Mobile OSes (screen lock, app switch) kill the SSE socket while the page
-  // is suspended, without firing any error: on resume the frozen reader would
-  // hang until the silence watchdog fires (~45 s). Abort it immediately so the
+  // Mobile OSes (screen lock, app switch, network loss/roaming) kill the SSE
+  // socket while the page is suspended or offline, without firing any error:
+  // on resume/reconnect the frozen reader would hang until the silence
+  // watchdog fires (~45 s). Abort it immediately so the silent
   // history-recovery path (catch block in `send`) starts at once; the backend
   // keeps running and persists the answer meanwhile.
   useEffect(() => {
@@ -358,9 +359,11 @@ export default function ChatWindow() {
     };
     document.addEventListener("visibilitychange", onResume);
     window.addEventListener("pageshow", onResume);
+    window.addEventListener("online", onResume);
     return () => {
       document.removeEventListener("visibilitychange", onResume);
       window.removeEventListener("pageshow", onResume);
+      window.removeEventListener("online", onResume);
     };
   }, []);
 
@@ -401,25 +404,12 @@ export default function ChatWindow() {
     [token, markAllDone],
   );
 
-  /** Recovery with a transient "reconnecting" bubble (removed on failure). */
+  /** Recovery after a dropped connection: poll the session history silently —
+   * the "Traitement en cours…" indicator keeps running, no error bubble —
+   * until the backend finishes and the persisted answer appears. */
   const attemptRecovery = useCallback(
     async (sid: string, sendStart: number, query: string): Promise<boolean> => {
-      const noticeId = nextId();
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: noticeId,
-          role: "assistant",
-          text: "Connexion interrompue — récupération de la réponse en cours…",
-          ts: new Date().toISOString(),
-          streaming: true,
-        },
-      ]);
-      const recovered = await recoverAnswer(sid, sendStart, query);
-      if (!recovered) {
-        setMessages((prev) => prev.filter((m) => m.id !== noticeId));
-      }
-      return recovered;
+      return recoverAnswer(sid, sendStart, query);
     },
     [recoverAnswer],
   );
@@ -713,16 +703,27 @@ export default function ChatWindow() {
       <AppHeader
         token={token}
         leftSlot={
-          token ? (
+          <>
+            {token && (
+              <button
+                type="button"
+                onClick={() => setHistoryOpen(true)}
+                className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 md:hidden"
+                title="Historique des conversations"
+              >
+                <History className="h-5 w-5" />
+              </button>
+            )}
+            {/* Icon counterpart of the text button below, small screens only. */}
             <button
               type="button"
-              onClick={() => setHistoryOpen(true)}
-              className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 md:hidden"
-              title="Historique des conversations"
+              onClick={newConversation}
+              className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 sm:hidden"
+              title="Nouvelle conversation"
             >
-              <History className="h-5 w-5" />
+              <MessageSquarePlus className="h-5 w-5" />
             </button>
-          ) : undefined
+          </>
         }
         rightSlot={
           <button

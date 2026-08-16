@@ -11,12 +11,13 @@ import { me } from "@/lib/api";
 interface AppHeaderProps {
   /** Controlled token state; when omitted the header manages it internally. */
   token?: string | null;
-  /** Extra content at the far left (e.g. the chat history drawer button). */
+  /** Extra content rendered immediately after the logo (e.g. the chat
+   * conversation shortcuts on small screens). */
   leftSlot?: React.ReactNode;
   /** Extra content at the far right (e.g. the chat side-panel drawer button),
    * after the mobile menu. */
   rightSlot?: React.ReactNode;
-  /** Right-side slot, rendered between the theme toggle and the mobile menu. */
+  /** Right-side slot, rendered before the theme toggle. */
   children?: React.ReactNode;
 }
 
@@ -77,7 +78,6 @@ export default function AppHeader({ token: tokenProp, leftSlot, rightSlot, child
   return (
     <header className="glass z-40 flex items-center justify-between gap-2 px-4 py-3 sm:px-6">
       <div className="flex min-w-0 items-center gap-3">
-        {leftSlot}
         <Link href="/" className="flex shrink-0 items-center gap-3" title="Yawoto — accueil">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent">
             <Scale className="h-5 w-5 text-white" />
@@ -91,6 +91,7 @@ export default function AppHeader({ token: tokenProp, leftSlot, rightSlot, child
             </span>
           </div>
         </Link>
+        {leftSlot}
         <nav className="ml-2 hidden items-center gap-1 md:flex">
           {navLinks.map((link) => {
             const active = pathname === link.href;
@@ -112,13 +113,14 @@ export default function AppHeader({ token: tokenProp, leftSlot, rightSlot, child
         </nav>
       </div>
       {/* shrink-0: icon buttons keep their size; the min-w-0 left block
-          absorbs any squeeze on narrow screens. Right-to-left order:
-          drawer (rightSlot), mobile menu, children (model picker, new
-          conversation), theme toggle. */}
+          absorbs any squeeze on narrow screens. Small-screen order, left to
+          right: logo, leftSlot (conversation shortcuts) | children (model
+          picker, new conversation), theme toggle, mobile menu, rightSlot
+          (drawer). */}
       <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+        {children}
         {/* Theme */}
         <ThemeToggle />
-        {children}
         {/* Mobile nav */}
         <div ref={menuRef} className="relative md:hidden">
           <button
