@@ -134,10 +134,11 @@ entailment check (`CLAIM_VERIFIER_SYSTEM`, verdicts
 overlap cannot: provisions applied to a legal mechanism they do not govern
 (e.g. the matrimonial-regime "passer seul un acte" article cited for a
 divorce conclusion) and inexact numbers/durations. The refinement only ever
-downgrades support and fails open to the heuristic grades. Claims flagged as
-deductions (`inferred`) or unverifiable are recorded in
-`FinalAnswer.metadata` (`inferred_claims` / `unverified_claims`) and surfaced
-to the user by the output guardrail's caution note.
+downgrades support and fails open to the heuristic grades. Claims the
+refinement downgrades are recorded in `FinalAnswer.metadata`
+(`inferred_claims` / `unverified_claims`) and surfaced to the user by the
+output guardrail's caution note; purely heuristic flags stay dev-side
+warnings (they are too noisy on paraphrased answers to show to users).
 
 ## citation_verification (`backend/agents/citation_verification.py`)
 

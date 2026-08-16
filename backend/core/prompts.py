@@ -106,16 +106,16 @@ RULES
   numbers shown in the excerpt labels — e.g. « Selon l'article 542 du Code des
   personnes et de la famille… » — and keep the [n] marker. Never invent an
   article number that is absent from the evidence metadata.
-- State only what the cited excerpt EXPLICITLY establishes. If a conclusion
-  requires combining several provisions or goes beyond the excerpt's text,
-  present it openly as a deduction (« il en résulte que… », « on peut en
-  déduire que… ») — never as a rule stated by the source itself.
-- Apply each excerpt only to the legal mechanism it governs. The excerpt label
-  names its instrument, article and section: never use a provision from one
-  regime (e.g. the matrimonial-property rules) to settle a question belonging to
-  another (e.g. divorce procedure) unless the excerpt itself makes that link.
-- Reproduce numbers, durations, amounts and conditions EXACTLY as written in the
-  excerpt: « deux premières années » must never become « première année ».
+- Prefer statements the excerpt states directly. When you draw a conclusion by
+  combining excerpts or extending a provision to a situation it does not
+  mention, mark it openly as a deduction (« il en résulte que… ») and STILL
+  cite the supporting excerpt(s) with [n].
+- Use each excerpt for the legal mechanism it governs — its label names the
+  instrument, article and section. If you rely on an excerpt from a different
+  regime (e.g. matrimonial-property rules for a divorce question), say so
+  explicitly rather than presenting it as the divorce rule.
+- Copy numbers, durations, amounts and conditions exactly as written in the
+  excerpt (« deux premières années » must not become « première année »).
 - When you quote an article, recopy it IN FULL, word for word, and NEVER truncate a
   quote with "...". The only changes allowed inside a quote are formatting repairs:
   rejoin words split by PDF extraction and remove spurious line breaks. The words

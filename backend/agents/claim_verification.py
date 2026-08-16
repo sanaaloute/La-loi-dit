@@ -357,9 +357,14 @@ class ClaimVerificationAgent(Agent):
         # "claims" from that message would only produce noise warnings.
         heuristic_levels = {c.claim_id: c.support_level for c in claims}
         claims = await refine_support_with_llm(claims, evidence, ctx)
-        refined = sum(
-            1 for c in claims if heuristic_levels.get(c.claim_id) is not c.support_level
-        )
+        # Claims the LLM refinement actually downgraded: only those carry a
+        # user-facing signal. Heuristic insufficiency alone is too noisy on
+        # paraphrased answers (small models reword heavily) — it stays a
+        # dev-side warning, exactly as before the refinement existed.
+        downgraded = [
+            c for c in claims if heuristic_levels.get(c.claim_id) is not c.support_level
+        ]
+        refined = len(downgraded)
         direct = sum(1 for c in claims if c.support_level is SupportLevel.DIRECT)
         indirect = sum(1 for c in claims if c.support_level is SupportLevel.INDIRECT)
         insufficient = sum(1 for c in claims if c.support_level is SupportLevel.INSUFFICIENT)
@@ -367,6 +372,11 @@ class ClaimVerificationAgent(Agent):
         # LLM-flagged deductions: related excerpt, but the claim goes beyond
         # its text (e.g. provision applied to a mechanism it does not govern).
         inferred = [c for c in claims if c.support_level is SupportLevel.INDIRECT and c.verification_note]
+        flagged_unverified = [
+            c
+            for c in downgraded
+            if c.support_level in (SupportLevel.INSUFFICIENT, SupportLevel.CONTRADICTORY)
+        ]
 
         warnings: list[str] = []
         if final is not None:
@@ -374,15 +384,14 @@ class ClaimVerificationAgent(Agent):
             language = final.language or state.get("language", "") or "fr"
             english = language.startswith("en")
             if insufficient:
-                # Surfaced to the user by the output guardrail's caution note.
-                final.metadata["unverified_claims"] = [
-                    c.text[:200] for c in claims if c.support_level is SupportLevel.INSUFFICIENT
-                ][:3]
                 warnings.append(
                     f"{insufficient} statement(s) could not be verified against the available sources."
                     if english
                     else f"Certaines affirmations n'ont pas pu être vérifiées dans les sources ({insufficient})."
                 )
+            if flagged_unverified:
+                # Surfaced to the user by the output guardrail's caution note.
+                final.metadata["unverified_claims"] = [c.text[:200] for c in flagged_unverified[:3]]
             if inferred:
                 final.metadata["inferred_claims"] = [c.text[:200] for c in inferred[:3]]
                 warnings.append(
