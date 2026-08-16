@@ -789,7 +789,7 @@ export default function ChatWindow() {
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 rows={2}
-                placeholder="Votre question juridique… (Entrée pour envoyer, Maj+Entrée pour sauter une ligne)"
+                placeholder="Posez votre question."
                 className={`w-full resize-none rounded-xl border border-gray-200 bg-white py-3 pl-4 text-sm text-gray-900 placeholder:text-gray-400 focus:border-accent/60 focus:bg-white focus:outline-none disabled:opacity-60 ${
                   recording || (micSupported && !busy) ? "pr-24" : "pr-14"
                 }`}

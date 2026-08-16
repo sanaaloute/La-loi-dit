@@ -61,7 +61,7 @@ export default function ModelPicker({ token, value, onChange }: ModelPickerProps
   }
 
   return (
-    <div ref={ref} className="relative hidden sm:block">
+    <div ref={ref} className="relative">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -69,7 +69,8 @@ export default function ModelPicker({ token, value, onChange }: ModelPickerProps
         title="Choisir le modèle"
       >
         <Cpu className="h-4 w-4 text-accent" />
-        <span className="max-w-40 truncate">{current?.label ?? "Modèle"}</span>
+        {/* Icon-only on small screens: the header is crowded on phones. */}
+        <span className="hidden max-w-40 truncate sm:inline">{current?.label ?? "Modèle"}</span>
         <ChevronDown className="h-3.5 w-3.5 text-gray-500" />
       </button>
       {open && (

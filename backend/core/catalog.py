@@ -334,14 +334,24 @@ def find_model(tier: Optional[str], model_id: str, *, settings: Optional[Setting
 
 
 def default_model(tier: Optional[str], *, settings: Optional[Settings] = None) -> str:
-    """The tier's default model — the MID catalog option.
+    """The tier's default model.
 
-    Catalog model lists are ordered cheap -> premium; the default sits in
-    the middle, and cheap-model routing (see model_router) drops trivial
+    Follows the deployment's default provider (``settings.llm_provider``): its
+    first catalog entry wins, so an Ollama-Cloud-first deployment defaults to
+    an Ollama Cloud model. Without a provider (or when it has no entry in the
+    tier's catalog), the MID option wins — catalog model lists are ordered
+    cheap -> premium, and cheap-model routing (see model_router) drops trivial
     queries to the first (cheapest) entry.
     """
     models = allowed_models(tier, settings=settings)
-    return models[len(models) // 2].id if models else ""
+    if not models:
+        return ""
+    provider = (settings.llm_provider if settings is not None else "").strip().lower()
+    if provider:
+        for entry in models:
+            if entry.provider == provider:
+                return entry.id
+    return models[len(models) // 2].id
 
 
 def all_models_with_access(tier: Optional[str], *, settings: Optional[Settings] = None) -> list[dict[str, Any]]:
