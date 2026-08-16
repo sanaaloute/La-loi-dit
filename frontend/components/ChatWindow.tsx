@@ -41,6 +41,7 @@ import {
   submitFeedback,
   transcribeAudio,
   type ChatResponse,
+  type ChatSessionDetail,
   type ExportItem,
   type StreamEvent,
 } from "@/lib/api";
@@ -49,6 +50,7 @@ interface Message {
   id: string;
   role: "user" | "assistant";
   text: string;
+  ts?: string;
   response?: ChatResponse;
   streaming?: boolean;
   error?: boolean;
@@ -80,6 +82,42 @@ function emptyStatuses(): Record<string, NodeStatus> {
   const statuses: Record<string, NodeStatus> = {};
   for (const node of PIPELINE_NODES) statuses[node.id] = "pending";
   return statuses;
+}
+
+/** Map the persisted session history to UI messages (shared by loadSession
+ * and the dropped-connection recovery). */
+function mapHistoryMessages(detail: ChatSessionDetail): Message[] {
+  return detail.messages.map((m) => ({
+    id: nextId(),
+    role: m.role,
+    text: m.role === "assistant" && m.answer ? m.answer.answer : m.content,
+    ts: m.created_at,
+    response:
+      m.role === "assistant" && m.answer
+        ? {
+            session_id: detail.session_id,
+            answer: m.answer,
+            trace: [],
+            latency_ms: 0,
+            trace_id: "",
+          }
+        : undefined,
+  }));
+}
+
+/** Chat timeline timestamp: HH:MM today, DD/MM HH:MM for older messages. */
+function formatMessageTime(iso?: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  const time = d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  if (sameDay) return time;
+  return `${d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })} ${time}`;
 }
 
 export default function ChatWindow() {
@@ -205,6 +243,7 @@ export default function ChatWindow() {
       id: nextId(),
       role: "assistant",
       text: response.answer.answer,
+      ts: new Date().toISOString(),
       response,
     };
     // Delta playback: the provisional streaming message is REPLACED by the
@@ -231,7 +270,7 @@ export default function ChatWindow() {
     setMessages((prev) =>
       prev.some((m) => m.id === msgId)
         ? prev.map((m) => (m.id === msgId ? { ...m, text: m.text + text } : m))
-        : [...prev, { id: msgId, role: "assistant", text, streaming: true }],
+        : [...prev, { id: msgId, role: "assistant", text, ts: new Date().toISOString(), streaming: true }],
     );
   }, []);
 
@@ -243,11 +282,11 @@ export default function ChatWindow() {
   }, []);
 
   const failWith = useCallback((detail: string) => {
-    setMessages((prev) => [...prev, { id: nextId(), role: "assistant", text: detail, error: true }]);
+    setMessages((prev) => [...prev, { id: nextId(), role: "assistant", text: detail, ts: new Date().toISOString(), error: true }]);
   }, []);
 
   const quotaReached = useCallback((detail: string) => {
-    setMessages((prev) => [...prev, { id: nextId(), role: "assistant", text: detail, quota: true }]);
+    setMessages((prev) => [...prev, { id: nextId(), role: "assistant", text: detail, ts: new Date().toISOString(), quota: true }]);
   }, []);
 
   const loadSession = useCallback(
@@ -260,22 +299,7 @@ export default function ChatWindow() {
       setStatuses(emptyStatuses());
       try {
         const detail = await getSession(id, token);
-        const loaded: Message[] = detail.messages.map((m) => ({
-          id: nextId(),
-          role: m.role,
-          text: m.role === "assistant" && m.answer ? m.answer.answer : m.content,
-          response:
-            m.role === "assistant" && m.answer
-              ? {
-                  session_id: detail.session_id,
-                  answer: m.answer,
-                  trace: [],
-                  latency_ms: 0,
-                  trace_id: "",
-                }
-              : undefined,
-        }));
-        setMessages(loaded);
+        setMessages(mapHistoryMessages(detail));
         setSessionIdState(detail.session_id);
         setSessionId(detail.session_id);
       } catch (err) {
@@ -285,6 +309,62 @@ export default function ChatWindow() {
       }
     },
     [token, busy, failWith],
+  );
+
+  // Mobile connections die mid-run while the backend keeps working and
+  // persists the completed answer in the session history. Poll that history
+  // (backend runs are capped at ~10 min) instead of failing outright.
+  const recoverAnswer = useCallback(
+    async (sid: string, sendStart: number): Promise<boolean> => {
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 20_000));
+        try {
+          const detail = await getSession(sid, token);
+          const msgs = detail.messages;
+          const last = msgs[msgs.length - 1];
+          if (
+            last?.role === "assistant" &&
+            last.answer &&
+            msgs[msgs.length - 2]?.role === "user" &&
+            Date.parse(last.created_at) >= sendStart - 5000
+          ) {
+            // The run completed server-side while we were disconnected:
+            // adopt the server history wholesale.
+            setMessages(mapHistoryMessages(detail));
+            markAllDone();
+            setHistoryRefresh((k) => k + 1);
+            return true;
+          }
+        } catch {
+          // History not readable yet — keep polling.
+        }
+      }
+      return false;
+    },
+    [token, markAllDone],
+  );
+
+  /** Recovery with a transient "reconnecting" bubble (removed on failure). */
+  const attemptRecovery = useCallback(
+    async (sid: string, sendStart: number): Promise<boolean> => {
+      const noticeId = nextId();
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: noticeId,
+          role: "assistant",
+          text: "Connexion interrompue — récupération de la réponse en cours…",
+          ts: new Date().toISOString(),
+          streaming: true,
+        },
+      ]);
+      const recovered = await recoverAnswer(sid, sendStart);
+      if (!recovered) {
+        setMessages((prev) => prev.filter((m) => m.id !== noticeId));
+      }
+      return recovered;
+    },
+    [recoverAnswer],
   );
 
   const sendFeedback = useCallback(
@@ -315,7 +395,7 @@ export default function ChatWindow() {
       streamMsgIdRef.current = null;
       setMessages((prev) => prev.filter((m) => m.id !== streamId));
     }
-    setMessages((prev) => [...prev, { id: nextId(), role: "assistant", text: "Génération interrompue par l'utilisateur." }]);
+    setMessages((prev) => [...prev, { id: nextId(), role: "assistant", text: "Génération interrompue par l'utilisateur.", ts: new Date().toISOString() }]);
   }, []);
 
   const stop = useCallback(() => {
@@ -412,11 +492,15 @@ export default function ChatWindow() {
     setBusy(true);
     setStatuses(emptyStatuses());
     setTab("agents");
-    setMessages((prev) => [...prev, { id: nextId(), role: "user", text: query }]);
+    setMessages((prev) => [...prev, { id: nextId(), role: "user", text: query, ts: new Date().toISOString() }]);
 
     const request = { query, session_id: sid, language: "fr", model: model ?? undefined };
+    const sendStart = Date.now();
     let streamed = false;
     let cancelled = false;
+    // Distinguishes a backend-reported failure (nothing to recover) from a
+    // dropped connection (the backend may still complete and persist).
+    let serverFailed = false;
 
     try {
       await streamChat(
@@ -442,6 +526,8 @@ export default function ChatWindow() {
             cancelled = true;
             discardStreamingMessage();
           } else if (event.type === "error") {
+            // The backend itself reported the failure — nothing to recover.
+            serverFailed = true;
             throw new Error(event.detail || "Erreur pendant le traitement");
           }
         },
@@ -465,6 +551,15 @@ export default function ChatWindow() {
             interrupted();
           } else if (postErr instanceof ApiError && postErr.status === 429) {
             quotaReached(postErr.message);
+          } else if (!(postErr instanceof ApiError)) {
+            // Network-level failure: the POST may still complete server-side
+            // (and persist the answer) even though this client is gone.
+            const recovered = await attemptRecovery(sid, sendStart);
+            if (!recovered) {
+              failWith(
+                postErr instanceof Error ? `Erreur : ${postErr.message}` : "Une erreur est survenue.",
+              );
+            }
           } else {
             failWith(
               postErr instanceof Error ? `Erreur : ${postErr.message}` : "Une erreur est survenue.",
@@ -472,14 +567,19 @@ export default function ChatWindow() {
           }
         }
       } else {
-        discardStreamingMessage();
-        failWith(err instanceof Error ? `Erreur : ${err.message}` : "Une erreur est survenue.");
+        // Dropped connection mid-stream: poll the session history for the
+        // answer the backend may still be computing before declaring failure.
+        const recovered = !serverFailed && (await attemptRecovery(sid, sendStart));
+        if (!recovered) {
+          discardStreamingMessage();
+          failWith(err instanceof Error ? `Erreur : ${err.message}` : "Une erreur est survenue.");
+        }
       }
     } finally {
       abortRef.current = null;
       setBusy(false);
     }
-  }, [input, busy, sessionId, token, model, markNode, acceptResponse, appendDelta, discardStreamingMessage, failWith, quotaReached, interrupted]);
+  }, [input, busy, sessionId, token, model, markNode, acceptResponse, appendDelta, discardStreamingMessage, attemptRecovery, failWith, quotaReached, interrupted]);
 
   function newConversation() {
     setMessages([]);
@@ -632,6 +732,9 @@ export default function ChatWindow() {
                     <div key={msg.id} className="flex justify-end gap-3">
                       <div className="max-w-[85%] rounded-2xl rounded-br-sm border border-accent/20 bg-accent/5 px-4 py-3 text-sm text-gray-900 shadow-panel sm:max-w-[75%]">
                         {msg.text}
+                        {msg.ts && (
+                          <div className="mt-1 text-right text-[10px] text-gray-400">{formatMessageTime(msg.ts)}</div>
+                        )}
                       </div>
                       <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-200 text-gray-600">
                         <User className="h-4 w-4" />
@@ -695,6 +798,9 @@ export default function ChatWindow() {
                           <div className="markdown-body text-sm text-gray-700">
                             <ReactMarkdown>{msg.text}</ReactMarkdown>
                           </div>
+                        )}
+                        {msg.ts && (
+                          <div className="mt-1.5 text-[10px] text-gray-400">{formatMessageTime(msg.ts)}</div>
                         )}
                         {msg.response && (
                           <div className="mt-2 flex items-center justify-end gap-2">
