@@ -551,9 +551,10 @@ export default function ChatWindow() {
             interrupted();
           } else if (postErr instanceof ApiError && postErr.status === 429) {
             quotaReached(postErr.message);
-          } else if (!(postErr instanceof ApiError)) {
-            // Network-level failure: the POST may still complete server-side
-            // (and persist the answer) even though this client is gone.
+          } else if (!(postErr instanceof ApiError) || postErr.status >= 500) {
+            // Network failure OR a bare proxy 5xx (the Next.js proxy answers
+            // a plain 500 when the mobile connection drops): the backend run
+            // may still complete and persist the answer — poll the history.
             const recovered = await attemptRecovery(sid, sendStart);
             if (!recovered) {
               failWith(
