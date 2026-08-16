@@ -101,6 +101,23 @@ def answer_relevance(answer_text: str, expected_keywords: Iterable[str]) -> floa
     return hits / len(keywords)
 
 
+def forbidden_terms(answer_text: str, forbidden_keywords: Iterable[str]) -> list[str]:
+    """Return the forbidden keywords found in the answer (normalized substring).
+
+    Negative expectations for cases where a specific output is known-wrong:
+    an article number from another legal regime (e.g. "223-12" cited for a
+    divorce question) or a known-incorrect formulation (« première année du
+    mariage » where the code says « deux premières années »).  A case fails
+    when this returns a non-empty list.
+    """
+    normalized_answer = _normalize(answer_text)
+    return [
+        k
+        for k in forbidden_keywords
+        if k and k.strip() and _normalize(k) in normalized_answer
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Retrieval-level metrics
 # ---------------------------------------------------------------------------

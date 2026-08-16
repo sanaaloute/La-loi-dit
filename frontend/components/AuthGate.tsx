@@ -36,7 +36,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   // mount to avoid flashing the login card to authenticated users.
   if (!hydrated) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gray-100">
+      <div className="flex h-dvh items-center justify-center bg-gray-100">
         <Scale className="h-8 w-8 animate-pulse text-accent" />
       </div>
     );
@@ -44,7 +44,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (!token) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-100 px-4 py-10">
+      <div className="flex min-h-dvh items-center justify-center bg-gray-100 px-4 py-10">
         <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl backdrop-blur-xl sm:p-8">
           <div className="mb-6 flex flex-col items-center gap-3 text-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-accent">

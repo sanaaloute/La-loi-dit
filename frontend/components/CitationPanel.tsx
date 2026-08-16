@@ -45,6 +45,9 @@ export default function CitationPanel({ citations }: CitationPanelProps) {
                 )}
               </div>
               <p className="mt-1 truncate text-[11px] text-gray-500">{citation.document_name}</p>
+              {citation.law_number && (
+                <p className="mt-0.5 text-[11px] text-gray-500">Loi n°{citation.law_number}</p>
+              )}
               {citation.url && (
                 <a
                   href={citation.url}

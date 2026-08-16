@@ -92,10 +92,11 @@ def test_is_model_allowed_per_tier():
 
 
 def test_default_model_and_unknown_tier():
-    # Default = mid catalog option (cheap routing handles trivial queries).
-    # Gratuit catalog is OpenRouter + Ollama only.
-    assert catalog.default_model("gratuit") == "openrouter/meta-llama/llama-3.3-70b-instruct"
-    assert catalog.default_model("pro") == "tokenfree/kimi-k2.5"
+    # Default = the first Ollama Cloud catalog entry, for every tier (users
+    # can pick another model from the UI; cheap routing handles trivial
+    # queries). Gratuit catalog is OpenRouter + Ollama only.
+    assert catalog.default_model("gratuit") == "ollama/gpt-oss:20b"
+    assert catalog.default_model("pro") == "ollama/gpt-oss:20b"
     assert catalog.get_tier("inconnu") == catalog.get_tier("gratuit")
 
 
@@ -135,7 +136,7 @@ def test_catalog_env_override_invalid_falls_back(monkeypatch):
     monkeypatch.setenv("LEGAL_AI_TIER_CATALOG_JSON", "{not valid json")
     get_settings.cache_clear()
     try:
-        assert catalog.default_model("gratuit") == "openrouter/meta-llama/llama-3.3-70b-instruct"
+        assert catalog.default_model("gratuit") == "ollama/gpt-oss:20b"
     finally:
         get_settings.cache_clear()
 
@@ -415,10 +416,11 @@ def test_resolve_llm_denies_unknown_model():
 
 def test_resolve_llm_defaults_to_tier_model():
     ctx = SimpleNamespace(settings=Settings(llm_provider="openai"), llm=None)
-    # No query -> tier default (mid option); cheap routing needs a query.
-    assert resolve_llm(ctx, _user("gratuit")).model == "openrouter/meta-llama/llama-3.3-70b-instruct"
-    assert resolve_llm(ctx, None).model == "openrouter/meta-llama/llama-3.3-70b-instruct"  # anonymous
-    assert resolve_llm(ctx, _user("pro")).model == "openai/kimi-k2.5"
+    # No query -> tier default (the Ollama Cloud catalog entry, every tier);
+    # cheap routing needs a query.
+    assert resolve_llm(ctx, _user("gratuit")).model == "ollama/gpt-oss:20b"
+    assert resolve_llm(ctx, None).model == "ollama/gpt-oss:20b"  # anonymous
+    assert resolve_llm(ctx, _user("pro")).model == "ollama/gpt-oss:20b"
 
 
 def test_resolve_llm_mock_mode_keeps_ctx_llm_but_gates():
@@ -562,7 +564,7 @@ def test_models_endpoint_anonymous_sees_gratuit(client):
     response = client.get("/api/v1/models")
     assert response.status_code == 200
     data = response.json()
-    assert data["default_model"] == "openrouter/meta-llama/llama-3.3-70b-instruct"
+    assert data["default_model"] == "ollama/gpt-oss:20b"
     by_id = {m["id"]: m for m in data["models"]}
     assert by_id["ollama/gpt-oss:20b"]["allowed"] is True
     assert by_id["openrouter/deepseek/deepseek-chat"]["allowed"] is True

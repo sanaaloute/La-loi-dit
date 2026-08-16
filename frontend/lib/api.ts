@@ -28,6 +28,7 @@ export interface Citation {
   chunk_id?: string | null;
   document_name: string;
   article?: string | null;
+  law_number?: string | null;
   url?: string | null;
   verified: boolean;
 }
@@ -666,33 +667,55 @@ export async function streamChat(
   let buffer = "";
   let sawFinal = false;
 
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+  // Silence watchdog: the backend emits a heartbeat every ~10 s, so a long
+  // stretch with no bytes at all means the connection died silently (mobile
+  // networks and OS suspend/resume cycles drop sockets without any error
+  // event). Fail loudly so the caller can recover from the session history.
+  const SILENCE_TIMEOUT_MS = 45_000;
+  let silenceTimer: ReturnType<typeof setTimeout> | undefined;
+  const readChunk = (): Promise<ReadableStreamReadResult<Uint8Array>> =>
+    new Promise((resolve, reject) => {
+      silenceTimer = setTimeout(() => {
+        void reader.cancel().catch(() => {});
+        reject(new Error("La connexion au serveur s'est interrompue (aucune donnée reçue)."));
+      }, SILENCE_TIMEOUT_MS);
+      reader.read().then(resolve, reject);
+    });
 
-    // SSE frames are separated by a blank line.
-    let sepIndex: number;
-    while ((sepIndex = buffer.indexOf("\n\n")) !== -1) {
-      const frame = buffer.slice(0, sepIndex);
-      buffer = buffer.slice(sepIndex + 2);
-      for (const line of frame.split("\n")) {
-        if (!line.startsWith("data:")) continue;
-        const payload = line.slice(5).trim();
-        if (!payload) continue;
-        try {
-          const event = JSON.parse(payload) as StreamEvent;
-          if (event.type === "final" || event.type === "cancelled" || event.type === "error") {
-            sawFinal = true;
+  try {
+    for (;;) {
+      const result = await readChunk();
+      clearTimeout(silenceTimer);
+      silenceTimer = undefined;
+      const { done, value } = result;
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // SSE frames are separated by a blank line.
+      let sepIndex: number;
+      while ((sepIndex = buffer.indexOf("\n\n")) !== -1) {
+        const frame = buffer.slice(0, sepIndex);
+        buffer = buffer.slice(sepIndex + 2);
+        for (const line of frame.split("\n")) {
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim();
+          if (!payload) continue;
+          try {
+            const event = JSON.parse(payload) as StreamEvent;
+            if (event.type === "final" || event.type === "cancelled" || event.type === "error") {
+              sawFinal = true;
+            }
+            onEvent(event);
+          } catch (err) {
+            // A handler error (e.g. backend "error" frame) must propagate.
+            if (err instanceof Error && !(err instanceof SyntaxError)) throw err;
+            // Ignore malformed frames; the final event or an error will follow.
           }
-          onEvent(event);
-        } catch (err) {
-          // A handler error (e.g. backend "error" frame) must propagate.
-          if (err instanceof Error && !(err instanceof SyntaxError)) throw err;
-          // Ignore malformed frames; the final event or an error will follow.
         }
       }
     }
+  } finally {
+    if (silenceTimer) clearTimeout(silenceTimer);
   }
 
   // A stream that ends with no terminal frame was truncated somewhere between

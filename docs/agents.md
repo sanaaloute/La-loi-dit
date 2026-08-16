@@ -125,7 +125,19 @@ raise bilingual warnings; contradictory ones also set
 `requires_human_review`. Recomputes
 `confidence_breakdown.legal_support_confidence` as the supported-claim
 fraction dampened by the contradicted share; the aggregate `confidence` is
-untouched. Pure heuristic — no LLM call.
+untouched.
+
+With a real LLM provider (`claim_llm_refinement_enabled`, skipped for the
+`mock` provider), heuristic-supported claims are then re-graded by an LLM
+entailment check (`CLAIM_VERIFIER_SYSTEM`, verdicts
+`explicit`/`inferred`/`unsupported`/`contradicted`) that catches what term
+overlap cannot: provisions applied to a legal mechanism they do not govern
+(e.g. the matrimonial-regime "passer seul un acte" article cited for a
+divorce conclusion) and inexact numbers/durations. The refinement only ever
+downgrades support and fails open to the heuristic grades. Claims flagged as
+deductions (`inferred`) or unverifiable are recorded in
+`FinalAnswer.metadata` (`inferred_claims` / `unverified_claims`) and surfaced
+to the user by the output guardrail's caution note.
 
 ## citation_verification (`backend/agents/citation_verification.py`)
 
@@ -147,7 +159,12 @@ another language (the template states the language limitation).
 
 Final policy gate. Applies confidence thresholds (warning below 0.55,
 `requires_human_review` below 0.40), unsafe-legal-advice detection, and
-appends the mandatory legal disclaimer (French/English).
+appends the mandatory legal disclaimer (French/English). When claim
+verification flagged deductions or unverifiable statements
+(`FinalAnswer.metadata["inferred_claims"]` / `["unverified_claims"]`), a
+bilingual caution note is appended to the answer body before the disclaimer —
+this note is user-facing and survives the production wiping of internal
+warnings.
 
 ## refusal (`backend/agents/refusal.py`)
 

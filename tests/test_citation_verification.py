@@ -116,3 +116,53 @@ async def test_node_renumbers_final_answer_and_citations():
     assert update["final_answer"].answer == "Selon la Charte [1]."
     assert [c.label for c in update["final_answer"].citations] == ["[1]"]
     assert update["final_answer"].citations[0].document_name == "Charte"
+
+
+# ---------------------------------------------------------------------------
+# Versioned citations: law number and lifecycle in labels / Citation objects
+# ---------------------------------------------------------------------------
+
+
+def test_citation_label_includes_law_number_without_duplication():
+    chunk = EvidenceChunk(
+        document_name="Code des personnes et de la famille",
+        article="242-1",
+        law_number="012-2025/ALT",
+        content="x",
+    )
+    assert (
+        chunk.citation_label()
+        == "Code des personnes et de la famille, loi n°012-2025/ALT, art. 242-1"
+    )
+    # No duplication when the document name already carries the number.
+    named = EvidenceChunk(
+        document_name="Code des personnes et de la famille (Loi n°012-2025/ALT)",
+        article="242-1",
+        law_number="012-2025/ALT",
+        content="x",
+    )
+    assert named.citation_label().count("012-2025/ALT") == 1
+
+
+def test_citation_label_marks_non_active_sources():
+    chunk = EvidenceChunk(
+        document_name="Ancien code", article="1", status="repealed", content="x"
+    )
+    assert "repealed" in chunk.citation_label()
+    # Active/unknown sources keep the historical label format.
+    active = EvidenceChunk(document_name="Code du travail", article="95", content="x")
+    assert active.citation_label() == "Code du travail, art. 95"
+
+
+def test_verified_citation_carries_law_number():
+    evidence = [
+        EvidenceChunk(
+            document_name="Code des personnes et de la famille du Burkina Faso (Loi n°012-2025/ALT)",
+            article="242-1",
+            law_number="012-2025/ALT",
+            content="Le divorce peut être demandé par un époux, notamment en cas d'adultère.",
+        )
+    ]
+    verified, _ = extract_citations("Le divorce peut être demandé par un époux [1].", evidence)
+    assert verified[0].law_number == "012-2025/ALT"
+    assert verified[0].article == "242-1"

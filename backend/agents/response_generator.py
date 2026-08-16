@@ -346,6 +346,7 @@ class ResponseGeneratorAgent(CompletionAgent):
                     chunk_id=chunk.chunk_id if chunk else None,
                     document_name=chunk.document_name if chunk else "",
                     article=chunk.article if chunk else None,
+                    law_number=chunk.law_number if chunk else None,
                     url=chunk.url if chunk else None,
                     verified=True,
                 )

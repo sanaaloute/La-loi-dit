@@ -13,7 +13,7 @@ interface PageShellProps {
  */
 export default function PageShell({ header, disclaimer, children }: PageShellProps) {
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
+    <div className="flex h-dvh flex-col overflow-hidden">
       {header}
       <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6">{children}</main>
       {disclaimer && (

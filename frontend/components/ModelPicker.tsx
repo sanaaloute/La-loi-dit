@@ -17,18 +17,23 @@ const TIER_BADGES: Partial<Record<Tier, { label: string; className: string }>> =
 
 export default function ModelPicker({ token, value, onChange }: ModelPickerProps) {
   const [models, setModels] = useState<ModelInfo[] | null>(null);
+  const [defaultModel, setDefaultModel] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!token) {
       setModels(null);
+      setDefaultModel(null);
       return;
     }
     let cancelled = false;
     listModels(token)
       .then((res) => {
-        if (!cancelled) setModels(res.models);
+        if (!cancelled) {
+          setModels(res.models);
+          setDefaultModel(res.default_model);
+        }
       })
       .catch(() => {
         if (!cancelled) setModels(null);
@@ -51,7 +56,10 @@ export default function ModelPicker({ token, value, onChange }: ModelPickerProps
   // Hidden when logged out or when the model list cannot be loaded.
   if (!token || !models || models.length === 0) return null;
 
-  const current = models.find((m) => m.id === value);
+  // No explicit choice: the backend default (Ollama Cloud) applies — show it
+  // as the effective selection so the picker reflects what actually runs.
+  const effective = value ?? defaultModel;
+  const current = models.find((m) => m.id === effective);
 
   function select(model: ModelInfo) {
     if (!model.allowed) return;
@@ -91,7 +99,7 @@ export default function ModelPicker({ token, value, onChange }: ModelPickerProps
               >
                 <span className="flex min-w-0 items-center gap-2">
                   <span className="truncate">{model.label}</span>
-                  {model.id === value && (
+                  {model.id === effective && (
                     <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
                   )}
                 </span>

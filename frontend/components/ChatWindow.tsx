@@ -138,6 +138,14 @@ export default function ChatWindow() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // The in-flight run (set while a question is being processed): lets the
+  // page-resume handler know a stream is open and worth recovering.
+  const inFlightRef = useRef<{ sid: string; sendStart: number; query: string } | null>(null);
+  // Marks an abort triggered by the page-resume handler (as opposed to the
+  // user pressing stop): the catch path then recovers instead of interrupting.
+  const resumeRecoveryRef = useRef(false);
+  // Session id found in localStorage at mount (undefined = not read yet).
+  const mountSessionIdRef = useRef<string | null | undefined>(undefined);
   // Id of the provisional assistant message receiving `delta` frames (the
   // verified-answer playback), replaced by the full message on `final`.
   const streamMsgIdRef = useRef<string | null>(null);
@@ -183,7 +191,12 @@ export default function ChatWindow() {
   }, []);
 
   useEffect(() => {
-    setSessionIdState(getSessionId());
+    const stored = getSessionId();
+    // Snapshot for the refresh-restore effect below: only the conversation
+    // found in localStorage at mount may be reloaded — never a session
+    // created later by the user (a new run must not be clobbered).
+    mountSessionIdRef.current = stored;
+    setSessionIdState(stored);
     setModelState(getModel());
   }, []);
 
@@ -311,22 +324,66 @@ export default function ChatWindow() {
     [token, busy, failWith],
   );
 
+  // Restore the active conversation after a page refresh: the session id
+  // survives in localStorage but the messages live only in the backend —
+  // reload them once the token is available. A session that cannot be read
+  // (deleted elsewhere, expired run…) is dropped silently for a fresh chat;
+  // it remains listed in the history panel when it exists server-side.
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    const sid = mountSessionIdRef.current;
+    if (restoredRef.current || !token || !sid || sessionId !== sid) return;
+    restoredRef.current = true;
+    setHistoryLoading(true);
+    getSession(sid, token)
+      .then((detail) => setMessages(mapHistoryMessages(detail)))
+      .catch(() => {
+        setSessionId(null);
+        setSessionIdState(null);
+      })
+      .finally(() => setHistoryLoading(false));
+  }, [token, sessionId]);
+
+  // Mobile OSes (screen lock, app switch) kill the SSE socket while the page
+  // is suspended, without firing any error: on resume the frozen reader would
+  // hang until the silence watchdog fires (~45 s). Abort it immediately so the
+  // history-recovery path (catch block in `send`) starts at once; the backend
+  // keeps running and persists the answer meanwhile.
+  useEffect(() => {
+    const onResume = () => {
+      if (document.visibilityState !== "visible") return;
+      if (!inFlightRef.current) return;
+      resumeRecoveryRef.current = true;
+      abortRef.current?.abort();
+    };
+    document.addEventListener("visibilitychange", onResume);
+    window.addEventListener("pageshow", onResume);
+    return () => {
+      document.removeEventListener("visibilitychange", onResume);
+      window.removeEventListener("pageshow", onResume);
+    };
+  }, []);
+
   // Mobile connections die mid-run while the backend keeps working and
   // persists the completed answer in the session history. Poll that history
   // (backend runs are capped at ~10 min) instead of failing outright.
   const recoverAnswer = useCallback(
-    async (sid: string, sendStart: number): Promise<boolean> => {
+    async (sid: string, sendStart: number, query: string): Promise<boolean> => {
       for (let attempt = 0; attempt < 30; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 20_000));
         try {
           const detail = await getSession(sid, token);
           const msgs = detail.messages;
           const last = msgs[msgs.length - 1];
+          const preceding = msgs[msgs.length - 2];
           if (
             last?.role === "assistant" &&
             last.answer &&
-            msgs[msgs.length - 2]?.role === "user" &&
-            Date.parse(last.created_at) >= sendStart - 5000
+            preceding?.role === "user" &&
+            // Clock-skew-proof match: the persisted user turn IS the question
+            // we sent, or the answer is fresh enough (server timestamps can
+            // differ from the client clock, so the text match wins).
+            (preceding.content === query || Date.parse(last.created_at) >= sendStart - 5000)
           ) {
             // The run completed server-side while we were disconnected:
             // adopt the server history wholesale.
@@ -346,7 +403,7 @@ export default function ChatWindow() {
 
   /** Recovery with a transient "reconnecting" bubble (removed on failure). */
   const attemptRecovery = useCallback(
-    async (sid: string, sendStart: number): Promise<boolean> => {
+    async (sid: string, sendStart: number, query: string): Promise<boolean> => {
       const noticeId = nextId();
       setMessages((prev) => [
         ...prev,
@@ -358,7 +415,7 @@ export default function ChatWindow() {
           streaming: true,
         },
       ]);
-      const recovered = await recoverAnswer(sid, sendStart);
+      const recovered = await recoverAnswer(sid, sendStart, query);
       if (!recovered) {
         setMessages((prev) => prev.filter((m) => m.id !== noticeId));
       }
@@ -487,6 +544,7 @@ export default function ChatWindow() {
     const controller = new AbortController();
     abortRef.current = controller;
     streamMsgIdRef.current = null;
+    resumeRecoveryRef.current = false;
 
     setInput("");
     setBusy(true);
@@ -496,6 +554,7 @@ export default function ChatWindow() {
 
     const request = { query, session_id: sid, language: "fr", model: model ?? undefined };
     const sendStart = Date.now();
+    inFlightRef.current = { sid, sendStart, query };
     let streamed = false;
     let cancelled = false;
     // Distinguishes a backend-reported failure (nothing to recover) from a
@@ -537,7 +596,19 @@ export default function ChatWindow() {
       if (cancelled) interrupted();
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
-        interrupted();
+        if (resumeRecoveryRef.current) {
+          // Aborted by the page-resume handler: the OS killed the socket while
+          // the page was suspended, but the backend drains and persists the
+          // run — recover the answer from the session history.
+          resumeRecoveryRef.current = false;
+          const recovered = await attemptRecovery(sid, sendStart, query);
+          if (!recovered) {
+            discardStreamingMessage();
+            failWith("La connexion s'est interrompue. Réessayez.");
+          }
+        } else {
+          interrupted();
+        }
       } else if (err instanceof ApiError && err.status === 409) {
         interrupted();
       } else if (err instanceof ApiError && err.status === 429) {
@@ -555,7 +626,7 @@ export default function ChatWindow() {
             // Network failure OR a bare proxy 5xx (the Next.js proxy answers
             // a plain 500 when the mobile connection drops): the backend run
             // may still complete and persist the answer — poll the history.
-            const recovered = await attemptRecovery(sid, sendStart);
+            const recovered = await attemptRecovery(sid, sendStart, query);
             if (!recovered) {
               failWith(
                 postErr instanceof Error ? `Erreur : ${postErr.message}` : "Une erreur est survenue.",
@@ -570,7 +641,7 @@ export default function ChatWindow() {
       } else {
         // Dropped connection mid-stream: poll the session history for the
         // answer the backend may still be computing before declaring failure.
-        const recovered = !serverFailed && (await attemptRecovery(sid, sendStart));
+        const recovered = !serverFailed && (await attemptRecovery(sid, sendStart, query));
         if (!recovered) {
           discardStreamingMessage();
           failWith(err instanceof Error ? `Erreur : ${err.message}` : "Une erreur est survenue.");
@@ -578,6 +649,7 @@ export default function ChatWindow() {
       }
     } finally {
       abortRef.current = null;
+      inFlightRef.current = null;
       setBusy(false);
     }
   }, [input, busy, sessionId, token, model, markNode, acceptResponse, appendDelta, discardStreamingMessage, attemptRecovery, failWith, quotaReached, interrupted]);
@@ -636,7 +708,7 @@ export default function ChatWindow() {
   ];
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
+    <div className="flex h-dvh flex-col overflow-hidden">
       {/* Header */}
       <AppHeader
         token={token}
@@ -652,16 +724,17 @@ export default function ChatWindow() {
             </button>
           ) : undefined
         }
+        rightSlot={
+          <button
+            type="button"
+            onClick={() => setPanelOpen((v) => !v)}
+            className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 md:hidden"
+            title="Panneau latéral"
+          >
+            <PanelRight className="h-5 w-5" />
+          </button>
+        }
       >
-        <button
-          type="button"
-          onClick={() => setPanelOpen((v) => !v)}
-          className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 md:hidden"
-          title="Panneau latéral"
-        >
-          <PanelRight className="h-5 w-5" />
-        </button>
-        <ModelPicker token={token} value={model} onChange={setModelState} />
         <button
           type="button"
           onClick={newConversation}
@@ -670,6 +743,7 @@ export default function ChatWindow() {
           <MessageSquarePlus className="h-4 w-4" />
           Nouvelle conversation
         </button>
+        <ModelPicker token={token} value={model} onChange={setModelState} />
       </AppHeader>
 
       {/* Main area */}
@@ -872,7 +946,7 @@ export default function ChatWindow() {
           </div>
 
           {/* Input */}
-          <div className="glass z-10 px-4 py-3 sm:px-6">
+          <div className="z-10 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-6">
             <div className="mx-auto max-w-3xl">
               {recording && (
                 <div className="mb-2 flex items-center gap-2 text-sm text-red-700">

@@ -90,6 +90,53 @@ async def test_stream_events_emits_deltas_before_final(seeded_graph, settings, m
     assert "".join(delta_texts) == final_answer
 
 
+async def test_stream_events_persist_after_client_disconnect(seeded_ctx, seeded_graph, settings, monkeypatch):
+    """A dropped client connection must not kill the run: the completed turn
+    is still persisted in the session history (the mobile recovery path polls
+    it when the SSE stream dies mid-run)."""
+    from backend.api.routers import chat as chat_router
+    from backend.core.models import ChatRequest, parse_answer_json
+    from backend.workflows.graph import initial_state
+
+    monkeypatch.setattr(chat_router, "ANSWER_DELTA_DELAY_SECONDS", 0)
+
+    query = "Quel est le préavis de licenciement pour un employé mensualisé ?"
+    session_id = "sess-disconnect"
+    gen = chat_router._stream_events(
+        seeded_graph,
+        initial_state(query, session_id=session_id),
+        ChatRequest(query=query, session_id=session_id),
+        "anonymous",
+        settings,
+        memory=seeded_ctx.memory,
+    )
+
+    frames: list[str] = []
+
+    async def consume() -> None:
+        async for frame in gen:
+            frames.append(frame)
+
+    consumer = asyncio.create_task(consume())
+    # Wait for the first frame, then drop the client: uvicorn cancels the
+    # response generator's task exactly this way on a broken connection.
+    while not frames:
+        await asyncio.sleep(0.005)
+    consumer.cancel()
+    try:
+        await consumer
+    except asyncio.CancelledError:
+        pass
+    await gen.aclose()
+
+    # The user/assistant turn landed in memory even though no `final` frame
+    # could be delivered on the dead stream.
+    messages = await seeded_ctx.memory.get_session_messages("anonymous", session_id)
+    assert [m.role for m in messages] == ["user", "assistant"]
+    assert messages[0].content == query
+    assert parse_answer_json(messages[1].content) is not None
+
+
 async def test_cached_stream_events_emit_deltas(monkeypatch):
     """Cache hits replay the same delta playback before the final frame."""
     import json

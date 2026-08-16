@@ -12,7 +12,7 @@ pipeline** over the golden dataset and writes JSON + Markdown reports.
 
 ## Golden dataset
 
-`backend/evaluation/golden_dataset.json` — 25 illustrative cases covering 10
+`backend/evaluation/golden_dataset.json` — 26 illustrative cases covering 10
 legal domains (≥ 2 cases each). Per-case schema:
 
 | Field | Required | Meaning |
@@ -23,6 +23,7 @@ legal domains (≥ 2 cases each). Per-case schema:
 | `expected_documents` | no | Document names that must appear in the evidence (substring, accent-insensitive) |
 | `expected_articles` | no | Article numbers expected in the evidence (drives rank-aware metrics) |
 | `expected_issues` | no | `[{"category": ..., "keywords": [...]}]` issue categories the answer must touch |
+| `forbidden_keywords` | no | Strings the answer must NOT contain (accent-insensitive) — known-wrong articles or formulations; any hit fails the case |
 | `domain`, `difficulty`, `language`, `scenario_date`, `note` | no | Metadata; `scenario_date` anchors timeline questions |
 
 The dataset header carries a `disclaimer` (sample cases, not legal advice) and
@@ -35,6 +36,12 @@ planned future work).
 declares `expected_articles` (90, 95, 96, 97, 98, 100) and seven
 `expected_issues`: `dismissal_grounds`, `notice`, `compensation`,
 `accrued_rights`, `unfair_dismissal`, `legal_remedies`, `jurisdiction`.
+
+The divorce-refusal regression case `qa-026` exercises the 2025 family code
+(Loi n°012-2025/ALT): the answer must ground the grounds and the
+non-conciliation procedure (art. 242-1, 242-13), and `forbidden_keywords`
+fails it if it applies the matrimonial-regime art. 223-12 to divorce or
+claims a one-year bar to consentement mutuel (art. 241-4 says two years).
 
 The **issue-coverage gate** enforces the regression: `issue_coverage` counts an
 issue category as covered when at least one of its keywords appears in the

@@ -92,6 +92,13 @@ class OutputGuardrailAgent(Agent):
             english = answer.language.startswith("en")
             full = get_prompt("DISCLAIMER_EN" if english else "DISCLAIMER_FR")
             note = get_prompt("INFO_NOTE_EN" if english else "INFO_NOTE_FR")
+            # Claim verification flagged deductions or unverifiable statements:
+            # say so in the answer itself (production hides internal warnings,
+            # so this note is the durable user-facing channel).
+            if answer.metadata.get("unverified_claims") or answer.metadata.get("inferred_claims"):
+                caution = get_prompt("CLAIM_UNCERTAINTY_NOTE_EN" if english else "CLAIM_UNCERTAINTY_NOTE_FR")
+                if caution.strip() not in answer.answer:
+                    answer.answer = answer.answer.rstrip() + caution
             if self._needs_full_disclaimer(state, answer, ctx):
                 disclaimer = full
             else:

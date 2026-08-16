@@ -190,3 +190,31 @@ def test_issue_coverage_accent_insensitive_keywords():
     ratio, missing = metrics.issue_coverage("Le préavis est d'un mois.", issues)
     assert ratio == 1.0
     assert missing == []
+
+
+# ---------------------------------------------------------------------------
+# forbidden_terms (negative expectations)
+# ---------------------------------------------------------------------------
+
+
+def test_forbidden_terms_detects_wrong_regime_article():
+    answer = (
+        "Le juge peut autoriser le divorce selon l'article 223-12 du code. "
+        "Le divorce par consentement mutuel est interdit la première année du mariage."
+    )
+    found = metrics.forbidden_terms(answer, ["223-12", "première année du mariage"])
+    assert found == ["223-12", "première année du mariage"]
+
+
+def test_forbidden_terms_ignores_correct_formulation():
+    # « deux premières années du mariage » must NOT trip « première année du mariage ».
+    answer = "Le divorce par consentement mutuel ne peut être demandé au cours des deux premières années du mariage."
+    assert metrics.forbidden_terms(answer, ["première année du mariage"]) == []
+    assert metrics.forbidden_terms(answer, []) == []
+    assert metrics.forbidden_terms(answer, ["", "  "]) == []
+
+
+def test_forbidden_terms_is_accent_and_case_insensitive():
+    assert metrics.forbidden_terms("…PREMIÈRE ANNÉE DU MARIAGE…", ["premiere annee du mariage"]) == [
+        "premiere annee du mariage"
+    ]

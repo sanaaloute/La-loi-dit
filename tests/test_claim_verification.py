@@ -9,6 +9,7 @@ from backend.agents.claim_verification import (
     verify_claims,
 )
 from backend.core.models import (
+    Claim,
     ConfidenceBreakdown,
     EvidenceChunk,
     FinalAnswer,
@@ -245,3 +246,175 @@ async def test_node_skips_claim_extraction_when_no_evidence():
     assert final.warnings == []
     assert not final.requires_human_review
     assert update["trace"][-1].startswith("claim_verification: 0 claims")
+
+
+# ---------------------------------------------------------------------------
+# LLM entailment refinement (regime-mismatch / deduction detection)
+# ---------------------------------------------------------------------------
+
+
+class _StubLLM:
+    """Minimal async LLM stub returning a canned completion."""
+
+    def __init__(self, response: str):
+        self.response = response
+        self.calls: list[tuple[str, str]] = []
+
+    async def complete(self, system: str, user: str, temperature: float = 0.0):
+        self.calls.append((system, user))
+        return self.response
+
+
+def _refinement_ctx(response: str, *, provider: str = "test-llm", enabled: bool = True):
+    from types import SimpleNamespace
+
+    from backend.core.config import Settings
+
+    settings = Settings(
+        llm_provider=provider,
+        claim_llm_refinement_enabled=enabled,
+    )
+    return SimpleNamespace(settings=settings, llm=_StubLLM(response))
+
+
+def _cited_claim(level: SupportLevel, chunk: EvidenceChunk) -> Claim:
+    from backend.core.models import ClaimSource
+
+    return Claim(
+        claim_id="claim-01",
+        text=(
+            "Le président du tribunal de grande instance peut autoriser l'époux "
+            "réclamant le divorce à passer seul l'acte malgré le refus de son "
+            "conjoint [1]."
+        ),
+        support_level=level,
+        sources=[
+            ClaimSource(
+                chunk_id=chunk.chunk_id,
+                document_name=chunk.document_name,
+                article=chunk.article,
+                support_level=level,
+            )
+        ],
+    )
+
+
+def _matrimonial_chunk() -> EvidenceChunk:
+    # The art. 223-12 trap: topically close to a divorce-refusal question but
+    # governing matrimonial-regime acts, not divorce.
+    return EvidenceChunk(
+        document_name="Code des personnes et de la famille",
+        article="223-12",
+        section="Régimes matrimoniaux",
+        law_number="012-2025/ALT",
+        content=(
+            "Un époux peut être autorisé par ordonnance du président du "
+            "tribunal de grande instance à passer seul un acte pour lequel le "
+            "concours ou le consentement de son conjoint serait nécessaire, "
+            "si son refus n'est pas justifié par l'intérêt de la famille."
+        ),
+    )
+
+
+async def test_refinement_downgrades_regime_mismatch_to_inferred():
+    from backend.agents.claim_verification import refine_support_with_llm
+
+    chunk = _matrimonial_chunk()
+    claim = _cited_claim(SupportLevel.DIRECT, chunk)
+    ctx = _refinement_ctx(
+        '{"verdicts": [{"claim_id": "claim-01", "verdict": "inferred", '
+        '"reason": "l\'extrait régit les actes du régime matrimonial, pas le divorce"}]}'
+    )
+    [result] = await refine_support_with_llm([claim], [chunk], ctx)
+    assert result.support_level is SupportLevel.INDIRECT
+    assert "régime matrimonial" in (result.verification_note or "")
+    assert len(ctx.llm.calls) == 1
+
+
+async def test_refinement_downgrades_to_contradicted():
+    from backend.agents.claim_verification import refine_support_with_llm
+
+    chunk = _matrimonial_chunk()
+    claim = _cited_claim(SupportLevel.INDIRECT, chunk)
+    ctx = _refinement_ctx(
+        '{"verdicts": [{"claim_id": "claim-01", "verdict": "contradicted", '
+        '"reason": "l\'extrait exclut ce cas"}]}'
+    )
+    [result] = await refine_support_with_llm([claim], [chunk], ctx)
+    assert result.support_level is SupportLevel.CONTRADICTORY
+
+
+async def test_refinement_keeps_explicit_verdict_untouched():
+    from backend.agents.claim_verification import refine_support_with_llm
+
+    chunk = _matrimonial_chunk()
+    claim = _cited_claim(SupportLevel.DIRECT, chunk)
+    ctx = _refinement_ctx(
+        '{"verdicts": [{"claim_id": "claim-01", "verdict": "explicit", "reason": "ok"}]}'
+    )
+    [result] = await refine_support_with_llm([claim], [chunk], ctx)
+    assert result.support_level is SupportLevel.DIRECT
+    assert result.verification_note is None
+
+
+async def test_refinement_never_upgrades_heuristic_flags():
+    from backend.agents.claim_verification import refine_support_with_llm
+
+    chunk = _matrimonial_chunk()
+    # Heuristic said INSUFFICIENT: the claim is not submitted at all.
+    claim = _cited_claim(SupportLevel.INSUFFICIENT, chunk)
+    ctx = _refinement_ctx(
+        '{"verdicts": [{"claim_id": "claim-01", "verdict": "explicit", "reason": "ok"}]}'
+    )
+    [result] = await refine_support_with_llm([claim], [chunk], ctx)
+    assert result.support_level is SupportLevel.INSUFFICIENT
+    assert ctx.llm.calls == []
+
+
+async def test_refinement_fails_open_on_garbage_response():
+    from backend.agents.claim_verification import refine_support_with_llm
+
+    chunk = _matrimonial_chunk()
+    claim = _cited_claim(SupportLevel.DIRECT, chunk)
+    ctx = _refinement_ctx("ceci n'est pas du JSON")
+    [result] = await refine_support_with_llm([claim], [chunk], ctx)
+    assert result.support_level is SupportLevel.DIRECT
+    assert result.verification_note is None
+
+
+async def test_refinement_skipped_for_mock_provider_and_when_disabled():
+    from backend.agents.claim_verification import refine_support_with_llm
+
+    chunk = _matrimonial_chunk()
+    for ctx in (
+        _refinement_ctx("{}", provider="mock"),
+        _refinement_ctx("{}", enabled=False),
+        None,
+    ):
+        claim = _cited_claim(SupportLevel.DIRECT, chunk)
+        [result] = await refine_support_with_llm([claim], [chunk], ctx)
+        assert result.support_level is SupportLevel.DIRECT
+        if ctx is not None:
+            assert ctx.llm.calls == []
+
+
+async def test_node_flags_inferred_claims_for_user_caution():
+    state = _state(
+        "Le préavis est d'un mois pour les employés mensualisés [1]. "
+        "Le taux de la TVA est de 18% selon le code [2]."
+    )
+    ctx = _refinement_ctx(
+        '{"verdicts": ['
+        '{"claim_id": "claim-01", "verdict": "inferred", "reason": "déduction au-delà du texte"},'
+        '{"claim_id": "claim-02", "verdict": "explicit", "reason": "ok"}'
+        "]}"
+    )
+    update = await claim_verification_node(state, ctx)
+    final = update["final_answer"]
+    levels = {c.claim_id: c.support_level for c in final.claims}
+    assert levels == {"claim-01": SupportLevel.INDIRECT, "claim-02": SupportLevel.DIRECT}
+    assert final.metadata["inferred_claims"], "inferred claims must be flagged for the caution note"
+    assert any("déductions" in w for w in final.warnings)
+    assert "1 refined by llm" in update["trace"][-1]
+    # Both claims remain "supported" (DIRECT/INDIRECT): no support downgrade.
+    assert final.confidence_breakdown.legal_support_confidence == 1.0

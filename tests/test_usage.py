@@ -295,8 +295,8 @@ def test_complex_query_routes_to_tier_default():
     ctx = _ctx(Settings(llm_provider="openai"))
     complex_query = "Explique et analyse les clauses du contrat de travail en détail."
     client = resolve_llm(ctx, _user("gratuit"), query=complex_query)
-    # Gratuit default is the mid OpenRouter model.
-    assert client.model == "openrouter/meta-llama/llama-3.3-70b-instruct"
+    # Gratuit default is the Ollama Cloud catalog entry.
+    assert client.model == "ollama/gpt-oss:20b"
 
 
 def test_explicit_model_always_wins():

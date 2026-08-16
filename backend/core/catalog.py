@@ -336,16 +336,20 @@ def find_model(tier: Optional[str], model_id: str, *, settings: Optional[Setting
 def default_model(tier: Optional[str], *, settings: Optional[Settings] = None) -> str:
     """The tier's default model.
 
-    Follows the deployment's default provider (``settings.llm_provider``): its
-    first catalog entry wins, so an Ollama-Cloud-first deployment defaults to
-    an Ollama Cloud model. Without a provider (or when it has no entry in the
-    tier's catalog), the MID option wins — catalog model lists are ordered
-    cheap -> premium, and cheap-model routing (see model_router) drops trivial
-    queries to the first (cheapest) entry.
+    Ollama Cloud is the platform default for EVERY tier: its first catalog
+    entry wins regardless of the deployment's ``llm_provider``. Users can
+    override the choice from the UI model picker. When the tier's catalog
+    has no Ollama entry, the deployment's default provider wins instead;
+    failing both, the MID option applies — catalog model lists are ordered
+    cheap -> premium, and cheap-model routing (see model_router) drops
+    trivial queries to the first (cheapest) entry.
     """
     models = allowed_models(tier, settings=settings)
     if not models:
         return ""
+    for entry in models:
+        if entry.provider == "ollama":
+            return entry.id
     provider = (settings.llm_provider if settings is not None else "").strip().lower()
     if provider:
         for entry in models:

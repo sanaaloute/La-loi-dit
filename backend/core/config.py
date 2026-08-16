@@ -423,6 +423,12 @@ class Settings(BaseSettings):
     claim_direct_term_coverage: float = 0.7  # term-coverage bar for DIRECT support
     claim_indirect_term_coverage: float = 0.4  # term-coverage bar for INDIRECT support
     claim_contradiction_term_coverage: float = 0.6  # topical-overlap bar above which a number mismatch contradicts
+    # LLM entailment refinement of claim support (claim_verification): re-grades
+    # heuristic-supported claims against their cited excerpt to catch statements
+    # the source does not explicitly establish (e.g. a provision applied to a
+    # legal mechanism it does not govern). Skipped for the mock provider.
+    claim_llm_refinement_enabled: bool = True
+    claim_llm_refinement_max_claims: int = 15  # cap on claims refined per answer (cost bound)
     # conflict resolver / context agent
     conflict_prefix_chars: int = 80  # identical-content prefix length compared before declaring a contradiction
     context_buffer_limit: int = 20  # default window size of the load_conversation_buffer tool

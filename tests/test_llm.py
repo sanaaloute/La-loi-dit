@@ -147,3 +147,23 @@ def test_with_failover_noop_without_keys_or_mock() -> None:
     no_keys = Settings(llm_provider="openai", llm_fallback_providers="openrouter")
     plain = LLMClient(no_keys)
     assert with_failover(plain, no_keys) is plain
+
+
+async def test_mock_routes_response_system_prompt_to_grounded_answer(settings: Settings) -> None:
+    """Regression: RESPONSE_SYSTEM must not collide with earlier mock branches.
+
+    The mock router dispatches on system-prompt substrings ("reason" for the
+    reasoning agent, "reflect" for reflection, ...) checked BEFORE the
+    respond/answer branch. A response-generator prompt containing such a
+    substring silently gets the wrong canned completion — the answer then has
+    no [n] markers and every evaluation case collapses to the unavailability
+    fallback.
+    """
+    from backend.core.prompts import get_prompt
+
+    client = LLMClient(settings)
+    user = 'Question: q ?\n\nPreuves:\n[1] Code du travail, art. 95: Le préavis est d\'un mois.'
+    for name in ("RESPONSE_SYSTEM", "RESPONSE_SECTIONS_ADDENDUM_FR", "RESPONSE_CASE_ANALYSIS_ADDENDUM_FR"):
+        system = get_prompt("RESPONSE_SYSTEM") + ("" if name == "RESPONSE_SYSTEM" else get_prompt(name))
+        result = await client.complete(system, user)
+        assert "[1]" in result, f"mock routed {name} away from the grounded answer"

@@ -13,7 +13,10 @@ interface AppHeaderProps {
   token?: string | null;
   /** Extra content at the far left (e.g. the chat history drawer button). */
   leftSlot?: React.ReactNode;
-  /** Right-side slot, rendered before the theme toggle. */
+  /** Extra content at the far right (e.g. the chat side-panel drawer button),
+   * after the mobile menu. */
+  rightSlot?: React.ReactNode;
+  /** Right-side slot, rendered between the theme toggle and the mobile menu. */
   children?: React.ReactNode;
 }
 
@@ -26,7 +29,7 @@ const NAV_LINKS = [
 
 const ADMIN_LINK = { href: "/admin", label: "Admin", icon: ShieldCheck };
 
-export default function AppHeader({ token: tokenProp, leftSlot, children }: AppHeaderProps) {
+export default function AppHeader({ token: tokenProp, leftSlot, rightSlot, children }: AppHeaderProps) {
   const [internalToken] = useAuthToken();
   const [menuOpen, setMenuOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -109,8 +112,12 @@ export default function AppHeader({ token: tokenProp, leftSlot, children }: AppH
         </nav>
       </div>
       {/* shrink-0: icon buttons keep their size; the min-w-0 left block
-          absorbs any squeeze on narrow screens. */}
+          absorbs any squeeze on narrow screens. Right-to-left order:
+          drawer (rightSlot), mobile menu, children (model picker, new
+          conversation), theme toggle. */}
       <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+        {/* Theme */}
+        <ThemeToggle />
         {children}
         {/* Mobile nav */}
         <div ref={menuRef} className="relative md:hidden">
@@ -145,8 +152,7 @@ export default function AppHeader({ token: tokenProp, leftSlot, children }: AppH
             </div>
           )}
         </div>
-        {/* Theme */}
-        <ThemeToggle />
+        {rightSlot}
       </div>
     </header>
   );

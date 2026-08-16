@@ -252,3 +252,43 @@ async def test_development_keeps_internal_warnings_and_conflicts(ctx):
     answer = (await OutputGuardrailAgent().run(state, ctx))["final_answer"]
     assert "Réponse potentiellement incomplète" in answer.warnings[0]
     assert len(answer.conflicts) == 1
+
+
+# ---------------------------------------------------------------------------
+# Claim-verification caution note (user-facing, survives production wiping)
+# ---------------------------------------------------------------------------
+
+
+async def test_caution_note_appended_when_claims_flagged(ctx):
+    from backend.agents.output_guardrail import OutputGuardrailAgent
+
+    answer = _grounded_answer()
+    answer.metadata["unverified_claims"] = ["Le juge peut prononcer sans motif"]
+    state = _guardrail_state(answer, QuestionType.FACTUAL)
+    text = (await OutputGuardrailAgent().run(state, ctx))["final_answer"].answer
+    assert "Prudence" in text
+    assert "professionnel du droit" in text
+    # The caution is part of the answer body, before the info-note separator.
+    assert text.index("Prudence") < text.index("à titre informatif")
+
+
+async def test_caution_note_appended_for_inferred_claims_in_production(ctx):
+    from backend.agents.output_guardrail import OutputGuardrailAgent
+
+    ctx.settings.env = "production"
+    answer = _grounded_answer()
+    answer.metadata["inferred_claims"] = ["Le juge peut se substituer au conjoint"]
+    state = _guardrail_state(answer, QuestionType.FACTUAL)
+    final = (await OutputGuardrailAgent().run(state, ctx))["final_answer"]
+    # Internal warnings are wiped in production; the caution note is not.
+    assert final.warnings == []
+    assert "Caution" not in final.answer  # French answer -> French note
+    assert "Prudence" in final.answer
+
+
+async def test_no_caution_note_without_flagged_claims(ctx):
+    from backend.agents.output_guardrail import OutputGuardrailAgent
+
+    state = _guardrail_state(_grounded_answer(), QuestionType.FACTUAL)
+    text = (await OutputGuardrailAgent().run(state, ctx))["final_answer"].answer
+    assert "Prudence" not in text

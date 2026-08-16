@@ -387,6 +387,7 @@ class IngestionPipeline:
         "auscgie-societes-commerciales-gie-2014.pdf": "Acte uniforme OHADA relatif au droit des sociétés commerciales et du GIE (2014)",
         "audcg-droit-commercial-general-2010.pdf": "Acte uniforme OHADA relatif au droit commercial général (2010)",
         "aus-suretes-2010.pdf": "Acte uniforme OHADA relatif aux sûretés (2010)",
+        "burkina-faso-code-des-personnes-et-de-la-famille-2025.pdf": "Code des personnes et de la famille du Burkina Faso (Loi n°012-2025/ALT du 1er septembre 2025)",
     }
 
     @classmethod

@@ -422,41 +422,87 @@ async def _stream_events(
         session_id = state.get("session_id", "")
         _register_run(session_id, pump)
         logger.info("chat stream started", extra={"session_id": session_id, "query": payload.query[:80]})
+        cancelled = False
+        # Set when the client connection dropped mid-run: the generator then
+        # finishes the run silently (see the drain loop below) instead of
+        # aborting it, so the answer still lands in the session history.
+        disconnected = False
         try:
-            cancelled = False
             deadline = started + settings.chat_run_timeout_seconds
-            while True:
-                try:
-                    kind, value = await asyncio.wait_for(
-                        queue.get(), timeout=settings.chat_heartbeat_seconds
-                    )
-                except asyncio.TimeoutError:
-                    # Heartbeat: keeps proxies (nginx, next dev) and browsers
-                    # from killing the idle SSE connection during long nodes.
-                    if time.perf_counter() > deadline:
+            try:
+                while True:
+                    try:
+                        kind, value = await asyncio.wait_for(
+                            queue.get(), timeout=settings.chat_heartbeat_seconds
+                        )
+                    except asyncio.TimeoutError:
+                        # Heartbeat: keeps proxies (nginx, next dev) and browsers
+                        # from killing the idle SSE connection during long nodes.
+                        if time.perf_counter() > deadline:
+                            pump.cancel()
+                            logger.warning("chat stream timed out", extra={"session_id": session_id})
+                            yield f"data: {json.dumps({'type': 'error', 'detail': 'Le traitement a dépassé le délai maximal. Réessayez ou simplifiez la question.'}, ensure_ascii=False)}\n\n"
+                            return
+                        yield ": hb\n\n"
+                        continue
+                    if kind == "update":
+                        update = value.get("update")
+                        if isinstance(update, dict):
+                            _merge_update(merged, update)
+                        frame = _strip_trace_frame(value, include_trace)
+                        yield f"data: {json.dumps({'type': 'update', **frame}, ensure_ascii=False, default=str)}\n\n"
+                    elif kind == "node_start":
+                        yield f"data: {json.dumps({'type': 'node_start', 'node': value}, ensure_ascii=False)}\n\n"
+                    elif kind == "done":
+                        break
+                    elif kind == "cancelled":
+                        cancelled = True
+                        logger.info("chat stream cancelled by user", extra={"session_id": session_id})
+                        yield f"data: {json.dumps({'type': 'cancelled'}, ensure_ascii=False)}\n\n"
+                        break
+                    else:  # "error"
+                        raise value
+            except (asyncio.CancelledError, GeneratorExit):
+                # Client disconnected mid-run (mobile screen lock, network
+                # drop, proxy cut): the server cancels this generator. Do NOT
+                # abort the graph run with it — drain it to completion below
+                # so the turn is still persisted; the client recovers the
+                # answer by polling the session history.
+                disconnected = True
+            if disconnected and not cancelled:
+                logger.info(
+                    "chat stream client disconnected; finishing the run silently",
+                    extra={"session_id": session_id},
+                )
+                while True:
+                    if pump.done() and queue.empty():
+                        break
+                    remaining = deadline - time.perf_counter()
+                    if remaining <= 0:
+                        pump.cancel()
+                        break
+                    try:
+                        kind, value = await asyncio.wait_for(queue.get(), timeout=remaining)
+                    except asyncio.TimeoutError:
                         pump.cancel()
                         logger.warning("chat stream timed out", extra={"session_id": session_id})
-                        yield f"data: {json.dumps({'type': 'error', 'detail': 'Le traitement a dépassé le délai maximal. Réessayez ou simplifiez la question.'}, ensure_ascii=False)}\n\n"
-                        return
-                    yield ": hb\n\n"
-                    continue
-                if kind == "update":
-                    update = value.get("update")
-                    if isinstance(update, dict):
-                        _merge_update(merged, update)
-                    frame = _strip_trace_frame(value, include_trace)
-                    yield f"data: {json.dumps({'type': 'update', **frame}, ensure_ascii=False, default=str)}\n\n"
-                elif kind == "node_start":
-                    yield f"data: {json.dumps({'type': 'node_start', 'node': value}, ensure_ascii=False)}\n\n"
-                elif kind == "done":
-                    break
-                elif kind == "cancelled":
-                    cancelled = True
-                    logger.info("chat stream cancelled by user", extra={"session_id": session_id})
-                    yield f"data: {json.dumps({'type': 'cancelled'}, ensure_ascii=False)}\n\n"
-                    break
-                else:  # "error"
-                    raise value
+                        break
+                    if kind == "update":
+                        update = value.get("update")
+                        if isinstance(update, dict):
+                            _merge_update(merged, update)
+                    elif kind == "done":
+                        break
+                    elif kind == "cancelled":
+                        cancelled = True
+                        break
+                    elif kind != "node_start":  # "error": failed runs persist nothing.
+                        logger.warning(
+                            "chat stream run failed after client disconnect: %s",
+                            value,
+                            extra={"session_id": session_id},
+                        )
+                        break
             if cancelled:
                 return
             response = _final_response(merged, state, started, trace_id=trace_id)
@@ -504,6 +550,14 @@ async def _stream_events(
                     cache_payload = response.model_dump(mode="json")
                     cache_payload["trace"] = []
                     await answer_cache.set(payload.query, model_id, cache_payload)
+            if disconnected:
+                # The run completed and was persisted after the client left;
+                # nothing more can be sent on the dead stream.
+                logger.info(
+                    "chat stream done after client disconnect",
+                    extra={"session_id": session_id, "latency_ms": response.latency_ms},
+                )
+                return
             # Verified-answer playback: `delta` frames type the text out in
             # the UI; the `final` frame stays the authoritative payload.
             async for _delta in _answer_deltas(response.answer.answer):
@@ -516,7 +570,8 @@ async def _stream_events(
         except Exception as exc:  # surface failures to the client instead of hanging
             logger.exception("chat stream failed", extra={"session_id": session_id})
             metrics.errors_total.labels(kind="chat_stream").inc()
-            yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)}, ensure_ascii=False)}\n\n"
+            if not disconnected:
+                yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)}, ensure_ascii=False)}\n\n"
         finally:
             _unregister_run(session_id, pump)
             if not pump.done():

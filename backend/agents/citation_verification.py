@@ -44,6 +44,7 @@ def extract_citations(text: str, evidence: list[EvidenceChunk]) -> tuple[list[Ci
                     chunk_id=chunk.chunk_id,
                     document_name=chunk.document_name,
                     article=chunk.article,
+                    law_number=chunk.law_number,
                     url=chunk.url,
                     verified=True,
                 )

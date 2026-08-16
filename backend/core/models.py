@@ -177,10 +177,17 @@ class EvidenceChunk(BaseModel):
 
     def citation_label(self) -> str:
         parts = [self.document_name or "Document inconnu"]
+        # Version the source when the law number is known and not already part
+        # of the document name, so readers (and the drafting LLM) can tell
+        # e.g. the 2025 family code from its 1989 predecessor.
+        if self.law_number and self.law_number not in parts[0]:
+            parts.append(f"loi n°{self.law_number}")
         if self.article:
             parts.append(f"art. {self.article}")
         if self.section:
             parts.append(f"sec. {self.section}")
+        if self.status and self.status not in ("active", "unknown"):
+            parts.append(self.status)
         return ", ".join(parts)
 
 
@@ -191,6 +198,7 @@ class Citation(BaseModel):
     chunk_id: Optional[str] = None  # resolved evidence chunk
     document_name: str = ""
     article: Optional[str] = None
+    law_number: Optional[str] = None  # instrument version, e.g. "012-2025/ALT"
     url: Optional[str] = None
     verified: bool = False  # True only if traced to real retrieved evidence
 
@@ -221,6 +229,10 @@ class Claim(BaseModel):
     text: str
     support_level: SupportLevel = SupportLevel.INSUFFICIENT  # best of sources
     sources: list[ClaimSource] = Field(default_factory=list)
+    # Why the verdict was assigned — set by the LLM entailment refinement
+    # (e.g. "the excerpt governs matrimonial acts, not divorce"), None for
+    # purely heuristic grades.
+    verification_note: Optional[str] = None
 
 
 # --------------------------------------------------------------------------

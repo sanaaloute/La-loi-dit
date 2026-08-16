@@ -129,6 +129,14 @@ async def evaluate(dataset_path: str, out_path: str) -> dict[str, Any]:
     chunks = seed_evidence()
     vectors = await ctx.embedder.embed([c.content for c in chunks])
     await ctx.vector_store.upsert(chunks, vectors)
+    # Hybrid retrieval like production: seed the BM25 corpus too, otherwise
+    # offline cases hinge solely on hash-embedding noise (top-k membership for
+    # short queries is essentially random as the corpus grows).
+    from backend.retrieval.bm25 import BM25Retriever
+
+    bm25 = BM25Retriever()
+    bm25.add_documents(chunks)
+    ctx.extras["bm25"] = bm25
     graph = build_graph(ctx)
 
     results: list[EvalCaseResult] = []
@@ -148,12 +156,14 @@ async def evaluate(dataset_path: str, out_path: str) -> dict[str, Any]:
         expected_documents = case.get("expected_documents", [])
         expected_articles = case.get("expected_articles", [])
         expected_issues = case.get("expected_issues", [])
+        forbidden_keywords = case.get("forbidden_keywords", [])
         groundedness = metrics.groundedness(answer)
         citation_accuracy = metrics.citation_accuracy(answer)
         relevance = metrics.answer_relevance(answer.answer, expected_keywords)
         precision = metrics.retrieval_precision(answer.evidence, expected_documents)
         recall = metrics.retrieval_recall(answer.evidence, expected_documents)
         hallucination = metrics.hallucination_detected(answer)
+        forbidden_found = metrics.forbidden_terms(answer.answer, forbidden_keywords)
 
         # Issue coverage (spec §38): the answer must touch every declared issue
         # category — an answer discussing only tribunal jurisdiction fails.
@@ -193,6 +203,7 @@ async def evaluate(dataset_path: str, out_path: str) -> dict[str, Any]:
         passed = (
             not hallucination
             and not missing_issues
+            and not forbidden_found
             and citation_accuracy >= _MIN_CITATION_ACCURACY
             and groundedness >= _MIN_GROUNDEDNESS
             and relevance >= _MIN_ANSWER_RELEVANCE
@@ -203,6 +214,8 @@ async def evaluate(dataset_path: str, out_path: str) -> dict[str, Any]:
             f"confidence={answer.confidence:.2f} refused={answer.refused} "
             f"evidence={len(answer.evidence)} chunks"
         )
+        if forbidden_found:
+            detail += f" forbidden_found={','.join(forbidden_found)}"
         if expected_issues:
             covered = len(expected_issues) - len(missing_issues)
             detail += f" issues={covered}/{len(expected_issues)}"

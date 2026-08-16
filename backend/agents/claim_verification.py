@@ -22,13 +22,21 @@ is recomputed as the fraction of supported claims, dampened by the share of
 contradicted ones (see the node docstring).  The aggregate
 ``FinalAnswer.confidence`` semantics stay untouched.
 
-Extension point: ``classify_support`` is a pure function, so an LLM-backed
-refinement (entailment scoring per claim/chunk pair) can replace or gate the
-heuristic without touching extraction, aggregation or the node wiring.
+LLM refinement (:func:`refine_support_with_llm`): the heuristic grades topical
+overlap, so it cannot see that a claim *applies* an excerpt to a legal
+mechanism the excerpt does not govern (e.g. citing the matrimonial-regime
+"passer seul un acte" article to conclude on divorce).  When enabled
+(``claim_llm_refinement_enabled``) and a real LLM provider is configured,
+heuristic-supported claims are re-graded by the LLM against their cited
+excerpt (verdicts explicit / inferred / unsupported / contradicted).  The
+refinement only ever DOWNGRADES support — a heuristic flag is never softened —
+and any LLM/parse failure falls back to the heuristic grades unchanged.
 """
 
 from __future__ import annotations
 
+import json
+import logging
 import re
 from typing import Any, Optional
 
@@ -42,7 +50,10 @@ from backend.core.models import (
     EvidenceChunk,
     SupportLevel,
 )
+from backend.core.prompts import get_prompt
 from backend.core.state import GraphState
+
+logger = logging.getLogger(__name__)
 
 _CITATION_RE = re.compile(r"\[(\d+)\]")
 _HEADING_RE = re.compile(r"^\s*#{1,6}\s+")
@@ -214,6 +225,106 @@ def verify_claims(
     return claims
 
 
+# LLM verdict -> support level.  Severity order used to ensure the refinement
+# only ever downgrades a heuristic grade, never softens one.
+_VERDICT_LEVELS: dict[str, SupportLevel] = {
+    "explicit": SupportLevel.DIRECT,
+    "inferred": SupportLevel.INDIRECT,
+    "unsupported": SupportLevel.INSUFFICIENT,
+    "contradicted": SupportLevel.CONTRADICTORY,
+}
+_SEVERITY = {
+    SupportLevel.DIRECT: 0,
+    SupportLevel.INDIRECT: 1,
+    SupportLevel.INSUFFICIENT: 2,
+    SupportLevel.CONTRADICTORY: 3,
+}
+_REFINEMENT_EXCERPT_CHARS = 1500  # per-excerpt cap in the verifier user message
+
+
+def _best_source_chunk(claim: Claim, by_id: dict[str, EvidenceChunk]) -> Optional[EvidenceChunk]:
+    """Return the chunk that set the claim's verdict (first at the best level)."""
+    for source in claim.sources:
+        if source.support_level is claim.support_level and source.chunk_id in by_id:
+            return by_id[source.chunk_id]
+    for source in claim.sources:  # defensive: any resolvable source
+        if source.chunk_id in by_id:
+            return by_id[source.chunk_id]
+    return None
+
+
+async def refine_support_with_llm(
+    claims: list[Claim],
+    evidence: list[EvidenceChunk],
+    ctx: Optional[AppContext],
+) -> list[Claim]:
+    """Re-grade heuristic-supported claims by LLM entailment (spec §21).
+
+    Only claims the heuristic found DIRECT or INDIRECT are submitted — those
+    are the ones the answer presents as grounded, so a false positive there is
+    what misleads the user.  The LLM verdict is applied only when it is WORSE
+    than the heuristic grade (term overlap cannot see regime mismatches; an
+    entailment verdict cannot prove topical support the heuristic found
+    absent).  Skipped entirely when disabled, without an LLM, or for the mock
+    provider (offline tests/eval keep the deterministic heuristic path); any
+    error returns the heuristic grades unchanged.
+    """
+    if not claims or ctx is None or getattr(ctx, "llm", None) is None:
+        return claims
+    settings = ctx.settings if ctx is not None else None
+    if settings is None or not getattr(settings, "claim_llm_refinement_enabled", False):
+        return claims
+    if getattr(settings, "llm_provider", "mock") == "mock":
+        return claims
+
+    candidates = [
+        c
+        for c in claims
+        if c.support_level in (SupportLevel.DIRECT, SupportLevel.INDIRECT) and c.sources
+    ][: getattr(settings, "claim_llm_refinement_max_claims", 15)]
+    if not candidates:
+        return claims
+
+    by_id = {chunk.chunk_id: chunk for chunk in evidence}
+    blocks: list[str] = []
+    pairs: list[tuple[Claim, EvidenceChunk]] = []
+    for claim in candidates:
+        chunk = _best_source_chunk(claim, by_id)
+        if chunk is None:
+            continue
+        pairs.append((claim, chunk))
+        blocks.append(
+            f'{claim.claim_id}: «{_CITATION_RE.sub("", claim.text).strip()}»\n'
+            f"EXCERPT ({chunk.citation_label()}): "
+            f"«{chunk.content[:_REFINEMENT_EXCERPT_CHARS]}»"
+        )
+    if not blocks:
+        return claims
+
+    user = "CLAIMS AND CITED EXCERPTS:\n\n" + "\n\n".join(blocks)
+    try:
+        raw = await ctx.llm.complete(get_prompt("CLAIM_VERIFIER_SYSTEM"), user, temperature=0.0)
+        match = re.search(r"\{.*\}", raw or "", re.DOTALL)
+        payload = json.loads(match.group(0)) if match else {}
+        verdicts = payload.get("verdicts", [])
+    except Exception as exc:  # fail open to the heuristic grades
+        logger.warning("claim LLM refinement skipped: %s", exc)
+        return claims
+
+    by_claim_id = {claim.claim_id: claim for claim, _ in pairs}
+    for entry in verdicts if isinstance(verdicts, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        claim = by_claim_id.get(str(entry.get("claim_id", "")))
+        level = _VERDICT_LEVELS.get(str(entry.get("verdict", "")))
+        if claim is None or level is None:
+            continue
+        if _SEVERITY[level] > _SEVERITY[claim.support_level]:
+            claim.support_level = level
+            claim.verification_note = str(entry.get("reason", ""))[:300] or None
+    return claims
+
+
 class ClaimVerificationAgent(Agent):
     """Grades every substantive statement of the draft against the evidence.
 
@@ -244,10 +355,18 @@ class ClaimVerificationAgent(Agent):
         # No evidence means the answer took the insufficient-evidence path,
         # which already declares that nothing could be verified — extracting
         # "claims" from that message would only produce noise warnings.
+        heuristic_levels = {c.claim_id: c.support_level for c in claims}
+        claims = await refine_support_with_llm(claims, evidence, ctx)
+        refined = sum(
+            1 for c in claims if heuristic_levels.get(c.claim_id) is not c.support_level
+        )
         direct = sum(1 for c in claims if c.support_level is SupportLevel.DIRECT)
         indirect = sum(1 for c in claims if c.support_level is SupportLevel.INDIRECT)
         insufficient = sum(1 for c in claims if c.support_level is SupportLevel.INSUFFICIENT)
         contradictory = sum(1 for c in claims if c.support_level is SupportLevel.CONTRADICTORY)
+        # LLM-flagged deductions: related excerpt, but the claim goes beyond
+        # its text (e.g. provision applied to a mechanism it does not govern).
+        inferred = [c for c in claims if c.support_level is SupportLevel.INDIRECT and c.verification_note]
 
         warnings: list[str] = []
         if final is not None:
@@ -255,10 +374,21 @@ class ClaimVerificationAgent(Agent):
             language = final.language or state.get("language", "") or "fr"
             english = language.startswith("en")
             if insufficient:
+                # Surfaced to the user by the output guardrail's caution note.
+                final.metadata["unverified_claims"] = [
+                    c.text[:200] for c in claims if c.support_level is SupportLevel.INSUFFICIENT
+                ][:3]
                 warnings.append(
                     f"{insufficient} statement(s) could not be verified against the available sources."
                     if english
                     else f"Certaines affirmations n'ont pas pu être vérifiées dans les sources ({insufficient})."
+                )
+            if inferred:
+                final.metadata["inferred_claims"] = [c.text[:200] for c in inferred[:3]]
+                warnings.append(
+                    f"{len(inferred)} statement(s) are deductions going beyond the cited sources."
+                    if english
+                    else f"Certaines affirmations sont des déductions allant au-delà des sources citées ({len(inferred)})."
                 )
             if contradictory:
                 # A contradicted legal statement is high-impact: always
@@ -288,7 +418,8 @@ class ClaimVerificationAgent(Agent):
                 *state.get("trace", []),
                 f"claim_verification: {len(claims)} claims "
                 f"({direct} direct, {indirect} indirect, "
-                f"{insufficient} insufficient, {contradictory} contradictory)",
+                f"{insufficient} insufficient, {contradictory} contradictory"
+                f"{f', {refined} refined by llm' if refined else ''})",
             ],
         }
 

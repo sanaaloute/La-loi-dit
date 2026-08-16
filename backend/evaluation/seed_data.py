@@ -31,11 +31,14 @@ def _chunk(
     government_body: str,
     url: str,
     confidence: float = 0.9,
+    law_number: str | None = None,
+    section: str | None = None,
 ) -> EvidenceChunk:
     return EvidenceChunk(
         document_id=document_id,
         document_name=document_name,
         article=article,
+        section=section,
         content=content,
         publication_date=publication_date,
         effective_date=publication_date,
@@ -45,6 +48,7 @@ def _chunk(
         source_kind=SearchKind.GOVERNMENT,
         language="fr",
         confidence=confidence,
+        law_number=law_number,
         metadata=dict(_SAMPLE_META),
     )
 
@@ -511,5 +515,129 @@ def seed_evidence() -> list[EvidenceChunk]:
             publication_date=date(2009, 6, 16),
             government_body="Ministère de l'Agriculture",
             url=f"{_JO_URL}/foncier-rural#art-31",
+        ),
+        # --- Code des personnes et de la famille, Loi n°012-2025/ALT ---
+        # The 223-12 chunk is a deliberate DISTRACTOR for the divorce question:
+        # it belongs to the matrimonial-regime rules, not to the divorce
+        # procedure, and a correct answer must not use it to conclude that a
+        # judge can "sign in place of" a refusing spouse.
+        _chunk(
+            document_id="cpf-2025",
+            document_name="Code des personnes et de la famille du Burkina Faso (Loi n°012-2025/ALT)",
+            article="242-1",
+            section="Divorce contentieux",
+            law_number="012-2025/ALT",
+            content=(
+                "Article 242-1 — Le divorce peut être demandé par un époux, "
+                "notamment : 1) lorsque la vie commune est devenue intolérable "
+                "par suite d'adultère, d'excès, de sévices ou injures graves ; "
+                "2) lorsque la vie familiale et la sécurité des enfants sont "
+                "gravement compromises par l'inconduite notoire ou l'abandon "
+                "moral ou matériel du foyer ; 3) en cas d'absence déclarée "
+                "conformément à l'article 112-7 du présent code ; 4) en cas de "
+                "séparation de fait continue depuis trois ans au moins ; 5) en "
+                "cas d'impuissance ou de stérilité médicalement constatée. "
+                "(Divorce contentieux.)"
+            ),
+            authority=AuthorityLevel.LAW,
+            publication_date=date(2025, 9, 1),
+            government_body="Assemblée législative de transition du Burkina Faso",
+            url=f"{_JO_URL}/cpf-2025#art-242-1",
+        ),
+        _chunk(
+            document_id="cpf-2025",
+            document_name="Code des personnes et de la famille du Burkina Faso (Loi n°012-2025/ALT)",
+            article="241-1",
+            section="Divorce par consentement mutuel",
+            law_number="012-2025/ALT",
+            content=(
+                "Article 241-1 — Le divorce par consentement mutuel peut avoir "
+                "lieu sur demande conjointe des époux ou par suite d'un accord "
+                "postérieur constaté devant le juge au contentieux. Le "
+                "consentement de chacun des époux n'est valable que s'il émane "
+                "d'une volonté libre et exempte de tout vice."
+            ),
+            authority=AuthorityLevel.LAW,
+            publication_date=date(2025, 9, 1),
+            government_body="Assemblée législative de transition du Burkina Faso",
+            url=f"{_JO_URL}/cpf-2025#art-241-1",
+        ),
+        _chunk(
+            document_id="cpf-2025",
+            document_name="Code des personnes et de la famille du Burkina Faso (Loi n°012-2025/ALT)",
+            article="241-4",
+            section="Divorce par consentement mutuel",
+            law_number="012-2025/ALT",
+            content=(
+                "Article 241-4 — Le divorce par consentement mutuel ne peut "
+                "être demandé au cours des deux premières années du mariage. "
+                "Lorsque l'un des deux époux se trouve placé sous l'un des "
+                "régimes de protection des incapables, aucune demande en "
+                "divorce par consentement mutuel ne peut être présentée."
+            ),
+            authority=AuthorityLevel.LAW,
+            publication_date=date(2025, 9, 1),
+            government_body="Assemblée législative de transition du Burkina Faso",
+            url=f"{_JO_URL}/cpf-2025#art-241-4",
+        ),
+        _chunk(
+            document_id="cpf-2025",
+            document_name="Code des personnes et de la famille du Burkina Faso (Loi n°012-2025/ALT)",
+            article="242-13",
+            section="Divorce contentieux",
+            law_number="012-2025/ALT",
+            content=(
+                "Article 242-13 — Lorsque la tentative de conciliation n'a pas "
+                "abouti, le juge rend sur-le-champ une ordonnance de "
+                "non-conciliation et autorise l'époux demandeur à poursuivre "
+                "sa demande en divorce. Il prescrit, même d'office, toutes les "
+                "mesures provisoires, conservatoires ou urgentes qui lui "
+                "paraissent nécessaires pour la sauvegarde des intérêts des "
+                "enfants ou de chacun des époux."
+            ),
+            authority=AuthorityLevel.LAW,
+            publication_date=date(2025, 9, 1),
+            government_body="Assemblée législative de transition du Burkina Faso",
+            url=f"{_JO_URL}/cpf-2025#art-242-13",
+        ),
+        _chunk(
+            document_id="cpf-2025",
+            document_name="Code des personnes et de la famille du Burkina Faso (Loi n°012-2025/ALT)",
+            article="242-10",
+            section="Divorce contentieux",
+            law_number="012-2025/ALT",
+            content=(
+                "Article 242-10 — En cas de non comparution du défendeur, le "
+                "juge fait procéder à la notification par tout moyen laissant "
+                "trace écrite. S'il ne comparaît pas à la date ainsi fixée, le "
+                "défendeur est considéré comme refusant toute conciliation."
+            ),
+            authority=AuthorityLevel.LAW,
+            publication_date=date(2025, 9, 1),
+            government_body="Assemblée législative de transition du Burkina Faso",
+            url=f"{_JO_URL}/cpf-2025#art-242-10",
+        ),
+        _chunk(
+            document_id="cpf-2025",
+            document_name="Code des personnes et de la famille du Burkina Faso (Loi n°012-2025/ALT)",
+            article="223-12",
+            section="Régimes matrimoniaux",
+            law_number="012-2025/ALT",
+            # No in-content article number: the article id lives in the
+            # metadata, so quoting this excerpt verbatim never asserts it.
+            content=(
+                "Un époux peut être autorisé par ordonnance du président du "
+                "tribunal de grande instance à passer seul un acte pour lequel "
+                "le concours ou le consentement de son conjoint serait "
+                "nécessaire, si celui-ci est hors d'état de manifester sa "
+                "volonté ou si son refus n'est pas justifié par l'intérêt de "
+                "la famille. L'acte passé dans les conditions fixées par "
+                "l'ordonnance est opposable à l'époux dont le concours ou le "
+                "consentement a fait défaut."
+            ),
+            authority=AuthorityLevel.LAW,
+            publication_date=date(2025, 9, 1),
+            government_body="Assemblée législative de transition du Burkina Faso",
+            url=f"{_JO_URL}/cpf-2025#art-223-12",
         ),
     ]

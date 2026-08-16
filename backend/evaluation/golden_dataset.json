@@ -223,6 +223,25 @@
       "domain": "ohada_law",
       "difficulty": "easy",
       "language": "fr"
+    },
+    {
+      "id": "qa-026",
+      "question": "Quels sont les motifs d'une demande de divorce ? Est-il possible de divorcer si l'un des époux refuse de signer les papiers du divorce ?",
+      "expected_keywords": ["divorce", "consentement mutuel", "contentieux", "adultère", "séparation de fait"],
+      "expected_documents": ["Code des personnes et de la famille du Burkina Faso (Loi n°012-2025/ALT)"],
+      "expected_articles": ["242-1", "242-13"],
+      "forbidden_keywords": ["223-12", "première année du mariage", "première année de mariage"],
+      "expected_issues": [
+        {"category": "divorce_grounds", "keywords": ["adultère", "sévices", "séparation de fait", "stérilité", "absence"]},
+        {"category": "mutual_consent", "keywords": ["consentement mutuel", "demande conjointe"]},
+        {"category": "spouse_refusal", "keywords": ["contentieux", "refusant toute conciliation"]},
+        {"category": "procedure", "keywords": ["conciliation", "tribunal", "ordonnance"]}
+      ],
+      "domain": "family_code",
+      "difficulty": "hard",
+      "language": "fr",
+      "scenario_date": "2026-01-15",
+      "note": "Regression (CPF 2025, Loi n°012-2025/ALT): the refusal scenario must be answered via divorce contentieux (art. 242-1 grounds, art. 242-13 non-conciliation). The answer must NOT apply art. 223-12 (matrimonial-regime 'passer seul un acte') to divorce, and must not claim a one-year bar to consentement mutuel (art. 241-4 says two years)."
     }
   ]
 }
