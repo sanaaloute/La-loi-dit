@@ -23,6 +23,7 @@ import asyncio
 import json
 import logging
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Literal, Optional
 
@@ -303,6 +304,9 @@ async def chat(
         ) as (trace_id, trace, handler):
             run_task = asyncio.create_task(run_query(graph, ctx, state, config=_graph_config(handler)))
             _register_run(state.get("session_id", ""), run_task)
+            # Wall-clock time the question arrived: the persisted prompt is
+            # stamped with it (see the timeout-marker path below).
+            received_at = datetime.now(timezone.utc)
             keep_registered = False
             try:
                 # shield: a client disconnect cancels this request coroutine
@@ -318,7 +322,7 @@ async def chat(
                             state.get("session_id", ""),
                             state.get("user_id", "anonymous"),
                             [
-                                ChatMessage(role="user", content=payload.query),
+                                ChatMessage(role="user", content=payload.query, created_at=received_at),
                                 ChatMessage(role="assistant", content=RUN_FAILURE_NOTE),
                             ],
                         )
@@ -468,6 +472,10 @@ async def _stream_events(
         settings=settings,
     ) as (trace_id, trace, handler):
         started = time.perf_counter()
+        # Wall-clock time the question arrived: the persisted prompt is stamped
+        # with it, the answer gets its own completion time (the turn is written
+        # only after the run ends — possibly minutes later, after a drain).
+        turn_started_at = datetime.now(timezone.utc)
         merged: dict[str, Any] = {}
         metrics.chat_requests_total.inc()
         queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
@@ -575,7 +583,7 @@ async def _stream_events(
                                 state.get("session_id", ""),
                                 state.get("user_id", "anonymous"),
                                 [
-                                    ChatMessage(role="user", content=payload.query),
+                                    ChatMessage(role="user", content=payload.query, created_at=turn_started_at),
                                     ChatMessage(role="assistant", content=RUN_FAILURE_NOTE),
                                 ],
                             )
@@ -595,7 +603,7 @@ async def _stream_events(
                         state.get("session_id", ""),
                         state.get("user_id", "anonymous"),
                         [
-                            ChatMessage(role="user", content=payload.query),
+                            ChatMessage(role="user", content=payload.query, created_at=turn_started_at),
                             # Full FinalAnswer JSON, same convention as run_query.
                             ChatMessage(role="assistant", content=response.answer.model_dump_json()),
                         ],

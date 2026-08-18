@@ -92,7 +92,9 @@ _TIER_CONFIG: dict[str, dict[str, Any]] = {
     "gratuit": {
         "providers": _FREE_PROVIDERS,
         "models": _FREE_MODELS,
-        "features": {"export": ["md"], "drafting": False, "priority": False},
+        # TEMP: drafting is open to gratuit until payment methods land; then
+        # flip back to False so only paid tiers generate documents.
+        "features": {"export": ["md"], "drafting": True, "priority": False},
         "daily_token_budget": 1_000_000,
         "daily_request_budget": 50,
         "rate_limit_per_minute": 30,

@@ -102,18 +102,19 @@ def test_templates_listed_for_privileged_tier(client):
     assert "employeur" in required
 
 
-def test_gratuit_user_cannot_access_drafting(client):
-    """Gratuit tier is excluded from drafting; upgrade to pro unlocks it."""
+def test_gratuit_user_can_access_drafting_until_payments(client):
+    """TEMP policy: drafting is open to gratuit until payment methods land;
+    it then becomes a paid-tier feature again (see catalog gratuit features)."""
     _, token = _register(client)
     response = client.get("/api/v1/draft/templates", headers=_headers(token))
-    assert response.status_code == 403
+    assert response.status_code == 200
 
     response = client.post(
         "/api/v1/draft",
         json={"template_id": "contrat_travail_cdi", "fields": CDI_FIELDS},
         headers=_headers(token),
     )
-    assert response.status_code == 403
+    assert response.status_code == 200, response.text
 
 
 def test_drafting_requires_auth(client):
@@ -220,8 +221,9 @@ def test_me_includes_tier_features(client):
     _, token = _register(client)
     me = client.get("/api/v1/auth/me", headers=_headers(token)).json()
     assert me["tier"] == "gratuit"
-    # Gratuit tier has a reduced feature set.
-    assert me["features"]["drafting"] is False
+    # Gratuit tier has a reduced feature set; drafting is TEMP-open to it
+    # until payment methods land (see catalog gratuit features).
+    assert me["features"]["drafting"] is True
     assert "md" in me["features"]["export"]
     assert "pdf" not in me["features"]["export"]
 

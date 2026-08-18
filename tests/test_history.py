@@ -293,3 +293,17 @@ def test_run_status_endpoint_reflects_in_flight_runs(client):
 
 def test_run_status_requires_auth(client):
     assert client.get("/api/v1/chat/sessions/whatever/run").status_code in (401, 403)
+
+
+def test_prompt_and_answer_have_distinct_timestamps(client):
+    """The prompt is stamped when received, the answer when completed — a
+    3-minute run must not show identical times on both cards."""
+    _, token = _register(client)
+    session_id = _chat(client, token, session_id="sess-timestamps")["session_id"]
+
+    messages = client.get(f"/api/v1/chat/sessions/{session_id}", headers=_headers(token)).json()["messages"]
+    assert [m["role"] for m in messages] == ["user", "assistant"]
+    user_ts = messages[0]["created_at"]
+    answer_ts = messages[1]["created_at"]
+    # ISO strings compare lexicographically (same +00:00 offset).
+    assert user_ts < answer_ts

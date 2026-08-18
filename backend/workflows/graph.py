@@ -30,6 +30,7 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import replace
+from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Optional
 
 from langgraph.graph import END, START, StateGraph
@@ -225,6 +226,10 @@ def initial_state(
 
 async def run_query(graph, ctx: AppContext, state: GraphState, *, config: Optional[dict[str, Any]] = None) -> ChatResponse:
     started = time.perf_counter()
+    # Wall-clock time the question was received: the persisted prompt carries
+    # this timestamp, the answer gets its own completion time — otherwise both
+    # show the completion time (the turn is written after the run ends).
+    received_at = datetime.now(timezone.utc)
     final_state = await graph.ainvoke(state, config=_with_recursion_limit(config))
     latency_ms = (time.perf_counter() - started) * 1000
     answer: FinalAnswer = final_state["final_answer"]
@@ -235,7 +240,7 @@ async def run_query(graph, ctx: AppContext, state: GraphState, *, config: Option
                 final_state["session_id"],
                 final_state.get("user_id", "anonymous"),
                 [
-                    ChatMessage(role="user", content=final_state["query"]),
+                    ChatMessage(role="user", content=final_state["query"], created_at=received_at),
                     # Full FinalAnswer JSON: the history API parses it back;
                     # prompt consumers unwrap it via plain_message_content().
                     ChatMessage(role="assistant", content=answer.model_dump_json()),

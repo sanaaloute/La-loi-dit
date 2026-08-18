@@ -348,7 +348,7 @@ export default function ChatWindow() {
   // Mobile OSes (screen lock, app switch, network loss/roaming) kill the SSE
   // socket while the page is suspended or offline, without firing any error:
   // on resume/reconnect the frozen reader would hang until the silence
-  // watchdog fires (~45 s). Abort it immediately so the silent
+  // watchdog fires (~15 s). Abort it immediately so the silent
   // history-recovery path (catch block in `send`) starts at once; the backend
   // keeps running and persists the answer meanwhile.
   useEffect(() => {
@@ -378,8 +378,13 @@ export default function ChatWindow() {
   const recoverAnswer = useCallback(
     async (sid: string, sendStart: number, query: string): Promise<boolean> => {
       let deadStreak = 0;
-      for (let attempt = 0; attempt < 30; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 20_000));
+      // 5 s cadence × 130 attempts ≈ 11 min: fast answer pickup on phones,
+      // still covering the backend run cap (~10 min). Polls are cheap GETs,
+      // far below the nginx per-IP rate limits. The stream silence watchdog
+      // deliberately stays ~15 s — the backend heartbeat ticks every 10 s,
+      // so a shorter watchdog would kill healthy streams mid-run.
+      for (let attempt = 0; attempt < 130; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5_000));
         try {
           const detail = await getSession(sid, token);
           const msgs = detail.messages;
