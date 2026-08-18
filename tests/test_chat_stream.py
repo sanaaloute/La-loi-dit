@@ -163,3 +163,78 @@ async def test_answer_deltas_empty_text():
     from backend.api.routers.chat import _answer_deltas
 
     assert [d async for d in _answer_deltas("")] == []
+
+
+async def test_stream_events_persist_timeout_marker_after_disconnect(seeded_ctx, seeded_graph, settings, monkeypatch):
+    """A run that cannot complete after the client disconnected (run timeout)
+    must persist an honest failure marker: the mobile recovery path polls the
+    session history and would otherwise wait in vain for an answer that will
+    never exist."""
+    from backend.api.routers import chat as chat_router
+    from backend.core.models import ChatRequest
+    from backend.workflows.graph import initial_state
+
+    monkeypatch.setattr(chat_router, "ANSWER_DELTA_DELAY_SECONDS", 0)
+    # Zero deadline: still legal in the main loop (it only checks the deadline
+    # on heartbeat gaps), but the drain loop after the disconnect sees the
+    # deadline already passed and must persist the failure marker.
+    settings.chat_run_timeout_seconds = 0.0
+
+    query = "Quel est le préavis de licenciement pour un employé mensualisé ?"
+    session_id = "sess-timeout-marker"
+    gen = chat_router._stream_events(
+        seeded_graph,
+        initial_state(query, session_id=session_id),
+        ChatRequest(query=query, session_id=session_id),
+        "anonymous",
+        settings,
+        memory=seeded_ctx.memory,
+    )
+
+    frames: list[str] = []
+    # Pull the first frame, then close: GeneratorExit at the suspended yield
+    # takes the disconnect path; the drain loop sees the passed deadline and
+    # persists the failure marker. Deterministic — no consumer-task race.
+    frames.append(await gen.__anext__())
+    await gen.aclose()
+
+    messages = await seeded_ctx.memory.get_session_messages("anonymous", session_id)
+    assert [m.role for m in messages] == ["user", "assistant"]
+    assert messages[0].content == query
+    assert "délai maximal" in messages[1].content
+
+
+# ---------------------------------------------------------------------------
+# Detached POST runs and the run-status endpoint
+# ---------------------------------------------------------------------------
+
+
+async def test_drain_run_keeps_registration_until_task_ends():
+    from backend.api.routers import chat as chat_router
+
+    started = asyncio.Event()
+
+    async def work():
+        started.set()
+        await asyncio.sleep(0.05)
+
+    task = asyncio.create_task(work())
+    chat_router._register_run("sess-drain", task)
+    drain = asyncio.create_task(chat_router._drain_run("sess-drain", task))
+    await started.wait()
+    # Still draining: the run stays registered (cancellable / status-visible).
+    assert chat_router._RUNNING.get("sess-drain") is task
+    await drain
+    assert "sess-drain" not in chat_router._RUNNING
+
+
+async def test_drain_run_unregisters_on_failure():
+    from backend.api.routers import chat as chat_router
+
+    async def boom():
+        raise RuntimeError("llm down")
+
+    task = asyncio.create_task(boom())
+    chat_router._register_run("sess-drain-fail", task)
+    await chat_router._drain_run("sess-drain-fail", task)
+    assert "sess-drain-fail" not in chat_router._RUNNING

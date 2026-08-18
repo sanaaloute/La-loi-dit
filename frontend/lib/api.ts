@@ -154,6 +154,8 @@ export interface HistoryMessage {
   content: string;
   answer: FinalAnswer | null;
   created_at: string;
+  /** Per-session position (0, 1, 2, …) — matches a prompt to its answer. */
+  index?: number;
 }
 
 export interface ChatSessionDetail {
@@ -583,6 +585,21 @@ export async function getSession(sessionId: string, token?: string | null): Prom
   return (await res.json()) as ChatSessionDetail;
 }
 
+/** Whether the backend is still computing a run for this session — lets the
+ * dropped-connection recovery tell "keep waiting for the answer" from
+ * "nothing is running, retry instead". Null when the status is unreadable
+ * (network down): an unreadable status must never count as "not running". */
+export async function getRunStatus(sessionId: string, token?: string | null): Promise<boolean | null> {
+  try {
+    const res = await apiFetch(`/chat/sessions/${encodeURIComponent(sessionId)}/run`, { token });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { running?: boolean };
+    return Boolean(data.running);
+  } catch {
+    return null;
+  }
+}
+
 /** Delete a conversation (204 on success; 404 when not the owner). */
 export async function deleteSession(sessionId: string, token?: string | null): Promise<void> {
   const res = await apiFetch(`/chat/sessions/${encodeURIComponent(sessionId)}`, {
@@ -667,11 +684,13 @@ export async function streamChat(
   let buffer = "";
   let sawFinal = false;
 
-  // Silence watchdog: the backend emits a heartbeat every ~10 s, so a long
-  // stretch with no bytes at all means the connection died silently (mobile
-  // networks and OS suspend/resume cycles drop sockets without any error
-  // event). Fail loudly so the caller can recover from the session history.
-  const SILENCE_TIMEOUT_MS = 45_000;
+  // Silence watchdog: the backend emits a heartbeat every ~10 s, so ~15 s
+  // with no bytes at all means the connection is dead or the stream is being
+  // buffered by an intermediary (mobile carrier proxies commonly buffer
+  // text/event-stream — on those paths no frame ever arrives). Fail fast so
+  // the caller switches to history polling instead of staring at a dead
+  // stream; mobile OS suspend/resume cycles also drop sockets silently.
+  const SILENCE_TIMEOUT_MS = 15_000;
   let silenceTimer: ReturnType<typeof setTimeout> | undefined;
   const readChunk = (): Promise<ReadableStreamReadResult<Uint8Array>> =>
     new Promise((resolve, reject) => {

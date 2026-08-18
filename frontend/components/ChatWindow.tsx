@@ -33,6 +33,7 @@ import {
   cancelChat,
   chat,
   getModel,
+  getRunStatus,
   getSession,
   getSessionId,
   PIPELINE_NODES,
@@ -369,9 +370,14 @@ export default function ChatWindow() {
 
   // Mobile connections die mid-run while the backend keeps working and
   // persists the completed answer in the session history. Poll that history
-  // (backend runs are capped at ~10 min) instead of failing outright.
+  // (backend runs are capped at ~10 min) instead of failing outright. The
+  // run-status endpoint tells us a server thread is still working on the
+  // prompt: while it runs we keep waiting; three consecutive "not running"
+  // readings with no answer landed mean the turn is dead — stop early with
+  // an honest failure instead of polling the full window in vain.
   const recoverAnswer = useCallback(
     async (sid: string, sendStart: number, query: string): Promise<boolean> => {
+      let deadStreak = 0;
       for (let attempt = 0; attempt < 30; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 20_000));
         try {
@@ -381,7 +387,10 @@ export default function ChatWindow() {
           const preceding = msgs[msgs.length - 2];
           if (
             last?.role === "assistant" &&
-            last.answer &&
+            // A structured FinalAnswer, or a plain-text marker (the backend
+            // persists an honest timeout/failure note when a run cannot
+            // complete after the client disconnected).
+            (last.answer || last.content) &&
             preceding?.role === "user" &&
             // Clock-skew-proof match: the persisted user turn IS the question
             // we sent, or the answer is fresh enough (server timestamps can
@@ -398,6 +407,10 @@ export default function ChatWindow() {
         } catch {
           // History not readable yet — keep polling.
         }
+        // Null = status unreadable (network blip): never counts as dead.
+        const running = await getRunStatus(sid, token);
+        deadStreak = running === false ? deadStreak + 1 : 0;
+        if (deadStreak >= 3) return false;
       }
       return false;
     },
@@ -604,28 +617,40 @@ export default function ChatWindow() {
       } else if (err instanceof ApiError && err.status === 429) {
         quotaReached(err.message);
       } else if (!streamed) {
-        try {
-          const response = await chat(request, token);
-          acceptResponse(response);
-        } catch (postErr) {
-          if (postErr instanceof ApiError && postErr.status === 409) {
-            interrupted();
-          } else if (postErr instanceof ApiError && postErr.status === 429) {
-            quotaReached(postErr.message);
-          } else if (!(postErr instanceof ApiError) || postErr.status >= 500) {
-            // Network failure OR a bare proxy 5xx (the Next.js proxy answers
-            // a plain 500 when the mobile connection drops): the backend run
-            // may still complete and persist the answer — poll the history.
-            const recovered = await attemptRecovery(sid, sendStart, query);
-            if (!recovered) {
+        // The stream never delivered a frame. When the run still reached the
+        // backend it is draining there — poll for the persisted answer rather
+        // than starting a duplicate run. An unreadable status (null) keeps
+        // the historical behavior: one POST /chat attempt.
+        const running = sid ? await getRunStatus(sid, token) : null;
+        if (running) {
+          const recovered = await attemptRecovery(sid, sendStart, query);
+          if (!recovered) {
+            failWith(err instanceof Error ? `Erreur : ${err.message}` : "Une erreur est survenue.");
+          }
+        } else {
+          try {
+            const response = await chat(request, token);
+            acceptResponse(response);
+          } catch (postErr) {
+            if (postErr instanceof ApiError && postErr.status === 409) {
+              interrupted();
+            } else if (postErr instanceof ApiError && postErr.status === 429) {
+              quotaReached(postErr.message);
+            } else if (!(postErr instanceof ApiError) || postErr.status >= 500) {
+              // Network failure OR a bare proxy 5xx (the Next.js proxy answers
+              // a plain 500 when the mobile connection drops): the backend run
+              // still completes and persists the answer — poll the history.
+              const recovered = await attemptRecovery(sid, sendStart, query);
+              if (!recovered) {
+                failWith(
+                  postErr instanceof Error ? `Erreur : ${postErr.message}` : "Une erreur est survenue.",
+                );
+              }
+            } else {
               failWith(
                 postErr instanceof Error ? `Erreur : ${postErr.message}` : "Une erreur est survenue.",
               );
             }
-          } else {
-            failWith(
-              postErr instanceof Error ? `Erreur : ${postErr.message}` : "Une erreur est survenue.",
-            );
           }
         }
       } else {

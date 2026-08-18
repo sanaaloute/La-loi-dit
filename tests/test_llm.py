@@ -131,7 +131,7 @@ def test_with_failover_builds_chain_from_configured_keys() -> None:
     assert isinstance(client, FailoverLLMClient)
     assert client.provider == "ollama"  # primary first
     assert client.clients[1].provider == "openrouter"
-    assert client.clients[1].model == "openrouter/deepseek/deepseek-chat"
+    assert client.clients[1].model == "openrouter/openai/gpt-oss-20b:free"
     # tokenfree has no dedicated key -> falls back to the main llm_api_key
     assert client.clients[2].provider == "tokenfree"
     assert client.clients[2].api_key == "sk-ollama"

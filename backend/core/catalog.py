@@ -63,23 +63,24 @@ _ALL_MODELS: list[dict[str, str]] = [
     {"id": "tokenfree/gpt-5.4-mini", "provider": "tokenfree", "label": "GPT-5.4 Mini (TokenFree)"},
     {"id": "tokenfree/qwen-max", "provider": "tokenfree", "label": "Qwen Max (TokenFree)"},
     {"id": "tokenfree/kimi-k2.5", "provider": "tokenfree", "label": "Kimi K2.5 (TokenFree)"},
-    # OpenRouter models.
-    {"id": "openrouter/deepseek/deepseek-chat", "provider": "openrouter", "label": "DeepSeek Chat"},
+    # OpenRouter models — the account's free-tier ids, probe-verified against
+    # the account (paid ids returned 402 Payment Required under load and are
+    # deliberately not offered). gpt-oss-20b first: it matches the Ollama
+    # Cloud primary, so failover answers stay coherent.
     {
-        "id": "openrouter/meta-llama/llama-3.3-70b-instruct",
+        "id": "openrouter/openai/gpt-oss-20b:free",
         "provider": "openrouter",
-        "label": "Llama 3.3 70B Instruct",
+        "label": "GPT-OSS 20B (OpenRouter, gratuit)",
     },
     {
-        "id": "openrouter/google/gemini-2.0-flash-001",
+        "id": "openrouter/google/gemma-4-26b-a4b-it:free",
         "provider": "openrouter",
-        "label": "Gemini 2.0 Flash",
+        "label": "Gemma 4 26B (OpenRouter, gratuit)",
     },
-    {"id": "openrouter/openai/gpt-4o", "provider": "openrouter", "label": "GPT-4o"},
     {
-        "id": "openrouter/anthropic/claude-sonnet-4",
+        "id": "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
         "provider": "openrouter",
-        "label": "Claude Sonnet 4",
+        "label": "Nemotron 3 Ultra (OpenRouter, gratuit)",
     },
 ]
 

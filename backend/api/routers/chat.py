@@ -84,6 +84,15 @@ class CancelPayload(BaseModel):
 # them. Entries are removed as soon as the run ends (success, error, cancel).
 _RUNNING: dict[str, "asyncio.Task[Any]"] = {}
 
+#: Persisted as the assistant turn when a run cannot complete after the client
+#: disconnected (timeout/error), so history-polling recovery resolves with an
+#: honest message instead of waiting for an answer that will never exist.
+RUN_FAILURE_NOTE = (
+    "Le traitement de votre question a dépassé le délai maximal ou a échoué "
+    "côté serveur. Veuillez relancer la question — si le problème persiste, "
+    "simplifiez-la ou réessayez plus tard."
+)
+
 
 def _register_run(session_id: str, task: "asyncio.Task[Any]") -> None:
     if session_id:
@@ -93,6 +102,23 @@ def _register_run(session_id: str, task: "asyncio.Task[Any]") -> None:
 def _unregister_run(session_id: str, task: "asyncio.Task[Any]") -> None:
     if _RUNNING.get(session_id) is task:
         _RUNNING.pop(session_id, None)
+
+
+async def _drain_run(session_id: str, task: "asyncio.Task[Any]") -> None:
+    """Await a POST /chat run detached after a client disconnect.
+
+    Keeps the run registered (cancellable via /chat/cancel, visible to the
+    run-status endpoint) until it actually ends; run_query persists the turn
+    itself on success, so the client can recover the answer from the history.
+    """
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass  # cancelled via /chat/cancel while draining
+    except Exception:
+        logger.warning("chat run failed after client disconnect", exc_info=True)
+    finally:
+        _unregister_run(session_id, task)
 
 
 @router.post("/chat/cancel")
@@ -277,14 +303,45 @@ async def chat(
         ) as (trace_id, trace, handler):
             run_task = asyncio.create_task(run_query(graph, ctx, state, config=_graph_config(handler)))
             _register_run(state.get("session_id", ""), run_task)
+            keep_registered = False
             try:
-                response = await asyncio.wait_for(run_task, timeout=settings.chat_run_timeout_seconds)
+                # shield: a client disconnect cancels this request coroutine
+                # but must not kill the graph run (see CancelledError below).
+                response = await asyncio.wait_for(
+                    asyncio.shield(run_task), timeout=settings.chat_run_timeout_seconds
+                )
             except asyncio.TimeoutError:
+                run_task.cancel()  # the shield keeps it alive; enforce the cap
+                if ctx.memory is not None:
+                    try:
+                        await ctx.memory.append_turn(
+                            state.get("session_id", ""),
+                            state.get("user_id", "anonymous"),
+                            [
+                                ChatMessage(role="user", content=payload.query),
+                                ChatMessage(role="assistant", content=RUN_FAILURE_NOTE),
+                            ],
+                        )
+                    except Exception:
+                        pass  # memory persistence must never break the answer path
                 raise HTTPException(status_code=504, detail="le traitement a dépassé le délai maximal")
             except asyncio.CancelledError:
-                raise HTTPException(status_code=409, detail="request cancelled by user")
+                if run_task.cancelled():
+                    # /chat/cancel (UI stop button) stopped the graph run.
+                    raise HTTPException(status_code=409, detail="request cancelled by user")
+                # Client disconnected mid-run: the shield kept the graph run
+                # alive — detach a watcher so it finishes and persists the
+                # turn; the client recovers the answer from the history.
+                logger.info(
+                    "POST /chat client disconnected; finishing the run silently",
+                    extra={"session_id": state.get("session_id", "")},
+                )
+                keep_registered = True
+                asyncio.ensure_future(_drain_run(state.get("session_id", ""), run_task))
+                raise
             finally:
-                _unregister_run(state.get("session_id", ""), run_task)
+                if not keep_registered:
+                    _unregister_run(state.get("session_id", ""), run_task)
             response.trace_id = trace_id
             if use_cache and is_cacheable(response.model_dump(mode="json"), settings):
                 # Never persist the internal trace in the shared answer cache:
@@ -474,17 +531,24 @@ async def _stream_events(
                     "chat stream client disconnected; finishing the run silently",
                     extra={"session_id": session_id},
                 )
+                # Set when the drained run can no longer complete (timeout or
+                # error): the client is polling the history for an answer that
+                # will never exist — persist an honest failure marker instead,
+                # so recovery resolves immediately instead of polling in vain.
+                drain_failed = False
                 while True:
                     if pump.done() and queue.empty():
                         break
                     remaining = deadline - time.perf_counter()
                     if remaining <= 0:
                         pump.cancel()
+                        drain_failed = True
                         break
                     try:
                         kind, value = await asyncio.wait_for(queue.get(), timeout=remaining)
                     except asyncio.TimeoutError:
                         pump.cancel()
+                        drain_failed = True
                         logger.warning("chat stream timed out", extra={"session_id": session_id})
                         break
                     if kind == "update":
@@ -496,13 +560,28 @@ async def _stream_events(
                     elif kind == "cancelled":
                         cancelled = True
                         break
-                    elif kind != "node_start":  # "error": failed runs persist nothing.
+                    elif kind != "node_start":  # "error"
+                        drain_failed = True
                         logger.warning(
                             "chat stream run failed after client disconnect: %s",
                             value,
                             extra={"session_id": session_id},
                         )
                         break
+                if drain_failed and not cancelled:
+                    if memory is not None:
+                        try:
+                            await memory.append_turn(
+                                state.get("session_id", ""),
+                                state.get("user_id", "anonymous"),
+                                [
+                                    ChatMessage(role="user", content=payload.query),
+                                    ChatMessage(role="assistant", content=RUN_FAILURE_NOTE),
+                                ],
+                            )
+                        except Exception:
+                            pass  # memory persistence must never break the stream
+                    return
             if cancelled:
                 return
             response = _final_response(merged, state, started, trace_id=trace_id)
@@ -874,14 +953,33 @@ async def get_chat_session(
         "session_id": session_id,
         "messages": [
             {
+                # Simple per-session index (0, 1, 2, …) so clients can match a
+                # prompt to its final answer without comparing text.
+                "index": index,
                 "role": m.role,
                 "content": m.content,
                 "answer": parse_answer_json(m.content) if m.role == "assistant" else None,
                 "created_at": m.created_at.isoformat(),
             }
-            for m in messages
+            for index, m in enumerate(messages)
         ],
     }
+
+
+@router.get("/chat/sessions/{session_id}/run")
+async def get_chat_run_status(
+    session_id: str,
+    user: TokenPayload = Depends(require_user),
+) -> dict[str, bool]:
+    """Whether a chat run is currently in flight for this session.
+
+    Lets a client whose stream dropped tell "the server is still computing my
+    answer" (keep polling the history) from "nothing is running" (the turn
+    failed or never started — retry instead of waiting). Session ids are
+    unguessable uuids; the boolean leaks nothing else.
+    """
+    task = _RUNNING.get(session_id)
+    return {"running": task is not None and not task.done()}
 
 
 @router.delete("/chat/sessions/{session_id}", status_code=204, response_class=Response)

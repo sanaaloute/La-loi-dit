@@ -248,3 +248,48 @@ def test_delete_session_owner_scoped(client):
 
 def test_delete_session_requires_auth(client):
     assert client.delete("/api/v1/chat/sessions/whatever").status_code == 401
+
+
+def test_session_detail_messages_have_sequential_index(client):
+    """Each prompt and its answer carry a simple per-session index (0, 1, 2…)
+    so clients can match them without comparing text."""
+    _, token = _register(client)
+    session_id = _chat(client, token, session_id="sess-index")["session_id"]
+
+    response = client.get(f"/api/v1/chat/sessions/{session_id}", headers=_headers(token))
+    assert response.status_code == 200
+    messages = response.json()["messages"]
+    assert [m["role"] for m in messages] == ["user", "assistant"]
+    assert [m["index"] for m in messages] == list(range(len(messages)))
+
+
+def test_run_status_endpoint_reflects_in_flight_runs(client):
+    """The recovery path polls this to tell 'still computing' from 'dead'."""
+    from backend.api.routers.chat import _RUNNING
+
+    class _FakeTask:
+        def __init__(self, done: bool) -> None:
+            self._done = done
+
+        def done(self) -> bool:
+            return self._done
+
+    _, token = _register(client)
+    sid = "sess-run-status"
+    url = f"/api/v1/chat/sessions/{sid}/run"
+
+    response = client.get(url, headers=_headers(token))
+    assert response.status_code == 200
+    assert response.json() == {"running": False}
+
+    _RUNNING[sid] = _FakeTask(done=False)
+    try:
+        assert client.get(url, headers=_headers(token)).json() == {"running": True}
+        _RUNNING[sid] = _FakeTask(done=True)
+        assert client.get(url, headers=_headers(token)).json() == {"running": False}
+    finally:
+        _RUNNING.pop(sid, None)
+
+
+def test_run_status_requires_auth(client):
+    assert client.get("/api/v1/chat/sessions/whatever/run").status_code in (401, 403)

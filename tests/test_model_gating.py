@@ -84,10 +84,10 @@ def test_catalog_tiers_restricted_in_dev_mode():
 
 def test_is_model_allowed_per_tier():
     assert catalog.is_model_allowed("gratuit", "ollama/gpt-oss:20b")
-    assert catalog.is_model_allowed("gratuit", "openrouter/deepseek/deepseek-chat")
-    assert catalog.is_model_allowed("pro", "openrouter/deepseek/deepseek-chat")
-    assert catalog.is_model_allowed("pro", "openrouter/openai/gpt-4o")
-    assert catalog.is_model_allowed("cabinet", "openrouter/openai/gpt-4o")
+    assert catalog.is_model_allowed("gratuit", "openrouter/openai/gpt-oss-20b:free")
+    assert catalog.is_model_allowed("pro", "openrouter/openai/gpt-oss-20b:free")
+    assert catalog.is_model_allowed("pro", "openrouter/google/gemma-4-26b-a4b-it:free")
+    assert catalog.is_model_allowed("cabinet", "openrouter/google/gemma-4-26b-a4b-it:free")
     assert not catalog.is_model_allowed("cabinet", "openrouter/openai/gpt-99")
 
 
@@ -104,10 +104,10 @@ def test_all_models_with_access_annotations():
     annotated = {m["id"]: m for m in catalog.all_models_with_access("pro")}
     assert annotated["ollama/gpt-oss:20b"]["allowed"] is True
     assert annotated["ollama/gpt-oss:20b"]["tier_required"] == "gratuit"
-    assert annotated["openrouter/deepseek/deepseek-chat"]["allowed"] is True
-    assert annotated["openrouter/deepseek/deepseek-chat"]["tier_required"] == "gratuit"
-    assert annotated["openrouter/openai/gpt-4o"]["allowed"] is True
-    assert annotated["openrouter/openai/gpt-4o"]["tier_required"] == "gratuit"
+    assert annotated["openrouter/openai/gpt-oss-20b:free"]["allowed"] is True
+    assert annotated["openrouter/openai/gpt-oss-20b:free"]["tier_required"] == "gratuit"
+    assert annotated["openrouter/google/gemma-4-26b-a4b-it:free"]["allowed"] is True
+    assert annotated["openrouter/google/gemma-4-26b-a4b-it:free"]["tier_required"] == "gratuit"
     # TokenFree models are above gratuit.
     assert annotated["tokenfree/gemini-2.5-flash"]["allowed"] is True
     assert annotated["tokenfree/gemini-2.5-flash"]["tier_required"] == "pro"
@@ -272,8 +272,8 @@ def test_llm_client_strips_provider_namespace():
     settings = Settings(llm_provider="mock")
     assert LLMClient(settings, provider="ollama", model="ollama/gpt-oss:20b").model == "ollama/gpt-oss:20b"
     assert (
-        LLMClient(settings, provider="openrouter", model="openrouter/deepseek/deepseek-chat").model
-        == "openrouter/deepseek/deepseek-chat"
+        LLMClient(settings, provider="openrouter", model="openrouter/openai/gpt-oss-20b:free").model
+        == "openrouter/openai/gpt-oss-20b:free"
     )
 
 
@@ -284,7 +284,7 @@ async def test_openrouter_completion_kwargs(monkeypatch):
     client = LLMClient(
         settings,
         provider="openrouter",
-        model="openrouter/deepseek/deepseek-chat",
+        model="openrouter/openai/gpt-oss-20b:free",
         api_key="or-key",
     )
     captured: dict = {}
@@ -304,7 +304,7 @@ async def test_openrouter_completion_kwargs(monkeypatch):
 
     monkeypatch.setattr(llm_module.litellm, "acompletion", fake_acompletion)
     assert await client.complete("system", "user") == "ok"
-    assert captured["model"] == "openrouter/deepseek/deepseek-chat"
+    assert captured["model"] == "openrouter/openai/gpt-oss-20b:free"
     assert captured["api_base"] == "https://openrouter.ai/api/v1"
     assert captured["api_key"] == "or-key"
     assert captured["extra_headers"]["HTTP-Referer"] == settings.app_name
@@ -319,7 +319,7 @@ async def test_openrouter_headers_are_ascii_safe(monkeypatch):
     client = LLMClient(
         settings,
         provider="openrouter",
-        model="openrouter/deepseek/deepseek-chat",
+        model="openrouter/openai/gpt-oss-20b:free",
         api_key="or-key",
     )
     captured: dict = {}
@@ -402,9 +402,9 @@ def _user(tier: str, sub: str = "user-1") -> TokenPayload:
 def test_resolve_llm_allows_tier_model():
     settings = Settings(llm_provider="openai", llm_api_key="sk-test", openrouter_api_key="or-test")
     ctx = SimpleNamespace(settings=settings, llm=None)
-    client = resolve_llm(ctx, _user("pro"), "openrouter/deepseek/deepseek-chat")
+    client = resolve_llm(ctx, _user("pro"), "openrouter/openai/gpt-oss-20b:free")
     assert client.provider == "openrouter"
-    assert client.model == "openrouter/deepseek/deepseek-chat"
+    assert client.model == "openrouter/openai/gpt-oss-20b:free"
     assert client.api_key == "or-test"
 
 
@@ -425,7 +425,7 @@ def test_resolve_llm_defaults_to_tier_model():
 
 def test_resolve_llm_mock_mode_keeps_ctx_llm_but_gates():
     ctx = SimpleNamespace(settings=Settings(llm_provider="mock"), llm="MOCK-LLM")
-    assert resolve_llm(ctx, _user("gratuit"), "openrouter/openai/gpt-4o") == "MOCK-LLM"
+    assert resolve_llm(ctx, _user("gratuit"), "openrouter/google/gemma-4-26b-a4b-it:free") == "MOCK-LLM"
     with pytest.raises(AuthorizationError):
         resolve_llm(ctx, _user("gratuit"), "openrouter/openai/gpt-99")
 
@@ -511,7 +511,7 @@ def test_gratuit_user_allowed_premium_model_on_chat(client):
     _, token = _register(client)
     response = client.post(
         "/api/v1/chat",
-        json={"query": "Quel est le préavis de licenciement ?", "model": "openrouter/openai/gpt-4o"},
+        json={"query": "Quel est le préavis de licenciement ?", "model": "openrouter/google/gemma-4-26b-a4b-it:free"},
         headers=_headers(token),
     )
     assert response.status_code == 200
@@ -547,7 +547,7 @@ def test_db_tier_change_unlocks_models_without_new_token(client):
 
     response = client.post(
         "/api/v1/chat",
-        json={"query": "Quel est le préavis de licenciement ?", "model": "openrouter/deepseek/deepseek-chat"},
+        json={"query": "Quel est le préavis de licenciement ?", "model": "openrouter/openai/gpt-oss-20b:free"},
         headers=_headers(token),
     )
     assert response.status_code == 200, response.text
@@ -567,9 +567,9 @@ def test_models_endpoint_anonymous_sees_gratuit(client):
     assert data["default_model"] == "ollama/gpt-oss:20b"
     by_id = {m["id"]: m for m in data["models"]}
     assert by_id["ollama/gpt-oss:20b"]["allowed"] is True
-    assert by_id["openrouter/deepseek/deepseek-chat"]["allowed"] is True
-    assert by_id["openrouter/openai/gpt-4o"]["allowed"] is True
-    assert by_id["openrouter/openai/gpt-4o"]["tier_required"] == "gratuit"
+    assert by_id["openrouter/openai/gpt-oss-20b:free"]["allowed"] is True
+    assert by_id["openrouter/google/gemma-4-26b-a4b-it:free"]["allowed"] is True
+    assert by_id["openrouter/google/gemma-4-26b-a4b-it:free"]["tier_required"] == "gratuit"
     assert by_id["tokenfree/gemini-2.5-flash"]["allowed"] is False
     assert by_id["tokenfree/gemini-2.5-flash"]["tier_required"] == "pro"
 
@@ -579,8 +579,8 @@ def test_models_endpoint_respects_token_tier(client):
     token = create_access_token("dev-pro", Role.USER, settings, tier="pro")
     response = client.get("/api/v1/models", headers=_headers(token))
     by_id = {m["id"]: m for m in response.json()["models"]}
-    assert by_id["openrouter/deepseek/deepseek-chat"]["allowed"] is True
-    assert by_id["openrouter/openai/gpt-4o"]["allowed"] is True
+    assert by_id["openrouter/openai/gpt-oss-20b:free"]["allowed"] is True
+    assert by_id["openrouter/google/gemma-4-26b-a4b-it:free"]["allowed"] is True
 
 
 # ---------------------------------------------------------------------------
