@@ -271,11 +271,14 @@ export const PIPELINE_NODES: PipelineNode[] = [
   { id: "retrieval_branch", label: "Recherches parallèles" },
   { id: "retrieval_merge", label: "Fusion des preuves" },
   { id: "conflict_resolver", label: "Résolution de conflits" },
+  { id: "parent_expansion", label: "Enrichissement des passages" },
   { id: "evidence_ranking", label: "Classement des preuves" },
+  { id: "coverage_auditor", label: "Audit de couverture" },
   { id: "reasoning_agent", label: "Raisonnement" },
   { id: "reflection_agent", label: "Réflexion" },
-  { id: "citation_verification", label: "Vérification des citations" },
   { id: "response_generator", label: "Génération de la réponse" },
+  { id: "claim_verification", label: "Vérification des affirmations" },
+  { id: "citation_verification", label: "Vérification des citations" },
   { id: "output_guardrail", label: "Garde-fou de sortie" },
 ];
 

@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import { flushSync } from "react-dom";
 import {
   AlertTriangle,
   ArrowUp,
@@ -84,6 +85,28 @@ function emptyStatuses(): Record<string, NodeStatus> {
   for (const node of PIPELINE_NODES) statuses[node.id] = "pending";
   return statuses;
 }
+
+/** Friendly one-line description of the step currently shown to the user. */
+const STEP_LABELS: Record<string, string> = {
+  input_guardrail: "Vérification des règles de sécurité…",
+  refusal: "Vérification des limites…",
+  query_router: "Analyse de votre requête…",
+  planner: "Planification de la recherche…",
+  context_agent: "Analyse du contexte…",
+  memory_agent: "Consultation de la mémoire…",
+  retrieval_branch: "Recherche documentaire…",
+  retrieval_merge: "Fusion des résultats…",
+  conflict_resolver: "Résolution des conflits…",
+  parent_expansion: "Enrichissement des passages…",
+  evidence_ranking: "Classement des preuves…",
+  coverage_auditor: "Vérification de la couverture…",
+  reasoning_agent: "Raisonnement juridique…",
+  reflection_agent: "Vérification interne…",
+  response_generator: "Rédaction de la réponse…",
+  claim_verification: "Vérification des affirmations…",
+  citation_verification: "Vérification des citations…",
+  output_guardrail: "Contrôle final…",
+};
 
 /** Map the persisted session history to UI messages (shared by loadSession
  * and the dropped-connection recovery). */
@@ -228,16 +251,32 @@ export default function ChatWindow() {
     return () => clearInterval(id);
   }, [recording]);
 
-  const markNode = useCallback((nodeId: string) => {
-    setStatuses((prev) => {
-      const index = PIPELINE_NODES.findIndex((n) => n.id === nodeId);
-      if (index === -1) return prev;
-      const next = { ...prev };
-      PIPELINE_NODES.forEach((n, i) => {
-        if (i < index) next[n.id] = "done";
-        else if (i === index) next[n.id] = "running";
+  const markNodeRunning = useCallback((nodeId: string) => {
+    flushSync(() => {
+      setStatuses((prev) => {
+        const index = PIPELINE_NODES.findIndex((n) => n.id === nodeId);
+        if (index === -1) return prev;
+        const next = { ...prev };
+        PIPELINE_NODES.forEach((n, i) => {
+          if (i < index) next[n.id] = "done";
+          else if (i === index) next[n.id] = "running";
+        });
+        return next;
       });
-      return next;
+    });
+  }, []);
+
+  const markNodeDone = useCallback((nodeId: string) => {
+    flushSync(() => {
+      setStatuses((prev) => {
+        const index = PIPELINE_NODES.findIndex((n) => n.id === nodeId);
+        if (index === -1) return prev;
+        const next = { ...prev };
+        PIPELINE_NODES.forEach((n, i) => {
+          if (i <= index) next[n.id] = "done";
+        });
+        return next;
+      });
     });
   }, []);
 
@@ -574,12 +613,13 @@ export default function ChatWindow() {
         request,
         (event: StreamEvent) => {
           if (event.type === "update") {
+            // The node has just finished: mark it done immediately.
             streamed = true;
-            markNode(event.node);
+            markNodeDone(event.node);
           } else if (event.type === "node_start") {
             // Node started executing: show it as running in real time.
             streamed = true;
-            markNode(event.node);
+            markNodeRunning(event.node);
           } else if (event.type === "delta") {
             // Verified-answer playback: type the final text out progressively.
             streamed = true;
@@ -672,7 +712,7 @@ export default function ChatWindow() {
       inFlightRef.current = null;
       setBusy(false);
     }
-  }, [input, busy, sessionId, token, model, markNode, acceptResponse, appendDelta, discardStreamingMessage, attemptRecovery, failWith, quotaReached, interrupted]);
+  }, [input, busy, sessionId, token, model, markNodeDone, markNodeRunning, acceptResponse, appendDelta, discardStreamingMessage, attemptRecovery, failWith, quotaReached, interrupted]);
 
   function newConversation() {
     setMessages([]);
@@ -704,6 +744,26 @@ export default function ChatWindow() {
       }
     }
   }
+
+  /** Realtime progress line shown while agents are running (especially on
+   * small screens where the full timeline panel is hidden). */
+  const currentStepLabel = useMemo(() => {
+    const runningIndex = PIPELINE_NODES.findIndex((n) => statuses[n.id] === "running");
+    if (runningIndex !== -1) {
+      return STEP_LABELS[PIPELINE_NODES[runningIndex].id] ?? PIPELINE_NODES[runningIndex].label;
+    }
+    let lastDoneIndex = -1;
+    for (let i = PIPELINE_NODES.length - 1; i >= 0; i--) {
+      if (statuses[PIPELINE_NODES[i].id] === "done") {
+        lastDoneIndex = i;
+        break;
+      }
+    }
+    if (lastDoneIndex !== -1) {
+      return STEP_LABELS[PIPELINE_NODES[lastDoneIndex].id] ?? PIPELINE_NODES[lastDoneIndex].label;
+    }
+    return "Préparation du traitement…";
+  }, [statuses]);
 
   // All question/answer exchanges of the conversation, for full-chat exports,
   // plus the user question each assistant message replies to (per-answer copy
@@ -963,12 +1023,14 @@ export default function ChatWindow() {
                   ),
                 )}
                 {busy && (
-                  <div className="flex items-center gap-3 text-sm text-gray-500">
-                    <span className="relative flex h-3 w-3">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
-                      <span className="relative inline-flex h-3 w-3 rounded-full bg-accent" />
-                    </span>
-                    Traitement en cours par les agents… ({elapsed}s)
+                  <div className="flex flex-col gap-0.5 text-sm text-gray-500">
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
+                      <span className="truncate">{currentStepLabel}</span>
+                    </div>
+                    <div className="pl-5 text-xs text-gray-400">
+                      Traitement en cours par les agents… ({elapsed}s)
+                    </div>
                   </div>
                 )}
               </div>
