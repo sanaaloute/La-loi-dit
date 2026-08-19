@@ -10,7 +10,7 @@ from backend.workflows.graph import initial_state, stream_query
 
 async def test_node_start_handler_fires_for_pipeline_nodes(seeded_graph):
     queue: asyncio.Queue[tuple[str, object]] = asyncio.Queue()
-    handler = _NodeStartHandler(queue)
+    handler = _NodeStartHandler(queue, "sess-test")
 
     async for _ in stream_query(
         seeded_graph,
@@ -36,7 +36,7 @@ async def test_node_start_handler_fires_for_pipeline_nodes(seeded_graph):
 
 def test_node_start_handler_ignores_non_node_chain_events():
     queue: asyncio.Queue[tuple[str, object]] = asyncio.Queue()
-    handler = _NodeStartHandler(queue)
+    handler = _NodeStartHandler(queue, "sess-test")
     asyncio.run(handler.on_chain_start({}, {}, metadata={}))
     asyncio.run(handler.on_chain_start({}, {}, metadata={"langgraph_node": "planner"}))
     asyncio.run(handler.on_chain_start({}, {}, metadata={"langgraph_node": "planner"}))

@@ -85,6 +85,11 @@ class CancelPayload(BaseModel):
 # them. Entries are removed as soon as the run ends (success, error, cancel).
 _RUNNING: dict[str, "asyncio.Task[Any]"] = {}
 
+# Best-effort current node for each in-flight run, surfaced to the UI via the
+# run-status endpoint so progress can be polled even when SSE frames are
+# buffered by an intermediary.
+_RUN_PROGRESS: dict[str, str] = {}
+
 #: Persisted as the assistant turn when a run cannot complete after the client
 #: disconnected (timeout/error), so history-polling recovery resolves with an
 #: honest message instead of waiting for an answer that will never exist.
@@ -137,6 +142,22 @@ async def chat_cancel(
         return {"cancelled": False}
     task.cancel()
     return {"cancelled": True}
+
+
+@router.get("/chat/sessions/{session_id}/run")
+async def get_chat_run_status(
+    session_id: str,
+    user: TokenPayload = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Best-effort status of an in-flight run, used by the UI progress poll.
+
+    Returns whether a graph run is still active and, when available, the name
+    of the node currently executing so the timeline can advance even if the
+    SSE stream is buffered by a proxy.
+    """
+    task = _RUNNING.get(session_id)
+    running = task is not None and not task.done()
+    return {"running": running, "node": _RUN_PROGRESS.get(session_id)}
 
 
 def _state_user_id(payload: ChatRequest, user: TokenPayload) -> str:
@@ -384,6 +405,7 @@ async def _pump_events(
     state: GraphState,
     config: Optional[dict[str, Any]],
     queue: "asyncio.Queue[tuple[str, Any]]",
+    session_id: str,
 ) -> None:
     """Forward graph stream events into a queue; cancelled via /chat/cancel.
 
@@ -401,6 +423,8 @@ async def _pump_events(
         await queue.put(("cancelled", None))
     except Exception as exc:  # surfaced to the consumer as an error frame
         await queue.put(("error", exc))
+    finally:
+        _RUN_PROGRESS.pop(session_id, None)
 
 
 class _NodeStartHandler(AsyncCallbackHandler):
@@ -410,9 +434,14 @@ class _NodeStartHandler(AsyncCallbackHandler):
     without this the UI cannot show which node is currently running (or stuck).
     """
 
-    def __init__(self, queue: "asyncio.Queue[tuple[str, Any]]"):
+    def __init__(
+        self,
+        queue: "asyncio.Queue[tuple[str, Any]]",
+        session_id: str,
+    ):
         super().__init__()
         self._queue = queue
+        self._session_id = session_id
         self._last_node: Optional[str] = None
 
     async def on_chain_start(
@@ -426,6 +455,7 @@ class _NodeStartHandler(AsyncCallbackHandler):
         node = (metadata or {}).get("langgraph_node")
         if node and node != self._last_node:
             self._last_node = node
+            _RUN_PROGRESS[self._session_id] = node
             self._queue.put_nowait(("node_start", node))
 
 
@@ -497,12 +527,12 @@ async def _stream_events(
         merged: dict[str, Any] = {}
         metrics.chat_requests_total.inc()
         queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
-        callbacks: list[Any] = [_NodeStartHandler(queue)]
+        session_id = state.get("session_id", "")
+        callbacks: list[Any] = [_NodeStartHandler(queue, session_id)]
         if handler is not None:
             callbacks.insert(0, handler)
         config = {"callbacks": callbacks}
-        pump = asyncio.create_task(_pump_events(graph, state, config, queue))
-        session_id = state.get("session_id", "")
+        pump = asyncio.create_task(_pump_events(graph, state, config, queue, session_id))
         _register_run(session_id, pump)
         logger.info("chat stream started", extra={"session_id": session_id, "query": payload.query[:80]})
         cancelled = False
@@ -679,6 +709,7 @@ async def _stream_events(
                 yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)}, ensure_ascii=False)}\n\n"
         finally:
             _unregister_run(session_id, pump)
+            _RUN_PROGRESS.pop(session_id, None)
             if not pump.done():
                 pump.cancel()
 

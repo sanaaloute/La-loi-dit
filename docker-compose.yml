@@ -45,10 +45,7 @@ services:
     environment:
       LEGAL_AI_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     ports:
-      # Bound to the Mac's Tailscale IP so the public EC2 relay can reach the API
-      # directly for the SSE stream (bypassing the Next.js proxy). Falls back to
-      # localhost when MAC_TS_IP is unset (local dev).
-      - "${MAC_TS_IP:-127.0.0.1}:8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./data:/app/data
     depends_on:

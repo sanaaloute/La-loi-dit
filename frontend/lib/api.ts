@@ -588,16 +588,22 @@ export async function getSession(sessionId: string, token?: string | null): Prom
   return (await res.json()) as ChatSessionDetail;
 }
 
-/** Whether the backend is still computing a run for this session — lets the
- * dropped-connection recovery tell "keep waiting for the answer" from
- * "nothing is running, retry instead". Null when the status is unreadable
- * (network down): an unreadable status must never count as "not running". */
-export async function getRunStatus(sessionId: string, token?: string | null): Promise<boolean | null> {
+export interface RunStatus {
+  running: boolean;
+  node?: string | null;
+}
+
+/** Best-effort status of an in-flight run. Returns null when the status is
+ * unreadable (network down): an unreadable status must never count as
+ * "not running". */
+export async function getRunStatus(
+  sessionId: string,
+  token?: string | null,
+): Promise<RunStatus | null> {
   try {
     const res = await apiFetch(`/chat/sessions/${encodeURIComponent(sessionId)}/run`, { token });
     if (!res.ok) return null;
-    const data = (await res.json()) as { running?: boolean };
-    return Boolean(data.running);
+    return (await res.json()) as RunStatus;
   } catch {
     return null;
   }
@@ -682,7 +688,6 @@ export async function streamChat(
     throw new Error("Flux indisponible (pas de corps de réponse)");
   }
 
-  console.debug("[SSE] stream started", res.status, res.url);
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -728,7 +733,6 @@ export async function streamChat(
             if (event.type === "final" || event.type === "cancelled" || event.type === "error") {
               sawFinal = true;
             }
-            console.debug("[SSE] event:", event);
             onEvent(event);
           } catch (err) {
             // A handler error (e.g. backend "error" frame) must propagate.

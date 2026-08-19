@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { flushSync } from "react-dom";
 import {
   AlertTriangle,
   ArrowUp,
@@ -252,31 +251,27 @@ export default function ChatWindow() {
   }, [recording]);
 
   const markNodeRunning = useCallback((nodeId: string) => {
-    flushSync(() => {
-      setStatuses((prev) => {
-        const index = PIPELINE_NODES.findIndex((n) => n.id === nodeId);
-        if (index === -1) return prev;
-        const next = { ...prev };
-        PIPELINE_NODES.forEach((n, i) => {
-          if (i < index) next[n.id] = "done";
-          else if (i === index) next[n.id] = "running";
-        });
-        return next;
+    setStatuses((prev) => {
+      const index = PIPELINE_NODES.findIndex((n) => n.id === nodeId);
+      if (index === -1) return prev;
+      const next = { ...prev };
+      PIPELINE_NODES.forEach((n, i) => {
+        if (i < index) next[n.id] = "done";
+        else if (i === index) next[n.id] = "running";
       });
+      return next;
     });
   }, []);
 
   const markNodeDone = useCallback((nodeId: string) => {
-    flushSync(() => {
-      setStatuses((prev) => {
-        const index = PIPELINE_NODES.findIndex((n) => n.id === nodeId);
-        if (index === -1) return prev;
-        const next = { ...prev };
-        PIPELINE_NODES.forEach((n, i) => {
-          if (i <= index) next[n.id] = "done";
-        });
-        return next;
+    setStatuses((prev) => {
+      const index = PIPELINE_NODES.findIndex((n) => n.id === nodeId);
+      if (index === -1) return prev;
+      const next = { ...prev };
+      PIPELINE_NODES.forEach((n, i) => {
+        if (i <= index) next[n.id] = "done";
       });
+      return next;
     });
   }, []);
 
@@ -287,6 +282,19 @@ export default function ChatWindow() {
       return next;
     });
   }, []);
+
+  // Progress poll: even when SSE frames are buffered by a proxy, the backend
+  // exposes the currently executing node; we poll it to keep the timeline and
+  // the mobile progress line moving in real time.
+  useEffect(() => {
+    if (!busy || !sessionId) return;
+    const id = setInterval(() => {
+      void getRunStatus(sessionId, token).then((status) => {
+        if (status?.node) markNodeRunning(status.node);
+      });
+    }, 1200);
+    return () => clearInterval(id);
+  }, [busy, sessionId, token, markNodeRunning]);
 
   const acceptResponse = useCallback((response: ChatResponse, replaceId?: string | null) => {
     markAllDone();
@@ -452,8 +460,8 @@ export default function ChatWindow() {
           // History not readable yet — keep polling.
         }
         // Null = status unreadable (network blip): never counts as dead.
-        const running = await getRunStatus(sid, token);
-        deadStreak = running === false ? deadStreak + 1 : 0;
+        const runStatus = await getRunStatus(sid, token);
+        deadStreak = runStatus?.running === false ? deadStreak + 1 : 0;
         if (deadStreak >= 3) return false;
       }
       return false;
@@ -662,13 +670,12 @@ export default function ChatWindow() {
       } else if (err instanceof ApiError && err.status === 429) {
         quotaReached(err.message);
       } else if (!streamed) {
-        console.debug("[chat] stream produced no frames; falling back to POST /chat");
         // The stream never delivered a frame. When the run still reached the
         // backend it is draining there — poll for the persisted answer rather
         // than starting a duplicate run. An unreadable status (null) keeps
         // the historical behavior: one POST /chat attempt.
-        const running = sid ? await getRunStatus(sid, token) : null;
-        if (running) {
+        const runStatus = sid ? await getRunStatus(sid, token) : null;
+        if (runStatus?.running) {
           const recovered = await attemptRecovery(sid, sendStart, query);
           if (!recovered) {
             failWith(err instanceof Error ? `Erreur : ${err.message}` : "Une erreur est survenue.");
