@@ -662,6 +662,7 @@ export default function ChatWindow() {
       } else if (err instanceof ApiError && err.status === 429) {
         quotaReached(err.message);
       } else if (!streamed) {
+        console.debug("[chat] stream produced no frames; falling back to POST /chat");
         // The stream never delivered a frame. When the run still reached the
         // backend it is draining there — poll for the persisted answer rather
         // than starting a duplicate run. An unreadable status (null) keeps

@@ -682,6 +682,7 @@ export async function streamChat(
     throw new Error("Flux indisponible (pas de corps de réponse)");
   }
 
+  console.debug("[SSE] stream started", res.status, res.url);
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -727,6 +728,7 @@ export async function streamChat(
             if (event.type === "final" || event.type === "cancelled" || event.type === "error") {
               sawFinal = true;
             }
+            console.debug("[SSE] event:", event);
             onEvent(event);
           } catch (err) {
             // A handler error (e.g. backend "error" frame) must propagate.
