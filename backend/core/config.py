@@ -269,11 +269,14 @@ class Settings(BaseSettings):
     ingestion_freshness_timeout_seconds: float = 20.0
     pdf_parser_max_pages: int = 50
     # --- OCR (scanned PDFs) ---
-    # PaddleOCR (French, CPU) behind backend.ingestion.ocr; import-guarded, so
-    # ingestion works normally without the OCR stack installed — scanned pages
-    # simply stay unrecovered instead of failing the loader.
+    # Provider: "tesseract" (default, stable on ARM64/x86_64) or "paddleocr".
+    # Tesseract uses the system tesseract binary + pytesseract; PaddleOCR uses
+    # the PaddleX/PaddleOCR engine. Both are import-guarded, so ingestion works
+    # even when the chosen stack is missing — scanned pages simply stay
+    # unrecovered instead of failing the loader.
+    ocr_provider: str = "tesseract"
     ocr_enabled: bool = True
-    ocr_lang: str = "fr"  # PaddleOCR recognition language
+    ocr_lang: str = "fra"  # Tesseract language pack; PaddleOCR maps "fr" internally
     # PaddleOCR/PaddleX model cache (PADDLE_PDX_CACHE_HOME); None = data_dir/"ocr_models".
     ocr_models_dir: Optional[Path] = None
     ocr_max_pages: int = 0  # per-document OCR page cap; 0 = no cap (all pages, batched)

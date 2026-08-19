@@ -99,8 +99,8 @@ def test_document_titles_default_matches_builtin():
     titles = load_document_titles()
     assert titles == IngestionPipeline._DOCUMENT_TITLE_MAP
     assert (
-        IngestionPipeline._display_name("code-du-travail-burkina-faso.pdf")
-        == "Code du travail du Burkina Faso (Loi 028-2008/AN)"
+        IngestionPipeline._display_name("burkina-faso_code_travail_028-2008-an_code-du-travail.pdf")
+        == "Code du travail du Burkina Faso (Loi n°028-2008/AN)"
     )
 
 
@@ -363,8 +363,8 @@ def test_document_titles_corrupt_file_falls_back(monkeypatch, tmp_path, caplog):
 
     try:
         with caplog.at_level(logging.WARNING, logger="backend.ingestion.pipeline"):
-            title = IngestionPipeline._display_name("code-du-travail-burkina-faso.pdf")
-        assert title == "Code du travail du Burkina Faso (Loi 028-2008/AN)"
+            title = IngestionPipeline._display_name("burkina-faso_code_travail_028-2008-an_code-du-travail.pdf")
+        assert title == "Code du travail du Burkina Faso (Loi n°028-2008/AN)"
         assert any(r.message == "document_titles_load_failed" for r in caplog.records)
     finally:
         pipeline_module._TITLE_CACHE.pop(str(corrupt), None)

@@ -602,3 +602,23 @@ class RetrievalAnalyticsResponse(BaseModel):
         "log records the token subject, not the role. Prometheus /metrics "
         "has the cross-process HTTP counters."
     )
+
+
+class UserPromptRecord(BaseModel):
+    """One persisted user prompt exposed to administrators."""
+
+    id: int
+    user_id: str
+    email: str = ""
+    prompt: str = ""
+    source: str = ""  # search, chat, chat_stream, ws_chat
+    session_id: str = ""
+    created_at: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class UserPromptsResponse(BaseModel):
+    prompts: list[UserPromptRecord] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    page_size: int = 25

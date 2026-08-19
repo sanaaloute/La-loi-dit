@@ -7,7 +7,7 @@ lazy bootstrap.
 
 from __future__ import annotations
 
-from sqlalchemy import Column, Date, Integer, MetaData, String, Table
+from sqlalchemy import Column, Date, Integer, MetaData, String, Table, Text
 
 metadata = MetaData()
 
@@ -45,6 +45,16 @@ USER_MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN phone VARCHAR(32) DEFAULT ''",
     # Key-value store for admin-adjustable settings (e.g. tier budgets).
     "CREATE TABLE IF NOT EXISTS app_settings (key VARCHAR(128) PRIMARY KEY, value TEXT DEFAULT '')",
+    "CREATE TABLE IF NOT EXISTS user_prompts ("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+    "user_id VARCHAR(64), "
+    "email VARCHAR(320), "
+    "prompt TEXT, "
+    "source VARCHAR(32), "
+    "session_id VARCHAR(128) DEFAULT '', "
+    "created_at VARCHAR(64), "
+    "metadata TEXT DEFAULT ''"
+    ")",
 ]
 
 workspaces = Table(
@@ -79,4 +89,25 @@ app_settings = Table(
     Column("value", String, default=""),
 )
 
-TABLES = {"users": users, "workspaces": workspaces, "usage": usage, "app_settings": app_settings}
+# Audit trail of every user prompt (search + chat). Kept indefinitely by
+# default; a retention job can be added later if the table grows.
+user_prompts = Table(
+    "user_prompts",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("user_id", String(64), index=True),
+    Column("email", String(320)),
+    Column("prompt", Text),
+    Column("source", String(32), index=True),  # search, chat, chat_stream, ws_chat
+    Column("session_id", String(128), default=""),
+    Column("created_at", String(64)),
+    Column("metadata", Text, default=""),  # JSON-encoded extra fields
+)
+
+TABLES = {
+    "users": users,
+    "workspaces": workspaces,
+    "usage": usage,
+    "app_settings": app_settings,
+    "user_prompts": user_prompts,
+}

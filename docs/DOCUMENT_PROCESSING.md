@@ -8,6 +8,12 @@ dedupe → version → upsert**, orchestrated by `IngestionPipeline`
 python -m backend.ingestion.pipeline <file-or-dir> [--name X] [--url Y] [--no-gc] [--full-reindex]
 ```
 
+Only one ingestion runs at a time: the CLI and the API startup auto-ingest
+(`LEGAL_AI_INGEST_ON_STARTUP`) share a lock file (`data/.ingest-on-startup.lock`,
+see `backend/ingestion/ingest_lock.py`). A second runner refuses to start while
+another holds the lock; a crashed runner's lock is reclaimed automatically
+(dead PID, or older than 2 h for a lock written by another container).
+
 ## Loaders
 
 `backend/ingestion/loaders.py` dispatches on extension (`load_any`); all

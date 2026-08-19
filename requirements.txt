@@ -60,12 +60,13 @@ lxml==5.3.0
 Markdown==3.7
 feedparser==6.0.11
 
-# OCR for scanned PDFs: PyMuPDF rendering + PaddleOCR (French, CPU).
+# OCR for scanned PDFs: PyMuPDF rendering + Tesseract (default) or PaddleOCR.
 # Import-guarded everywhere (backend/ingestion/ocr.py), so the platform runs
 # normally without these installed. paddlex (a paddleocr dep) hard-pins
 # opencv-contrib-python, which needs the libgl system library; the Docker
 # build swaps it for the pinned headless build below (same cv2 API, no libgl).
 PyMuPDF==1.28.2
+pytesseract==0.3.13
 paddlepaddle==3.2.0
 paddleocr==3.2.0
 Pillow==11.3.0

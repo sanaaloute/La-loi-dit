@@ -59,26 +59,32 @@ cp .env.example .env
 `.env` adjustments for the Mac:
 
 ```ini
-LEGAL_AI_WEB_WORKERS=2                                       # 32 GB: fine
+LEGAL_AI_WEB_WORKERS=3                                       # 32 GB: fine
 LEGAL_AI_EMBEDDING_API_BASE=http://host.docker.internal:11434  # Mac-native Ollama
 API_PROXY_TARGET=http://api:8000
 MAC_TS_IP=100.x.y.z                                          # from Phase 1
-# Embedded Milvus Lite instead of the Milvus/etcd/minio server stack:
+# Standalone Milvus server (compose services etcd+minio+milvus), shared by
+# every api worker — do NOT point this at the embedded Lite file:
 LEGAL_AI_MILVUS_ENABLED=true
-LEGAL_AI_MILVUS_URI=/app/data/milvus_lite.db
+LEGAL_AI_MILVUS_HOST=milvus
+LEGAL_AI_MILVUS_PORT=19530
+LEGAL_AI_MILVUS_URI=            # empty -> http://milvus:19530
 # POSTGRES_* secrets, STT provider, etc. as on the EC2
 ```
 
 On the `minimac` branch the main `docker-compose.yml` IS the minimal stack
-(only `api`, `frontend`, `postgres`, `redis`). The cut services and why
-they are safe to drop:
+(`api`, `frontend`, `postgres`, `redis`, `etcd`, `minio`, `milvus`). The cut
+services and why they are safe to drop:
 
-- **milvus + etcd + minio** — replaced by embedded Milvus Lite
-  (`LEGAL_AI_MILVUS_URI` above, a file inside the `./data` volume);
 - **temporal + temporal-ui + celery-worker** — dormant subsystems: nothing in
   the API/request path imported them (the code is removed on this branch);
 - **prometheus + grafana** — optional observability; `/metrics` keeps working;
 - **ollama-relay** — a WSL-only workaround; Ollama runs natively on the Mac.
+
+> Note: the stack previously ran embedded Milvus Lite
+> (`LEGAL_AI_MILVUS_URI=/app/data/milvus_lite.db`). Lite is single-process:
+> with more than one api worker, the others silently fell back to an empty
+> in-memory store — which is why the standalone server stack is back.
 
 Then:
 

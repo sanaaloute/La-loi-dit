@@ -4,13 +4,15 @@ name: legal-ai-burkina
 # Mac Mini (minimac branch): minimal stack.
 #
 # Cut vs the original full deployment (all dormant or replaceable):
-#   - milvus + etcd + minio → embedded Milvus Lite (LEGAL_AI_MILVUS_URI points
-#     at /app/data/milvus_lite.db inside the ./data volume — no server needed)
 #   - temporal + temporal-ui + celery-worker → dormant subsystems: nothing in
 #     the API/request path imported them (removed on this branch)
 #   - prometheus + grafana → optional observability; /metrics keeps working
 #   - ollama-relay → WSL-only workaround; Ollama runs natively on the Mac and
 #     is reached via host.docker.internal
+#
+# Milvus runs as a standalone server (etcd + minio + milvus) so multiple API
+# workers can share the index — the embedded Milvus Lite alternative
+# (LEGAL_AI_MILVUS_URI=/app/data/milvus_lite.db) is single-process only.
 # ---------------------------------------------------------------------------
 
 networks:
@@ -20,6 +22,9 @@ networks:
 volumes:
   postgres-data:
   redis-data:
+  etcd-data:
+  minio-data:
+  milvus-data:
 
 services:
   api:
@@ -47,6 +52,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      milvus:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -86,6 +93,74 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+    restart: unless-stopped
+    networks: [legal-net]
+
+  # --- Milvus standalone (shared by every api worker) ---
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.14
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    volumes:
+      - etcd-data:/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks: [legal-net]
+
+  minio:
+    image: minio/minio:RELEASE.2024-05-28T17-19-04Z
+    environment:
+      # MinIO credentials are sourced from .env (the only source of truth).
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    command: minio server /minio_data --console-address ":9001"
+    ports:
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio-data:/minio_data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks: [legal-net]
+
+  milvus:
+    # Server 2.6 to match the pymilvus 3.x client (see requirements.txt).
+    image: milvusdb/milvus:v2.6.0
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      # Milvus authenticates to MinIO with the same .env-sourced credentials
+      # (it panics on signature mismatch otherwise).
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+    ports:
+      # No host port needed by clients (the api reaches it over legal-net);
+      # keep localhost bindings for ops convenience.
+      - "127.0.0.1:19530:19530"
+      - "127.0.0.1:9091:9091"
+    volumes:
+      - milvus-data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      - etcd
+      - minio
     restart: unless-stopped
     networks: [legal-net]
 

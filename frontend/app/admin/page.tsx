@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Cpu, FileText, Gauge, LayoutDashboard, Users } from "lucide-react";
+import { Cpu, FileText, Gauge, LayoutDashboard, Search, Users } from "lucide-react";
 import AppHeader from "@/components/AppHeader";
 import DocumentsTab from "@/components/admin/DocumentsTab";
 import OverviewTab from "@/components/admin/OverviewTab";
+import PromptsTab from "@/components/admin/PromptsTab";
 import ProvidersTab from "@/components/admin/ProvidersTab";
 import QuotasTab from "@/components/admin/QuotasTab";
 import UsersTab from "@/components/admin/UsersTab";
@@ -15,11 +16,12 @@ import PageShell from "@/components/ui/PageShell";
 import { useAuthToken } from "@/lib/useAuth";
 import { me, type UserProfile } from "@/lib/api";
 
-type TabId = "apercu" | "documents" | "utilisateurs" | "quotas" | "fournisseurs";
+type TabId = "apercu" | "documents" | "recherches" | "utilisateurs" | "quotas" | "fournisseurs";
 
 const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: "apercu", label: "Aperçu", icon: LayoutDashboard },
   { id: "documents", label: "Documents", icon: FileText },
+  { id: "recherches", label: "Recherches", icon: Search },
   { id: "utilisateurs", label: "Utilisateurs", icon: Users },
   { id: "quotas", label: "Quotas", icon: Gauge },
   { id: "fournisseurs", label: "Fournisseurs", icon: Cpu },
@@ -104,6 +106,7 @@ export default function AdminPage() {
 
           {tab === "apercu" && <OverviewTab />}
           {tab === "documents" && <DocumentsTab />}
+          {tab === "recherches" && <PromptsTab />}
           {tab === "utilisateurs" && <UsersTab />}
           {tab === "quotas" && <QuotasTab />}
           {tab === "fournisseurs" && <ProvidersTab />}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FolderPlus, Loader2, Plus, Sparkles, Trash2, Upload, X } from "lucide-react";
+import { FolderPlus, Loader2, Plus, Search, Sparkles, Trash2, Upload, X } from "lucide-react";
 import ErrorCard from "@/components/ui/ErrorCard";
 import LoadingState from "@/components/ui/LoadingState";
 import {
@@ -93,6 +93,11 @@ export default function DocumentsTab() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [result, setResult] = useState<DocumentIngestResult | null>(null);
 
+  // Documents table: search + pagination
+  const [searchQuery, setSearchQuery] = useState("");
+  const [pageSize, setPageSize] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
+
   // Legal-domain taxonomy management
   const [domains, setDomains] = useState<DomainInfo[]>([]);
   const [showDomainForm, setShowDomainForm] = useState(false);
@@ -132,6 +137,11 @@ export default function DocumentsTab() {
   useEffect(() => {
     void load();
   }, []);
+
+  // Reset to first page when the user searches or changes page size.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, pageSize]);
 
   /** Refresh only the ingestion table (after upload/delete); keeps the form. */
   async function refreshStatus() {
@@ -704,70 +714,155 @@ export default function DocumentsTab() {
         {!status || status.documents.length === 0 ? (
           <EmptyState message="Aucun document indexé pour le moment." />
         ) : (
-          <TableShell>
-            <THead>
-              <tr>
-                <Th>Document</Th>
-                <Th>Version</Th>
-                <Th>Chunks</Th>
-                <Th>Statut</Th>
-                <Th />
-              </tr>
-            </THead>
-            <tbody>
-              {status.documents.map((doc) => (
-                <tr key={doc.document_id}>
-                  <Td title={doc.document_id}>
-                    {doc.document_name || <span className="font-mono text-xs">{doc.document_id}</span>}
-                  </Td>
-                  <Td>{doc.version}</Td>
-                  {/* Real chunk count in the vector store (not versions.json). */}
-                  <Td title={`${formatNumber(doc.article_count)} articles dans versions.json`}>
-                    {doc.chunk_count === null || doc.chunk_count === undefined
-                      ? "—"
-                      : formatNumber(doc.chunk_count)}
-                  </Td>
-                  <Td>
-                    {doc.last_status === "failed" ? (
-                      <span
-                        className="inline-flex items-center rounded-full border border-red-700/30 bg-red-700/10 px-2 py-0.5 text-[10px] font-medium text-red-700"
-                        title={doc.last_error || "Dernière ingestion en échec"}
+          <div className="space-y-3">
+            {/* Search + page size */}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="relative max-w-md">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Rechercher un document…"
+                  className={`${INPUT_CLASS} pl-9`}
+                />
+              </div>
+              <div className="flex items-center gap-2 text-xs text-gray-600">
+                <span>Afficher</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => setPageSize(Number(e.target.value))}
+                  className={INPUT_CLASS}
+                >
+                  <option value={5}>5</option>
+                  <option value={10}>10</option>
+                  <option value={20}>20</option>
+                </select>
+                <span>documents par page</span>
+              </div>
+            </div>
+
+            {(() => {
+              const q = searchQuery.trim().toLowerCase();
+              const filtered = status.documents.filter((doc) => {
+                if (!q) return true;
+                return (
+                  (doc.document_name ?? "").toLowerCase().includes(q) ||
+                  doc.document_id.toLowerCase().includes(q)
+                );
+              });
+              const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+              const page = Math.min(currentPage, totalPages);
+              const start = (page - 1) * pageSize;
+              const paginated = filtered.slice(start, start + pageSize);
+
+              return (
+                <>
+                  <TableShell>
+                    <THead>
+                      <tr>
+                        <Th>Document</Th>
+                        <Th>Version</Th>
+                        <Th>Chunks</Th>
+                        <Th>Statut</Th>
+                        <Th />
+                      </tr>
+                    </THead>
+                    <tbody>
+                      {paginated.map((doc) => (
+                        <tr key={doc.document_id}>
+                          <Td title={doc.document_id}>
+                            {doc.document_name || <span className="font-mono text-xs">{doc.document_id}</span>}
+                          </Td>
+                          <Td>{doc.version}</Td>
+                          {/* Real chunk count in the vector store (not versions.json). */}
+                          <Td title={`${formatNumber(doc.article_count)} articles dans versions.json`}>
+                            {doc.chunk_count === null || doc.chunk_count === undefined
+                              ? "—"
+                              : formatNumber(doc.chunk_count)}
+                          </Td>
+                          <Td>
+                            {doc.last_status === "failed" ? (
+                              <span
+                                className="inline-flex items-center rounded-full border border-red-700/30 bg-red-700/10 px-2 py-0.5 text-[10px] font-medium text-red-700"
+                                title={doc.last_error || "Dernière ingestion en échec"}
+                              >
+                                échec
+                              </span>
+                            ) : doc.chunk_count === 0 ? (
+                              <span
+                                className="inline-flex items-center rounded-full border border-warn-border/60 bg-warn-bg px-2 py-0.5 text-[10px] font-medium text-warn-text"
+                                title="Aucun chunk dans le vector store pour ce document"
+                              >
+                                0 chunk
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent">
+                                indexé
+                              </span>
+                            )}
+                          </Td>
+                          <Td>
+                            <button
+                              type="button"
+                              onClick={() => void handleDelete(doc.document_id)}
+                              disabled={deletingId === doc.document_id}
+                              title={`Supprimer ${doc.document_id}`}
+                              aria-label={`Supprimer ${doc.document_id}`}
+                              className="flex h-8 w-8 items-center justify-center rounded-lg border border-red-700/30 bg-red-700/10 text-red-700 transition-colors hover:bg-red-700/20 disabled:opacity-50"
+                            >
+                              {deletingId === doc.document_id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                          </Td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </TableShell>
+
+                  {/* Pagination */}
+                  <div className="flex flex-col items-center justify-between gap-3 text-xs text-gray-600 sm:flex-row">
+                    <span>
+                      {formatNumber(filtered.length)} document{filtered.length > 1 ? "s" : ""}
+                      {q ? ` correspondant${filtered.length > 1 ? "s" : ""} à « ${searchQuery} »` : ""}
+                      {filtered.length > 0
+                        ? ` — page ${page} / ${totalPages}`
+                        : ""}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                        disabled={page <= 1}
+                        className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
+                          page <= 1
+                            ? "border-gray-200 bg-gray-100 text-gray-400"
+                            : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+                        }`}
                       >
-                        échec
-                      </span>
-                    ) : doc.chunk_count === 0 ? (
-                      <span
-                        className="inline-flex items-center rounded-full border border-warn-border/60 bg-warn-bg px-2 py-0.5 text-[10px] font-medium text-warn-text"
-                        title="Aucun chunk dans le vector store pour ce document"
+                        Précédent
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                        disabled={page >= totalPages}
+                        className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
+                          page >= totalPages
+                            ? "border-gray-200 bg-gray-100 text-gray-400"
+                            : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+                        }`}
                       >
-                        0 chunk
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent">
-                        indexé
-                      </span>
-                    )}
-                  </Td>
-                  <Td>
-                    <button
-                      type="button"
-                      onClick={() => void handleDelete(doc.document_id)}
-                      disabled={deletingId === doc.document_id}
-                      title={`Supprimer ${doc.document_id}`}
-                      aria-label={`Supprimer ${doc.document_id}`}
-                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-red-700/30 bg-red-700/10 text-red-700 transition-colors hover:bg-red-700/20 disabled:opacity-50"
-                    >
-                      {deletingId === doc.document_id ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Trash2 className="h-3.5 w-3.5" />
-                      )}
-                    </button>
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </TableShell>
+                        Suivant
+                      </button>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
         )}
       </SectionCard>
 

@@ -42,6 +42,8 @@ from backend.core.models import (
     IngestionStatusResponse,
     RetrievalAnalyticsResponse,
     Role,
+    UserPromptRecord,
+    UserPromptsResponse,
     UserRequestStats,
 )
 from backend.security.jwt import TokenPayload
@@ -87,13 +89,23 @@ async def ingestion_status(request: Request) -> IngestionStatusResponse:
     with stale, healthy-looking numbers.
     ``failed_documents`` is the same records list filtered to failures.
     """
-    from backend.ingestion.pipeline import load_ingestion_results
+    from backend.ingestion.pipeline import load_document_titles, load_ingestion_results
     from backend.ingestion.versioning import VersionStore
 
     ctx = get_ctx(request)
     store = VersionStore(ctx.settings.data_dir)
     state = store._load()
     results = load_ingestion_results(ctx.settings.data_dir)
+
+    # Reverse lookup: document_id (sha256 of filename) -> human-readable title.
+    # This covers documents that exist in the version store but whose
+    # ingestion_results.json record was lost or never written.
+    import hashlib
+
+    id_to_title = {
+        hashlib.sha256(fn.encode("utf-8")).hexdigest()[:16]: title
+        for fn, title in load_document_titles().items()
+    }
 
     async def _real_chunk_count(document_id: str) -> Optional[int]:
         if ctx.vector_store is None:
@@ -106,10 +118,13 @@ async def ingestion_status(request: Request) -> IngestionStatusResponse:
     documents: list[IngestionDocumentStatus] = []
     for document_id, entry in sorted(state.items()):
         latest = results.get(document_id) or {}
+        display_name = str(latest.get("document_name", "") or "")
+        if not display_name:
+            display_name = id_to_title.get(document_id, "")
         documents.append(
             IngestionDocumentStatus(
                 document_id=document_id,
-                document_name=str(latest.get("document_name", "") or ""),
+                document_name=display_name,
                 version=int(entry.get("version", 1)),
                 content_hash=str(entry.get("hash", "")),
                 article_count=len(entry.get("articles") or {}),
@@ -199,6 +214,35 @@ async def retrieval_analytics(request: Request) -> RetrievalAnalyticsResponse:
         by_path=by_path,
         by_user=by_user,
     )
+
+
+@router.get("/prompts", response_model=UserPromptsResponse)
+async def list_prompts(
+    request: Request,
+    q: str = Query("", description="Substring search on prompt text or email"),
+    source: Optional[str] = Query(None, description="Filter by source: search, chat, chat_stream, ws_chat"),
+    user_id: Optional[str] = Query(None, description="Filter by user id"),
+    from_date: Optional[str] = Query(None, alias="from", description="ISO date lower bound (YYYY-MM-DD)"),
+    to_date: Optional[str] = Query(None, alias="to", description="ISO date upper bound (YYYY-MM-DD)"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+) -> UserPromptsResponse:
+    """Paginated audit trail of user prompts (search + chat). Admin only."""
+    ctx = get_ctx(request)
+    store = getattr(ctx, "user_store", None)
+    if store is None:
+        raise HTTPException(status_code=503, detail="user store unavailable")
+    data = await store.list_prompts(
+        q=q,
+        source=source,
+        user_id=user_id,
+        from_date=from_date,
+        to_date=to_date,
+        page=page,
+        page_size=page_size,
+    )
+    data["prompts"] = [p.model_dump(mode="json") for p in data["prompts"]]
+    return UserPromptsResponse(**data)
 
 
 async def _user_display_map(request: Request) -> dict[str, str]:

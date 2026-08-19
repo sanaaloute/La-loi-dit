@@ -8,10 +8,11 @@ offline — same interface, no external calls.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import math
-from typing import Protocol
+from typing import Optional, Protocol
 
 import litellm
 from backend.core.config import Settings
@@ -86,8 +87,32 @@ class LiteLLMEmbeddings:
             extra_headers.setdefault("X-Title", safe_app_name)
         if extra_headers:
             kwargs["extra_headers"] = extra_headers
-        resp = await litellm.aembedding(**kwargs)
-        return [list(item["embedding"]) for item in resp.data]
+        # Hard per-call timeout: without it a wedged embedding server (or a
+        # dead keep-alive connection) hangs the coroutine forever and freezes
+        # the whole ingestion run; a bounded failure marks the document
+        # failed — re-ingestable — and the run continues with the next one.
+        kwargs["timeout"] = self.settings.llm_timeout_seconds
+        # Bounded retries with backoff: the embedding server (Ollama under
+        # memory pressure in particular) occasionally drops a connection
+        # mid-request; one transient hiccup must not fail a whole document.
+        transient = (
+            litellm.APIConnectionError,
+            litellm.Timeout,
+            litellm.InternalServerError,
+            litellm.RateLimitError,
+            litellm.ServiceUnavailableError,
+        )
+        last_exc: Optional[Exception] = None
+        for attempt in range(3):
+            try:
+                resp = await litellm.aembedding(**kwargs)
+                return [list(item["embedding"]) for item in resp.data]
+            except transient as exc:
+                last_exc = exc
+                if attempt < 2:
+                    await asyncio.sleep(2.0 * (attempt + 1))
+        assert last_exc is not None
+        raise last_exc
 
 
 class HashEmbeddings:

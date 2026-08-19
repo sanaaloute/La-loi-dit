@@ -67,8 +67,11 @@ ENV PYTHONUNBUFFERED=1 \
     PATH="/usr/local/bin:${PATH}"
 
 # curl: healthcheck. libgomp1: OpenMP runtime required by paddlepaddle (OCR).
+# tesseract + poppler-utils: default OCR provider (Tesseract) and PDF utilities.
+# tesseract-ocr-fra provides French language models.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl libgomp1 \
+       tesseract-ocr tesseract-ocr-fra poppler-utils \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system app && useradd --system --gid app --home /app app
 

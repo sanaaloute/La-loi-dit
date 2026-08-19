@@ -999,6 +999,36 @@ export interface ProvidersResponse {
   infra: Record<string, unknown>;
 }
 
+export type PromptSource = "search" | "chat" | "chat_stream" | "ws_chat";
+
+export interface UserPromptRecord {
+  id: number;
+  user_id: string;
+  email: string;
+  prompt: string;
+  source: PromptSource;
+  session_id: string;
+  created_at: string; // ISO 8601
+  metadata: Record<string, unknown>;
+}
+
+export interface UserPromptsResponse {
+  prompts: UserPromptRecord[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface UserPromptsQuery {
+  q?: string;
+  source?: PromptSource;
+  user_id?: string;
+  from?: string; // YYYY-MM-DD
+  to?: string; // YYYY-MM-DD
+  page?: number;
+  page_size?: number;
+}
+
 export interface FolderInfo {
   name: string;
   files: number;
@@ -1190,6 +1220,18 @@ export const adminApi = {
   ingestionStatus: () => adminRequest<IngestionStatusResponse>("/ingestion/status"),
   retrievalAnalytics: () => adminRequest<RetrievalAnalyticsResponse>("/retrieval/analytics"),
   evaluationLatest: () => adminRequest<EvaluationLatestResponse>("/evaluation/latest"),
+  prompts: (query: UserPromptsQuery = {}) => {
+    const params = new URLSearchParams();
+    if (query.q) params.set("q", query.q);
+    if (query.source) params.set("source", query.source);
+    if (query.user_id) params.set("user_id", query.user_id);
+    if (query.from) params.set("from", query.from);
+    if (query.to) params.set("to", query.to);
+    if (query.page !== undefined) params.set("page", String(query.page));
+    if (query.page_size !== undefined) params.set("page_size", String(query.page_size));
+    const qs = params.toString();
+    return adminRequest<UserPromptsResponse>(`/prompts${qs ? `?${qs}` : ""}`);
+  },
 };
 
 export function downloadBlob(blob: Blob, filename: string) {

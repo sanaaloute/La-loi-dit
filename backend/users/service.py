@@ -10,6 +10,7 @@ the env-var dev users, and a warning is logged.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import uuid
@@ -83,6 +84,19 @@ class UserRecord(BaseModel):
     subscription_status: str = "none"
     subscription_period_end: str = ""
     subscription_cancel_at_period_end: bool = False
+
+
+class UserPromptRecord(BaseModel):
+    """One prompt saved for admin analytics."""
+
+    id: int
+    user_id: str
+    email: str = ""
+    prompt: str = ""
+    source: str = ""  # search, chat, chat_stream, ws_chat
+    session_id: str = ""
+    created_at: str = ""
+    metadata: dict[str, Any] = {}
 
 
 class UserStore:
@@ -546,6 +560,141 @@ class UserStore:
         if rows:
             return rows[0]  # type: ignore[return-value]
         return {"tokens_in": 0, "tokens_out": 0, "requests": 0}
+
+    # ------------------------------------------------------------------
+    # Prompt audit trail (admin "Recherches" tab)
+    # ------------------------------------------------------------------
+
+    async def record_prompt(
+        self,
+        user_id: str,
+        prompt: str,
+        *,
+        source: str,
+        session_id: str = "",
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """Persist a user prompt best-effort; never raises."""
+        if not user_id or not prompt:
+            return
+        if not await self._ensure_db():
+            return
+        email = ""
+        try:
+            record = await self.get_by_id(user_id)
+            if record is not None:
+                email = record.email or record.name or user_id
+        except Exception:
+            pass
+        if not email:
+            email = user_id
+        t = TABLES["user_prompts"]
+        try:
+            async with self._session_factory() as session:
+                await session.execute(
+                    t.insert(),
+                    {
+                        "user_id": user_id,
+                        "email": email,
+                        "prompt": prompt,
+                        "source": source,
+                        "session_id": session_id or "",
+                        "created_at": _utcnow_iso(),
+                        "metadata": json.dumps(metadata or {}, ensure_ascii=False, default=str),
+                    },
+                )
+                await session.commit()
+        except Exception:
+            logger.warning("record_prompt failed", exc_info=True)
+
+    async def list_prompts(
+        self,
+        *,
+        q: str = "",
+        source: Optional[str] = None,
+        user_id: Optional[str] = None,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 25,
+    ) -> dict[str, Any]:
+        """Paginated prompt audit trail for the admin dashboard.
+
+        Filters are AND-combined. Text search is substring on prompt OR email.
+        Dates are ISO date strings compared lexicographically against created_at.
+        """
+        if not await self._ensure_db():
+            return {"prompts": [], "total": 0, "page": page, "page_size": page_size}
+        from sqlalchemy import func, select
+
+        t = TABLES["user_prompts"]
+        stmt = select(t)
+        count_stmt = select(func.count()).select_from(t)
+        conditions = []
+
+        if q:
+            like_q = f"%{q}%"
+            # Driver-agnostic ILIKE fallback: SQLite is case-insensitive for LIKE
+            # by default for ASCII, and Postgres supports ILIKE. We use a simple
+            # lower() wrapper to stay cross-dialect.
+            text_condition = (
+                func.lower(t.c.prompt).like(func.lower(like_q))
+                | func.lower(t.c.email).like(func.lower(like_q))
+            )
+            conditions.append(text_condition)
+        if source:
+            conditions.append(t.c.source == source)
+        if user_id:
+            conditions.append(t.c.user_id == user_id)
+        if from_date:
+            conditions.append(t.c.created_at >= from_date)
+        if to_date:
+            # Make the upper bound inclusive of the whole day.
+            conditions.append(t.c.created_at < f"{to_date}T23:59:59.999999+00:00")
+
+        if conditions:
+            where_clause = conditions[0]
+            for c in conditions[1:]:
+                where_clause = where_clause & c
+            stmt = stmt.where(where_clause)
+            count_stmt = count_stmt.where(where_clause)
+
+        stmt = stmt.order_by(t.c.created_at.desc())
+        offset = max(0, (page - 1)) * page_size
+        stmt = stmt.limit(page_size).offset(offset)
+
+        try:
+            async with self._session_factory() as session:
+                rows = (await session.execute(stmt)).all()
+                total = (await session.execute(count_stmt)).scalar() or 0
+        except Exception:
+            logger.warning("list_prompts failed", exc_info=True)
+            return {"prompts": [], "total": 0, "page": page, "page_size": page_size}
+
+        def _parse_meta(raw: Any) -> dict[str, Any]:
+            try:
+                return json.loads(raw) if raw else {}
+            except Exception:
+                return {}
+
+        return {
+            "prompts": [
+                UserPromptRecord(
+                    id=r.id,
+                    user_id=r.user_id or "",
+                    email=r.email or "",
+                    prompt=r.prompt or "",
+                    source=r.source or "",
+                    session_id=r.session_id or "",
+                    created_at=r.created_at or "",
+                    metadata=_parse_meta(r.metadata),
+                )
+                for r in rows
+            ],
+            "total": int(total),
+            "page": page,
+            "page_size": page_size,
+        }
 
     # ------------------------------------------------------------------
     # App settings (key-value, e.g. admin tier budget overrides)

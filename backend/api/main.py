@@ -90,69 +90,33 @@ async def _auto_ingest_on_startup(app: FastAPI, settings: Any) -> None:
 
     Idempotent by design: the pipeline's content-hash versioning skips
     unchanged documents, so a boot with no document changes costs one scan.
-    A lock file in the data dir guards against concurrent runs when uvicorn
-    spawns several workers (only the first worker ingests).
+    The shared ingestion lock guards against concurrent runs when uvicorn
+    spawns several workers and against CLI reindexes running in a separate
+    container (only the first runner ingests).
     """
-    import os
-    import socket
-    import time
     from pathlib import Path
 
-    def _pid_alive(pid: int) -> bool:
-        try:
-            os.kill(pid, 0)
-            return True
-        except (ProcessLookupError, OverflowError):
-            return False
-        except PermissionError:
-            return True
+    from backend.ingestion.ingest_lock import ingestion_lock
 
-    lock = Path(settings.data_dir) / ".ingest-on-startup.lock"
-    owner = f"{socket.gethostname()}:{os.getpid()}"
-    for attempt in range(2):
-        try:
-            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(fd, owner.encode())
-            os.close(fd)
-            break
-        except FileExistsError:
-            # Lock liveness: a lock belongs to a dead run when its container
-            # hostname differs (recreated) OR its recorded PID is gone (killed
-            # mid-ingestion, e.g. by `docker compose restart`, which keeps the
-            # hostname). Only a lock whose PID is alive on this host means a
-            # sibling worker is genuinely ingesting. The 15-min age rule
-            # remains the last-resort fallback.
-            try:
-                raw = lock.read_text(encoding="utf-8", errors="ignore").strip()
-                age = time.time() - lock.stat().st_mtime
-            except OSError:
-                continue  # vanished between checks: retry the create
-            lock_host, _, pid_text = raw.partition(":")
-            alive = False
-            if lock_host == socket.gethostname() and pid_text.isdigit():
-                alive = _pid_alive(int(pid_text))
-            if alive and (age < 900 or attempt == 1):
-                logger.info("startup ingestion: skipped (another worker holds the lock)")
-                return
-            logger.warning("startup ingestion: reclaiming lock from dead run (%s)", raw or "?")
-            lock.unlink(missing_ok=True)
-    try:
-        target = Path(settings.data_dir) / "legal_docs"
-        if not target.exists():
-            logger.info("startup ingestion: %s not found, nothing to index", target)
+    with ingestion_lock(settings.data_dir) as acquired:
+        if not acquired:
+            logger.info("startup ingestion: skipped (another run holds the lock)")
             return
-        from backend.ingestion.pipeline import IngestionPipeline
+        try:
+            target = Path(settings.data_dir) / "legal_docs"
+            if not target.exists():
+                logger.info("startup ingestion: %s not found, nothing to index", target)
+                return
+            from backend.ingestion.pipeline import IngestionPipeline
 
-        pipeline = IngestionPipeline(app.state.ctx)
-        results = await pipeline.reindex_directory(target)
-        summary: dict[str, int] = {}
-        for r in results:
-            summary[r.status] = summary.get(r.status, 0) + 1
-        logger.info("startup ingestion done: %s", summary)
-    except Exception:
-        logger.exception("startup ingestion failed")
-    finally:
-        lock.unlink(missing_ok=True)
+            pipeline = IngestionPipeline(app.state.ctx)
+            results = await pipeline.reindex_directory(target)
+            summary: dict[str, int] = {}
+            for r in results:
+                summary[r.status] = summary.get(r.status, 0) + 1
+            logger.info("startup ingestion done: %s", summary)
+        except Exception:
+            logger.exception("startup ingestion failed")
 
 
 def _error_handler(status_code: int):

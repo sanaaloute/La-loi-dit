@@ -152,6 +152,17 @@ def _state_user_id(payload: ChatRequest, user: TokenPayload) -> str:
     return payload.user_id or "anonymous"
 
 
+def _prompt_user_id(user: TokenPayload) -> str:
+    """Stable identity used for the prompt audit trail.
+
+    Authenticated users are recorded under their DB user id; anonymous
+    callers fall back to their subject claim or the literal "anonymous".
+    """
+    if user.sub != "anonymous":
+        return user.user_id or user.sub
+    return "anonymous"
+
+
 def _make_state(payload: ChatRequest, user_sub: str) -> GraphState:
     from backend.workflows.graph import initial_state
 
@@ -294,6 +305,13 @@ async def chat(
 
     usage_before = dict(llm.usage_totals)
     metrics.chat_requests_total.inc()
+    if ctx.user_store is not None:
+        await ctx.user_store.record_prompt(
+            _prompt_user_id(user),
+            payload.query,
+            source="chat",
+            session_id=payload.session_id or "",
+        )
     with metrics.time_histogram(metrics.chat_latency_seconds):
         async with traced_chat_run(
             payload.query,
@@ -712,6 +730,15 @@ async def chat_stream(
             )
 
     usage_before = dict(llm.usage_totals)
+    if ctx.user_store is not None:
+        asyncio.create_task(
+            ctx.user_store.record_prompt(
+                _prompt_user_id(user),
+                query,
+                source="chat_stream",
+                session_id=session_id or "",
+            )
+        )
     return StreamingResponse(
         _stream_events(
             get_graph(request),
@@ -769,6 +796,16 @@ async def ws_chat(ws: WebSocket) -> None:
             await ws.send_json({"type": "error", "detail": exc.detail})
             await ws.close(code=4400)
             return
+
+        if ctx.user_store is not None:
+            asyncio.create_task(
+                ctx.user_store.record_prompt(
+                    user_sub if user_sub != "anonymous" else "anonymous",
+                    payload.query,
+                    source="ws_chat",
+                    session_id=payload.session_id or "",
+                )
+            )
 
         state = _make_state(payload, user_sub)
 

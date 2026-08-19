@@ -13,6 +13,7 @@ import inspect
 import json
 import logging
 import os
+import sys
 import tempfile
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -82,6 +83,33 @@ def record_ingestion_result(
 
     state = load_ingestion_results(data_dir)
     state[result.document_id] = record
+
+    target = Path(data_dir) / RESULTS_FILENAME
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(target.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(state, fh, ensure_ascii=False, indent=1)
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def remove_ingestion_result(data_dir: Union[str, Path], document_id: str) -> None:
+    """Drop a document's record from ``ingestion_results.json`` (atomic rewrite).
+
+    The journal is append/overwrite-only by design, but a record must go when
+    the document itself is deleted — otherwise the admin console keeps listing
+    (and reporting as failed) documents that no longer exist.
+    """
+    state = load_ingestion_results(data_dir)
+    if document_id not in state:
+        return
+    del state[document_id]
 
     target = Path(data_dir) / RESULTS_FILENAME
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -380,14 +408,32 @@ class IngestionPipeline:
     #: Embedded fallback display titles; the effective map is resolved by
     #: :func:`load_document_titles` (legal-sources file / settings override).
     _DOCUMENT_TITLE_MAP: dict[str, str] = {
-        "code-du-travail-burkina-faso.pdf": "Code du travail du Burkina Faso (Loi 028-2008/AN)",
-        "constitution-burkina-faso.pdf": "Constitution du Burkina Faso (IVème République, 1991)",
-        "constitution-burkina-faso-transition-2015.pdf": "Charte de la Transition du Burkina Faso (2015)",
-        "traite-ohada.pdf": "Traité OHADA",
-        "auscgie-societes-commerciales-gie-2014.pdf": "Acte uniforme OHADA relatif au droit des sociétés commerciales et du GIE (2014)",
-        "audcg-droit-commercial-general-2010.pdf": "Acte uniforme OHADA relatif au droit commercial général (2010)",
-        "aus-suretes-2010.pdf": "Acte uniforme OHADA relatif aux sûretés (2010)",
-        "burkina-faso-code-des-personnes-et-de-la-famille-2025.pdf": "Code des personnes et de la famille du Burkina Faso (Loi n°012-2025/ALT du 1er septembre 2025)",
+        "burkina-faso_arrete_sante_2015_images-tabac.pdf": "Arrêté conjoint 2015 — Images tabac au Burkina Faso",
+        "burkina-faso_code_civil_1804_code-civil.pdf": "Code civil de 1804 (édition annotée applicable au Burkina Faso)",
+        "burkina-faso_code_famille_012-2025-alt_code-des-personnes-et-de-la-famille.pdf": "Code des personnes et de la famille du Burkina Faso (Loi n°012-2025/ALT)",
+        "burkina-faso_code_mines_016-2024-alt_code-minier.pdf": "Code minier du Burkina Faso (Loi n°016-2024/ALT du 18 juillet 2024)",
+        "burkina-faso_code_penal_1996_code-penal.pdf": "Code pénal du Burkina Faso (1996)",
+        "burkina-faso_code_procedure-civile_022-1999-an_code-de-procedure-civile.pdf": "Code de procédure civile du Burkina Faso (Loi n°022-1999/AN)",
+        "burkina-faso_code_travail_028-2008-an_code-du-travail.pdf": "Code du travail du Burkina Faso (Loi n°028-2008/AN)",
+        "burkina-faso_constitution_etat_002-1997-adp_constitution.pdf": "Constitution du Burkina Faso (Loi n°002/97/ADP du 27 janvier 1997)",
+        "burkina-faso_decret_justice_1997-084_definition-sanction-contraventions.pdf": "Décret n°97-84/PRES/PM/MJ — Définition et sanction des contraventions",
+        "burkina-faso_decret_securite_2016-1052_police-de-proximite.pdf": "Décret n°2016-1052/PRES — Police de proximité",
+        "burkina-faso_decret_transport_2003-418_contraventions-circulation-routiere.pdf": "Décret n°2003-418/PRES — Contraventions en matière de circulation routière",
+        "burkina-faso_loi_anticorruption_004-2015-cnt_prevention-repression-corruption.pdf": "Loi n°004-2015/CNT — Prévention et répression de la corruption au Burkina Faso",
+        "burkina-faso_loi_concurrence_016-2017-an_organisation-de-la-concurrence.pdf": "Loi n°016-2017/AN — Organisation de la concurrence au Burkina Faso",
+        "burkina-faso_loi_foncier_034-2009-an_regime-foncier-rural.pdf": "Loi n°034-2009/AN — Régime foncier rural au Burkina Faso",
+        "burkina-faso_loi_foncier_034-2012-an_reorganisation-agraire-et-fonciere.pdf": "Loi n°034-2012/AN — Réorganisation agraire et foncière au Burkina Faso",
+        "burkina-faso_loi_justice_010-1993-adp_organisation-judiciaire.pdf": "Loi n°010/93/ADP — Organisation judiciaire au Burkina Faso",
+        "burkina-faso_loi_libertes-publiques_022-1997-as_reunions-manifestations-voie-publique.pdf": "Loi n°022/97/11/AS — Liberté de réunions et de manifestations sur la voie publique",
+        "burkina-faso_loi_numerique_045-2009-an_services-transactions-electroniques.pdf": "Loi n°045-2009/AN — Services et transactions électroniques au Burkina Faso",
+        "burkina-faso_loi_protection-personnes_061-2015-cnt_violences-femmes-filles.pdf": "Loi n°061-2015/CNT — Violences à l'égard des femmes et des filles",
+        "burkina-faso_loi_transport_005-2018-an_permis-de-conduire.pdf": "Loi n°005-2018/AN — Permis de conduire au Burkina Faso",
+        "burkina-faso_ordonnance_procedure-penale_68-7-1968_code-de-procedure-penale.pdf": "Code de procédure pénale (Ordonnance n°68-7 du 21 février 1968)",
+        "ohada_acte-uniforme_commercial_2010_droit-commercial-general.pdf": "Acte uniforme OHADA portant droit commercial général (AUDCG, 2010)",
+        "ohada_acte-uniforme_societes-cooperatives_2010_droit-des-societes-cooperatives.pdf": "Acte uniforme OHADA relatif au droit des sociétés coopératives (2010)",
+        "ohada_acte-uniforme_societes_2014_societes-commerciales-gie.pdf": "Acte uniforme OHADA relatif au droit des sociétés commerciales et du GIE (AUSCGIE, 2014)",
+        "ohada_acte-uniforme_suretes_2010_organisation-des-suretes.pdf": "Acte uniforme OHADA portant organisation des sûretés (AUS, 2010)",
+        "ohada_traite_institutions_1993-2008_traite-ohada.pdf": "Traité OHADA (1993, révisé 2008)"
     }
 
     @classmethod
@@ -654,9 +700,16 @@ class IngestionPipeline:
             return result
 
     async def delete_document(self, document_id: str) -> DocumentIngestResult:
-        """Remove a logical document from the vector store, keyword index and version registry."""
+        """Remove a logical document from every store that tracks it.
+
+        Covers the vector store, the keyword index, the version registry, the
+        ingestion-results journal (so the admin console stops listing it) and
+        the relational legal graph.
+        """
         deleted = await self._delete_document_chunks(document_id)
         self._versions.remove(document_id)
+        remove_ingestion_result(self._data_dir, document_id)
+        await self._clear_legal_graph(document_id)
         return DocumentIngestResult(
             document_id=document_id,
             document_name="",
@@ -665,6 +718,24 @@ class IngestionPipeline:
             status="deleted",
             detail=f"Removed {deleted} chunks",
         )
+
+    async def _clear_legal_graph(self, document_id: str) -> None:
+        """Drop the document's knowledge-graph rows (best-effort mirror of
+        :meth:`_persist_legal_graph`): a graph failure must never fail a
+        deletion, and a disabled graph is simply a no-op."""
+        try:
+            from backend.knowledge.store import graph_store_for
+
+            store = graph_store_for(self.ctx)
+            if store is None:
+                return
+            await store.clear_document(document_id)
+        except Exception:
+            logger.warning(
+                "legal graph cleanup failed for document_id=%s; deletion is unaffected",
+                document_id,
+                exc_info=True,
+            )
 
     async def reindex_directory(
         self,
@@ -968,6 +1039,7 @@ class IngestionPipeline:
 
 async def _run_cli(args: argparse.Namespace) -> int:
     from backend.core.context import build_context  # lazy: wires other subsystems
+    from backend.ingestion.ingest_lock import LOCK_FILENAME, ingestion_lock
 
     ctx = await build_context()
     pipeline = IngestionPipeline(ctx)
@@ -979,40 +1051,53 @@ async def _run_cli(args: argparse.Namespace) -> int:
     if args.url:
         metadata["url"] = args.url
 
-    if args.full_reindex:
-        # A destructive full reindex with an in-memory fallback store would
-        # wipe the version registry while leaving the real Milvus index intact,
-        # producing silent duplicates once Milvus comes back. Refuse unless we
-        # are actually talking to Milvus.
-        settings = getattr(ctx, "settings", None)
-        if settings and getattr(settings, "milvus_enabled", False):
-            from backend.vectorstore.milvus_store import MilvusVectorStore
+    # Never run concurrently with the API's startup auto-ingest (or a second
+    # CLI reindex): parallel runs double the memory pressure on small hosts and
+    # race on the shared Milvus index.
+    with ingestion_lock(pipeline._data_dir) as acquired:
+        if not acquired:
+            print(
+                "ERROR: another ingestion is already running "
+                f"(lock: {Path(pipeline._data_dir) / LOCK_FILENAME}). "
+                "Wait for it to finish or, if it crashed, remove the lock file.",
+                file=sys.stderr,
+            )
+            return 2
 
-            if not isinstance(ctx.vector_store, MilvusVectorStore):
-                store_name = type(ctx.vector_store).__name__
-                print(
-                    f"ERROR: --full-reindex requires a connected Milvus store, "
-                    f"but the active store is {store_name}. "
-                    "Ensure Milvus is running and reachable before reindexing.",
-                    file=sys.stderr,
-                )
-                return 1
+        if args.full_reindex:
+            # A destructive full reindex with an in-memory fallback store would
+            # wipe the version registry while leaving the real Milvus index intact,
+            # producing silent duplicates once Milvus comes back. Refuse unless we
+            # are actually talking to Milvus.
+            settings = getattr(ctx, "settings", None)
+            if settings and getattr(settings, "milvus_enabled", False):
+                from backend.vectorstore.milvus_store import MilvusVectorStore
 
-        # Drop every known document so the next ingestion starts from scratch.
-        for doc_id in list(pipeline._versions.list_document_ids()):
-            print((await pipeline.delete_document(doc_id)).model_dump_json())
+                if not isinstance(ctx.vector_store, MilvusVectorStore):
+                    store_name = type(ctx.vector_store).__name__
+                    print(
+                        f"ERROR: --full-reindex requires a connected Milvus store, "
+                        f"but the active store is {store_name}. "
+                        "Ensure Milvus is running and reachable before reindexing.",
+                        file=sys.stderr,
+                    )
+                    return 1
 
-    if not target.exists():
-        print(f"Not found: {target}")
-        return 1
+            # Drop every known document so the next ingestion starts from scratch.
+            for doc_id in list(pipeline._versions.list_document_ids()):
+                print((await pipeline.delete_document(doc_id)).model_dump_json())
 
-    results = await pipeline.reindex_directory(target, metadata=metadata, gc=args.gc)
-    exit_code = 0
-    for result in results:
-        print(result.model_dump_json())
-        if result.status == "failed":
-            exit_code = 1
-    return exit_code
+        if not target.exists():
+            print(f"Not found: {target}")
+            return 1
+
+        results = await pipeline.reindex_directory(target, metadata=metadata, gc=args.gc)
+        exit_code = 0
+        for result in results:
+            print(result.model_dump_json())
+            if result.status == "failed":
+                exit_code = 1
+        return exit_code
 
 
 def main() -> int:

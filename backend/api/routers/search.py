@@ -34,6 +34,13 @@ async def search(
     with metrics.time_histogram(metrics.retrieval_latency_seconds):
         chunks = await ctx.retriever.retrieve(tasks)
 
+    if ctx.user_store is not None:
+        await ctx.user_store.record_prompt(
+            user.sub if user.sub != "anonymous" else user.user_id or "anonymous",
+            q,
+            source="search",
+        )
+
     return {
         "query": q,
         "count": len(chunks),
