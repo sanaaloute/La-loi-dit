@@ -78,8 +78,13 @@ class LiteLLMEmbeddings:
         #   case as the chat client in core/llm.py).
         # - OpenRouter accepts optional rankings headers.
         extra_headers: dict[str, str] = {}
-        if model.startswith("ollama/") and kwargs.get("api_key"):
-            extra_headers["Authorization"] = f"Bearer {kwargs['api_key']}"
+        if model.startswith("ollama/"):
+            # Keep the model loaded between calls so Ollama does not unload it
+            # from memory and force a slow reload (often timing out) on the next
+            # request. The value is passed through LiteLLM to Ollama's API.
+            kwargs["keep_alive"] = self.settings.ollama_keep_alive
+            if kwargs.get("api_key"):
+                extra_headers["Authorization"] = f"Bearer {kwargs['api_key']}"
         if model.startswith("openrouter/"):
             # HTTP headers must be ASCII; the configured app name may not be.
             safe_app_name = self.settings.app_name.encode("ascii", "ignore").decode("ascii")

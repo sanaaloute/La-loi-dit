@@ -69,6 +69,14 @@ class Settings(BaseSettings):
     # Dedicated Ollama Cloud key; falls back to llm_api_key (documented for
     # single-key setups where the main key IS the ollama.com key).
     ollama_api_key: str = ""
+    # How long Ollama keeps a model loaded after a request. "1h" = one hour,
+    # "24h" = one day, "0m" = unload immediately. Use a long value (or set the
+    # OLLAMA_KEEP_ALIVE env var on the Ollama server) to avoid model-reload
+    # latency/timeout on every embedding/chat request.
+    ollama_keep_alive: str = "24h"
+    # Pre-load local Ollama embedding models at API startup so the first user
+    # request does not have to wait for the model to be loaded from disk.
+    ollama_warmup_on_startup: bool = True
     # Comma-separated providers tried (in order) when the primary LLM fails or
     # returns an empty completion. Providers without a configured API key are
     # skipped silently, so the chain is inert in key-less/offline setups.

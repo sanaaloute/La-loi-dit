@@ -155,6 +155,7 @@ class LLMClient:
                     model=model,
                     messages=messages,
                     stream=False,
+                    keep_alive=self.settings.ollama_keep_alive,
                     options={
                         "temperature": self.settings.llm_temperature if temperature is None else temperature,
                         "num_predict": max_tokens or self.settings.llm_max_tokens,
@@ -231,8 +232,12 @@ class LLMClient:
         # Ollama Cloud (and any authenticated Ollama endpoint) expects the
         # API key as a Bearer token. LiteLLM's ollama provider does not add
         # this header automatically, so we inject it via extra_headers.
-        if self.provider == "ollama" and self.api_key:
-            extra_headers["Authorization"] = f"Bearer {self.api_key}"
+        if self.provider == "ollama":
+            # Ask Ollama to keep the model loaded between requests so we do not
+            # pay the reload cost (and risk timeout) on every chat call.
+            kwargs["keep_alive"] = self.settings.ollama_keep_alive
+            if self.api_key:
+                extra_headers["Authorization"] = f"Bearer {self.api_key}"
         # OpenRouter rankings/attribution headers (app name as fallback).
         # HTTP headers must be latin-1; strip any non-ASCII characters
         # (e.g. an em-dash in the configured app name) or every call fails.

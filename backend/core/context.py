@@ -10,13 +10,14 @@ being silent.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from backend.core.cache import CacheProtocol, InMemoryCache, RedisCache, get_cache
 from backend.core.config import Settings, get_settings
-from backend.core.embeddings import EmbeddingProvider, get_embedder
+from backend.core.embeddings import EmbeddingProvider, LiteLLMEmbeddings, get_embedder
 from backend.core.llm import LLMClient, get_llm
 from backend.core.model_router import with_failover
 from backend.core.ports import MemoryStoreProtocol, RetrieverProtocol, VectorStoreProtocol
@@ -50,12 +51,22 @@ async def build_context(settings: Optional[Settings] = None) -> AppContext:
     if settings.langfuse_enabled:
         register_litellm_callbacks(settings)
 
+    embedder = get_embedder(settings)
     ctx = AppContext(
         settings=settings,
         llm=with_failover(get_llm(settings), settings),
         cache=await get_cache(settings),
-        embedder=get_embedder(settings),
+        embedder=embedder,
     )
+
+    # Pre-load a local Ollama embedding model at startup so the first user
+    # request does not have to wait for the model to be loaded from disk.
+    if (
+        settings.ollama_warmup_on_startup
+        and isinstance(embedder, LiteLLMEmbeddings)
+        and settings.embedding_model.startswith("ollama/")
+    ):
+        await _warmup_local_ollama_embedder(embedder, settings)
 
     from backend.memory.store import MemoryStore
 
@@ -78,6 +89,36 @@ async def build_context(settings: Optional[Settings] = None) -> AppContext:
         if status.startswith("degraded") and settings.strict_infra_enabled:
             logger.error("strict infra: %s %s", dep, status)
     return ctx
+
+
+async def _warmup_local_ollama_embedder(
+    embedder: LiteLLMEmbeddings,
+    settings: Settings,
+) -> None:
+    """Send a tiny embedding request to a local Ollama model to force load it.
+
+    This blocks startup briefly, but it guarantees the model is already resident
+    when the first user request arrives. A failure is logged but never stops
+    the API from booting (strict infra is handled via /ready status).
+    """
+    try:
+        await asyncio.wait_for(
+            embedder.embed(["warmup"]),
+            timeout=max(30.0, settings.llm_timeout_seconds),
+        )
+        logger.info("Ollama embedding model warmed up: %s", settings.embedding_model)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Ollama embedding model warmup timed out after %ss: %s",
+            max(30.0, settings.llm_timeout_seconds),
+            settings.embedding_model,
+        )
+    except Exception:
+        logger.warning(
+            "Ollama embedding model warmup failed: %s",
+            settings.embedding_model,
+            exc_info=True,
+        )
 
 
 async def _assess_infra(ctx: AppContext) -> dict[str, str]:
