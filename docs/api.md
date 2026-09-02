@@ -8,10 +8,20 @@ document ingestion requires higher privileges — see
 
 ## Auth (`backend/api/routers/auth.py`)
 
-There is no public registration endpoint. Users come from an in-memory dev
-store: in `development` an `admin` / `admin123` user is created at boot, and
-extra users can be injected via the `LEGAL_AI_DEV_USERS` env var
-(`user1:pass1:role,user2:pass2:role`, role ∈ `admin|legal_expert|user|viewer`).
+Two account sources, checked in order: the database user store (accounts
+created via `POST /auth/register`) and the in-memory dev store (in
+`development` an `admin` / `admin123` user is created at boot; extra users
+can be injected via the `LEGAL_AI_DEV_USERS` env var —
+`user1:pass1:role,user2:pass2:role`, role ∈ `admin|legal_expert|user|viewer`).
+
+### POST /api/v1/auth/register
+
+```json
+{ "email": "awa@example.com", "password": "motdepasse1", "name": "Awa" }
+```
+
+`email` OR `phone` (E.164) is required; both may be given. → `201` + the
+same token payload as `/auth/token` (auto-login).
 
 ### POST /api/v1/auth/token
 
@@ -26,11 +36,58 @@ extra users can be injected via the `LEGAL_AI_DEV_USERS` env var
 ```
 
 Tokens are HS256 JWTs (`sub`, `role`, `exp`), lifetime
-`LEGAL_AI_JWT_EXPIRE_MINUTES` (default 60).
+`LEGAL_AI_JWT_EXPIRE_MINUTES` (default 60). `username` accepts an email, a
+phone number, or a dev-store username.
 
-### GET /api/v1/auth/me
+### POST /api/v1/auth/refresh
 
-Returns the validated token payload: `{ "sub": "…", "role": "…", "exp": … }`.
+Exchanges a valid Bearer token for a fresh one (sliding renewal, same
+session `jti`). Expired or displaced tokens get a 401.
+
+### POST /api/v1/auth/logout → `204`
+
+Revokes the caller's active session **for the current device class** (see
+`X-Device-Id` below); the old token 401s on next use. Clients should also
+discard the token locally.
+
+### DELETE /api/v1/auth/me → `204`
+
+Permanently deletes the caller's account: user row, personal workspace,
+usage and prompt rows, plus best-effort purge of chat history and long-term
+memory. All sessions (all device classes) are revoked. Dev-store accounts
+get `400`; the last admin account gets `403`.
+
+### POST /api/v1/auth/password-reset/request → `202` (always)
+
+```json
+{ "identifier": "awa@example.com" }
+```
+
+Starts a password reset (email OR phone as identifier). The response is
+always `202` so accounts cannot be enumerated. When the account has an
+email and SMTP is configured (`LEGAL_AI_SMTP_*`), a reset link
+(`{LEGAL_AI_FRONTEND_URL}/reinitialiser?token=…`, 30-min validity) is
+emailed; in development without SMTP the link is logged. Phone-only
+accounts have no delivery channel yet.
+
+### POST /api/v1/auth/password-reset/confirm
+
+```json
+{ "token": "<from-email>", "new_password": "nouveaumdp2" }
+```
+
+→ `200` `{"detail": "password updated"}`; `400` on invalid/expired token.
+All existing sessions are revoked — every device must log in again.
+
+### Native clients: `X-Device-Id` header
+
+Native apps (iOS/Android) MUST send `X-Device-Id: <stable-uuid>` on every
+request (login included). Its presence (a) fingerprints the session on the
+device UUID instead of `user-agent|accept-language|IP` — mobile networks
+change IPs mid-session (CGNAT, Wi-Fi↔cellular), and (b) scopes the
+single-active-session slot per device class (`active_session:{user}:mobile`
+vs. the unscoped web key), so a phone and a browser stay logged in
+simultaneously while two phones still kick each other out.
 
 ## Chat (`backend/api/routers/chat.py`)
 

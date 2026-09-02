@@ -59,7 +59,7 @@ Docker Compose: API, Celery, Nginx, PostgreSQL, Redis, Milvus, Temporal, Prometh
 - **Orchestration**: complete LangGraph pipeline with conditional re-retrieval, bounded retries, per-worker failure isolation, streaming.
 - **Hybrid retrieval**: parallel vector + BM25 + official-source workers, RRF fusion with configurable weights, dedup, relevance floor.
 - **Authority model**: 16-level hierarchy (constitution → OHADA → amended law → law → decree → … → blog) consumed in ranking and conflict resolution.
-- **Conflict resolution**: version-in-force at scenario date > authority > recency; unresolved conflicts capped and surfaced, never silently resolved.
+- **Conflict resolution**: version-in-force at scenario date > authority > recency; unresolved conflicts dampen confidence (×0.85 each) and surface a user-facing note, never silently resolved.
 - **Citation verification**: post-generation marker verification, fabricated `[n]` stripped, confidence scaled by accuracy; refusal path for zero-evidence answers.
 - **LLM abstraction**: LiteLLM multi-provider with failover, token metering, mock offline provider; subscription-tier model catalog.
 - **Guardrails**: deterministic injection/jailbreak/PII regex policies (FR+EN), fail-closed input guard, output refusal policy — tested.

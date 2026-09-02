@@ -129,13 +129,18 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # --- single active session check (authenticated users only) ---
         if user_id and jti and settings.single_session_per_user:
-            from backend.security.sessions import device_fingerprint, verify_active_session
+            from backend.security.sessions import (
+                device_fingerprint,
+                session_scope,
+                verify_active_session,
+            )
 
             session_ok = await verify_active_session(
                 user_id,
                 jti,
                 cache,
                 fingerprint=device_fingerprint(request),
+                scope=session_scope(request),
             )
             if not session_ok:
                 return _session_violation_response()

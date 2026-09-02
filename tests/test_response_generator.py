@@ -169,11 +169,15 @@ async def test_full_coverage_keeps_high_confidence(settings):
 
 
 @pytest.mark.asyncio
-async def test_unresolved_conflict_caps_confidence(settings):
+async def test_unresolved_conflict_dampens_confidence(settings):
     from backend.core.models import ConflictReport
 
     agent = ResponseGeneratorAgent()
     llm = StubLLM(["Réponse complète [1]."])
+
+    baseline_state = _state(_evidence())
+    baseline = (await agent.run(baseline_state, _ctx(settings, llm)))["final_answer"]
+
     state = _state(_evidence())
     state["conflicts"] = [
         ConflictReport(
@@ -186,7 +190,10 @@ async def test_unresolved_conflict_caps_confidence(settings):
     ]
     result = await agent.run(state, _ctx(settings, llm))
     answer = result["final_answer"]
-    assert answer.confidence <= 0.6
+    # One unresolved conflict: one dampening multiplier (0.85), not a hard cap.
+    assert answer.confidence == round(
+        baseline.confidence * settings.confidence_unresolved_conflict_dampening, 2
+    )
     assert any("contredisent" in w for w in answer.warnings)
 
 

@@ -181,10 +181,10 @@ Related pre-existing knobs that the new components also honor:
   incomplète", unverifiable-citation removals, claim-verification flags, and
   `requires_human_review` escalations for contradicted or unsafe content.
 - **Confidence semantics**: the aggregate is 0.4 × citation accuracy + 0.6 ×
-  sub-question coverage, capped at 0.6/0.75 for unresolved conflicts or
-  reflection-flagged gaps — a fully-cited but partial answer no longer displays
-  "100%". Per-dimension detail is in `confidence_breakdown`; per-statement
-  verdicts in `claims`.
+  sub-question coverage, dampened ×0.85 per unresolved conflict and capped at
+  0.75 for reflection-flagged gaps — a fully-cited but partial answer no longer
+  displays "100%". Per-dimension detail is in `confidence_breakdown`;
+  per-statement verdicts in `claims`.
 - **Latency**: a coverage gap, `INSUFFICIENT:` reasoning or a reflection retry
   can trigger one extra retrieval fan-out per run; `rerank_llm_enabled` adds
   one LLM rescore call per retrieval branch.

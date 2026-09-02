@@ -134,10 +134,17 @@ def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings)
 
+    # Interactive docs / OpenAPI schema are a development convenience; once
+    # the API is directly internet-facing (mobile apps) they stay hidden
+    # unless explicitly re-enabled via LEGAL_AI_API_DOCS_ENABLED.
+    expose_docs = settings.env == "development" or settings.api_docs_enabled
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
         lifespan=lifespan,
+        docs_url="/docs" if expose_docs else None,
+        redoc_url="/redoc" if expose_docs else None,
+        openapi_url="/openapi.json" if expose_docs else None,
     )
     app.state.audit_log = deque(maxlen=settings.audit_log_cap)
 

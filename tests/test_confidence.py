@@ -110,9 +110,11 @@ async def test_aggregate_is_weighted_mean_of_citation_and_coverage(settings):
 
 
 @pytest.mark.asyncio
-async def test_unresolved_conflict_still_caps_and_lowers_temporal(settings):
+async def test_unresolved_conflict_dampens_and_lowers_temporal(settings):
     agent = ResponseGeneratorAgent()
     llm = StubLLM(["Réponse complète [1]."])
+    baseline = (await agent.run(_state(_evidence()), _ctx(settings, llm)))["final_answer"]
+
     state = _state(
         _evidence(),
         conflicts=[
@@ -127,7 +129,10 @@ async def test_unresolved_conflict_still_caps_and_lowers_temporal(settings):
     )
     result = await agent.run(state, _ctx(settings, llm))
     answer = result["final_answer"]
-    assert answer.confidence <= 0.6  # existing cap preserved
+    # One unresolved conflict: exactly one dampening multiplier (no hard cap).
+    assert answer.confidence == round(
+        baseline.confidence * settings.confidence_unresolved_conflict_dampening, 2
+    )
     assert answer.confidence_breakdown.temporal_confidence == 0.5
 
 

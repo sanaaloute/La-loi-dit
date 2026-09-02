@@ -135,6 +135,20 @@ class Settings(BaseSettings):
     # Needed for real-time SSE: bypassing the Next.js /backend-api proxy with
     # NEXT_PUBLIC_API_URL requires the API to accept cross-origin requests.
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    # Expose /docs, /redoc and /openapi.json outside development. Off by
+    # default: the API is reachable directly from the internet (mobile apps)
+    # and the schema should not be public in production.
+    api_docs_enabled: bool = False
+    # Public web app URL, used in outbound links (password reset emails).
+    frontend_url: str = "http://localhost:3000"
+
+    # --- outbound email (password reset links; disabled when smtp_host="") ---
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""  # defaults to smtp_username
+    smtp_use_tls: bool = True
 
     # --- scalability / high availability ---
     # None => resolved as (env == "production"); set explicitly to override.
@@ -419,7 +433,8 @@ class Settings(BaseSettings):
     answer_child_preview_chars: int = 200  # child-chunk preview length inside a parent excerpt
     confidence_citation_weight: float = 0.4  # weight of citation accuracy in the aggregate confidence
     confidence_coverage_weight: float = 0.6  # weight of sub-question coverage in the aggregate confidence
-    confidence_unresolved_conflict_cap: float = 0.6  # confidence cap while source conflicts stay unresolved
+    confidence_unresolved_conflict_dampening: float = 0.85  # per-unresolved-conflict multiplier on the aggregate confidence
+    confidence_conflict_max_dampenings: int = 3  # cap on the dampening exponent: heavily-conflicted answers decay to 0.85³, not toward zero
     confidence_reflection_gap_cap: float = 0.75  # confidence cap when reflection flags unanswered parts
     source_default_authority_weight: float = 0.15  # authority weight assumed for unknown authority levels
     retrieval_top_mean_count: int = 3  # top-N relevance scores averaged into retrieval confidence

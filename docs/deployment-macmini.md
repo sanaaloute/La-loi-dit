@@ -127,6 +127,50 @@ The frontend proxies `/backend-api/*` to the api container, so the frontend
 port is the **only** service to expose. SSE chat streaming works through the
 tunnel with no extra settings.
 
+### Public API endpoint for mobile apps
+
+Native apps must NOT go through the frontend's `/backend-api` rewrite (it
+buffers SSE and adds a hop). Expose the API container directly on its own
+hostname — it already binds `127.0.0.1:8000` on the host.
+
+> The hostname must be a **first-level** subdomain (`api-yawoto.neobytech.net`,
+> NOT `api.yawoto.neobytech.net`): Cloudflare's free Universal SSL covers
+> `*.neobytech.net` only, so a second-level name gets no certificate and TLS
+> fails at the edge. Create the DNS record in the **dashboard** (zone
+> `neobytech.net` → DNS → Records → CNAME, name `api-yawoto`, target
+> `<tunnel-id>.cfargotunnel.com`, proxy enabled) — `cloudflared tunnel route
+> dns` from this Mac writes into the wrong zone (the local cert.pem cannot
+> see `neobytech.net` and suffix-mangles the hostname).
+
+The matching ingress rule lives in `~/.cloudflared/config-yawoto.yml`
+**before** the frontend rule (order matters):
+
+```yaml
+ingress:
+  - hostname: api-yawoto.neobytech.net
+    service: http://localhost:8000
+  - hostname: yawoto.neobytech.net
+    service: http://localhost:3100
+  - service: http_status:404
+```
+
+then `launchctl kickstart -k gui/$(id -u)/com.yawoto.cloudflared`. Verify SSE
+arrives unbuffered (you should see frames trickle in, then `: hb` heartbeats
+every ~10 s):
+
+```bash
+TOKEN=$(curl -s https://api-yawoto.neobytech.net/api/v1/auth/token \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"…","password":"…"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+curl -N -H "Authorization: Bearer $TOKEN" -H "X-Device-Id: smoke-test" \
+  "https://api-yawoto.neobytech.net/api/v1/chat/stream?query=Bonjour&language=fr"
+```
+
+Mobile clients must send `X-Device-Id` on every request (see
+[api.md](api.md)#native-clients-x-device-id-header) and use the SSE endpoint
+for chat — Cloudflare kills responses with >100 s to first byte (error 524),
+which rules out the non-streaming `POST /chat` for long runs.
+
 LaunchAgent `~/Library/LaunchAgents/com.yawoto.cloudflared.plist` (model it
 on any existing cloudflared plist; add `--config
 /Users/<you>/.cloudflared/config-yawoto.yml` before `run`), then:

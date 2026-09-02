@@ -14,15 +14,17 @@ tier "cabinet" so the local dev admin sees every model.
 from __future__ import annotations
 
 import logging
+import secrets
 import time
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from backend.core.config import Settings
 from backend.core import catalog
 from backend.core.exceptions import AuthenticationError, UserAlreadyExistsError
+from backend.core.mailer import send_email
 from backend.core.models import Role
 from backend.security.jwt import TokenPayload, create_access_token, decode_access_token
 from backend.security.passwords import hash_password, verify_password
@@ -30,6 +32,9 @@ from backend.security.sessions import (
     activate_session,
     device_fingerprint,
     generate_jti,
+    revoke_all_sessions,
+    revoke_session,
+    session_scope,
     verify_active_session,
 )
 
@@ -58,6 +63,20 @@ class RegisterRequest(BaseModel):
     phone: str = Field(default="", max_length=32)
     password: str = Field(min_length=8, max_length=200)
     name: str = Field(default="", max_length=200)
+
+
+class PasswordResetRequest(BaseModel):
+    identifier: str = Field(min_length=3, max_length=320)  # email or phone
+
+
+class PasswordResetConfirm(BaseModel):
+    token: str = Field(min_length=10, max_length=200)
+    new_password: str = Field(min_length=8, max_length=200)
+
+
+#: Cache namespace + TTL for password-reset tokens.
+RESET_KEY_PREFIX = "pwd_reset:"
+RESET_TTL_SECONDS = 30 * 60
 
 
 class MeResponse(BaseModel):
@@ -149,6 +168,7 @@ async def _token_response(
             device_fingerprint(request),
             expires_at,
             cache,
+            scope=session_scope(request),
         )
 
     return TokenResponse(
@@ -253,8 +273,9 @@ async def refresh_token(request: Request) -> TokenResponse:
 
     session_user = payload.user_id or payload.sub
     cache = getattr(ctx, "cache", None)
+    scope = session_scope(request)
     if settings.single_session_per_user and not await verify_active_session(
-        session_user, payload.jti, cache
+        session_user, payload.jti, cache, scope=scope
     ):
         raise AuthenticationError("session no longer active")
 
@@ -264,7 +285,9 @@ async def refresh_token(request: Request) -> TokenResponse:
     )
     expires_at = int(time.time()) + settings.jwt_expire_minutes * 60
     if settings.single_session_per_user:
-        await activate_session(session_user, jti, device_fingerprint(request), expires_at, cache)
+        await activate_session(
+            session_user, jti, device_fingerprint(request), expires_at, cache, scope=scope
+        )
 
     return TokenResponse(
         access_token=token,
@@ -316,3 +339,142 @@ async def whoami(request: Request) -> MeResponse:
         workspace_id="",
         features=catalog.get_tier(user.tier, settings=settings).get("features", {}),
     )
+
+
+@router.post("/logout", status_code=204)
+async def logout(request: Request) -> Response:
+    """Revoke the caller's active session for this device class.
+
+    Clients must also discard their token; this endpoint makes the discard
+    server-side effective immediately (the old token 401s on next use).
+    """
+    from backend.api.deps import get_ctx, require_user
+
+    user: TokenPayload = await require_user(request)
+    ctx = get_ctx(request)
+    if ctx.settings.single_session_per_user:
+        await revoke_session(
+            user.user_id or user.sub,
+            getattr(ctx, "cache", None),
+            scope=session_scope(request),
+        )
+    return Response(status_code=204)
+
+
+@router.delete("/me", status_code=204)
+async def delete_account(request: Request) -> Response:
+    """Permanently delete the caller's account and associated data.
+
+    Required by app-store rules wherever account creation is offered. Only
+    DB-backed accounts can self-delete (dev-store bootstrap accounts are
+    deployment-owned); the last admin account is protected so the platform
+    can never lock itself out.
+    """
+    from backend.api.deps import get_ctx, require_user
+
+    user: TokenPayload = await require_user(request)
+    if not user.user_id:
+        raise HTTPException(status_code=400, detail="only registered accounts can be deleted")
+    ctx = get_ctx(request)
+    user_store = _db_user_store(request)
+    if user_store is None:
+        raise HTTPException(status_code=503, detail="user store unavailable")
+    record = await user_store.get_by_id(user.user_id)
+    if record is None:
+        # Token belongs to a dev-store bootstrap account, not the DB.
+        raise HTTPException(status_code=400, detail="only registered accounts can be deleted")
+    if record.role == Role.ADMIN and await user_store.count_admins() <= 1:
+        raise HTTPException(status_code=403, detail="the last admin account cannot be deleted")
+    if not await user_store.delete_user(record.id):
+        raise HTTPException(status_code=500, detail="account deletion failed")
+    await revoke_all_sessions(record.id, getattr(ctx, "cache", None))
+
+    # Best-effort purge of chat history + long-term memory; a failure here
+    # must not resurrect the account or fail the request.
+    memory = getattr(ctx, "memory", None)
+    if memory is not None:
+        try:
+            for entry in await memory.list_sessions(record.id):
+                await memory.delete_session(record.id, entry["session_id"])
+            memories = await memory.list_memories(record.id)
+            await memory.delete_memories([m.id for m in memories])
+        except Exception:
+            logger.warning(
+                "memory purge failed for deleted account", extra={"user_id": record.id}
+            )
+    return Response(status_code=204)
+
+
+@router.post("/password-reset/request", status_code=202)
+async def request_password_reset(payload: PasswordResetRequest, request: Request) -> Response:
+    """Start a password reset. ALWAYS 202 so identifiers cannot be enumerated.
+
+    The reset link is emailed when SMTP is configured and the account has an
+    email address. Without a mailer the link is logged in development only.
+    Phone-only accounts have no delivery channel yet (no SMS gateway) — the
+    request succeeds silently from the client's perspective either way.
+    """
+    from backend.api.deps import get_ctx
+
+    ctx = get_ctx(request)
+    settings = ctx.settings
+    cache = getattr(ctx, "cache", None)
+    user_store = _db_user_store(request)
+    if cache is None or user_store is None:
+        raise HTTPException(status_code=503, detail="password reset unavailable")
+
+    try:
+        record = await user_store.find_by_identifier(payload.identifier)
+    except Exception:
+        record = None
+    if record is not None:
+        token = secrets.token_urlsafe(32)
+        await cache.set(f"{RESET_KEY_PREFIX}{token}", {"user_id": record.id}, ttl=RESET_TTL_SECONDS)
+        link = f"{settings.frontend_url.rstrip('/')}/reinitialiser?token={token}"
+        if record.email:
+            sent = await send_email(
+                settings,
+                record.email,
+                "Réinitialisation de votre mot de passe",
+                "Bonjour,\n\n"
+                "Pour choisir un nouveau mot de passe, ouvrez ce lien "
+                f"(valable 30 minutes) :\n\n{link}\n\n"
+                "Si vous n'êtes pas à l'origine de cette demande, ignorez ce message.\n",
+            )
+            if not sent and settings.env == "development":
+                logger.info("password reset link for %s: %s", record.email, link)
+            elif not sent:
+                logger.warning(
+                    "password reset email for %s not delivered (mailer disabled/failing)",
+                    record.email,
+                )
+        else:
+            logger.info(
+                "password reset requested for phone-only account (no delivery channel)",
+                extra={"user_id": record.id},
+            )
+    return Response(status_code=202)
+
+
+@router.post("/password-reset/confirm")
+async def confirm_password_reset(payload: PasswordResetConfirm, request: Request) -> dict[str, str]:
+    """Complete a password reset. All existing sessions are revoked, so every
+    device must log in again with the new password."""
+    from backend.api.deps import get_ctx
+
+    ctx = get_ctx(request)
+    cache = getattr(ctx, "cache", None)
+    user_store = _db_user_store(request)
+    if cache is None or user_store is None:
+        raise HTTPException(status_code=503, detail="password reset unavailable")
+
+    key = f"{RESET_KEY_PREFIX}{payload.token}"
+    entry = await cache.get(key)
+    user_id = entry.get("user_id") if isinstance(entry, dict) else None
+    if not user_id:
+        raise HTTPException(status_code=400, detail="invalid or expired reset token")
+    if not await user_store.set_password(user_id, payload.new_password):
+        raise HTTPException(status_code=500, detail="password update failed")
+    await cache.delete(key)
+    await revoke_all_sessions(user_id, cache)
+    return {"detail": "password updated"}

@@ -378,6 +378,18 @@ RULES
         "verified against the cited sources; confirm them with a legal professional "
         "before relying on them."
     ),
+    # User-visible note appended by the output guardrail when official sources
+    # conflict and the dispute could not be resolved. The conflicts list itself
+    # stays internal (production wipes it) — this note is the durable channel.
+    "CONFLICT_CAUTION_NOTE_FR": (
+        "\n\nNote : des sources officielles se contredisent sur un ou plusieurs points ; "
+        "les versions en présence sont indiquées dans la réponse et la confiance "
+        "affichée en tient compte."
+    ),
+    "CONFLICT_CAUTION_NOTE_EN": (
+        "\n\nNote: official sources disagree on one or more points; the conflicting "
+        "versions are indicated in the answer and the displayed confidence reflects it."
+    ),
     # --- claim verification LLM refinement (backend/agents/claim_verification.py) ---
     "CLAIM_VERIFIER_SYSTEM": """You are a strict legal claim verifier for a Burkina Faso legal research assistant.
 

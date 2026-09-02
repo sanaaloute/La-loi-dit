@@ -1,11 +1,15 @@
 import type { NextConfig } from "next";
 
-// Server-side proxy target used when NEXT_PUBLIC_API_URL is NOT set. The
-// backend does not enable CORS, so by default the browser talks to the
-// same-origin path "/backend-api/*" which Next.js rewrites to the API.
-// Set NEXT_PUBLIC_API_URL (e.g. http://localhost:8000) to call the API
-// directly from the browser — this requires CORS to be handled upstream
-// (e.g. via Nginx).
+// Server-side proxy target used when NEXT_PUBLIC_API_URL is NOT set: by
+// default the browser talks to the same-origin path "/backend-api/*" which
+// Next.js rewrites to the API. Set NEXT_PUBLIC_API_URL (e.g.
+// http://localhost:8000) to call the API directly from the browser — the
+// backend's CORS middleware (LEGAL_AI_CORS_ORIGINS) must then allow this
+// origin. Direct streaming is REQUIRED for real-time SSE: this rewrite
+// buffers the stream and delivers frames in bursts.
+// NOTE: native mobile apps should NOT use this proxy — they call the API
+// directly via its own hostname (see docs/deployment-macmini.md, "Public
+// API endpoint for mobile apps").
 const API_PROXY_TARGET = process.env.API_PROXY_TARGET ?? "http://localhost:8000";
 
 const nextConfig: NextConfig = {

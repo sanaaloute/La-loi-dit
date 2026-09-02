@@ -56,7 +56,7 @@ def test_agent_tuning_defaults_match_legacy_constants():
     assert s.answer_child_preview_chars == 200
     assert s.confidence_citation_weight == 0.4
     assert s.confidence_coverage_weight == 0.6
-    assert s.confidence_unresolved_conflict_cap == 0.6
+    assert s.confidence_unresolved_conflict_dampening == 0.85
     assert s.confidence_reflection_gap_cap == 0.75
     assert s.source_default_authority_weight == 0.15
     assert s.retrieval_top_mean_count == 3
@@ -116,7 +116,7 @@ def test_confidence_blend_weights_change_aggregate():
     assert overridden["final_answer"].confidence == 1.0
 
 
-def test_unresolved_conflict_cap_is_configurable():
+def test_unresolved_conflict_dampening_is_configurable():
     agent = ResponseGeneratorAgent()
     conflict = ConflictReport(
         topic="Code du travail art. 95",
@@ -125,13 +125,38 @@ def test_unresolved_conflict_cap_is_configurable():
         reason="conflit non résolu",
         resolved=False,
     )
-    tuned = Settings(confidence_unresolved_conflict_cap=0.3)
+    tuned = Settings(confidence_unresolved_conflict_dampening=0.5)
+    # Base blend: 0.4 * 1.0 + 0.6 * 0.5 = 0.7, dampened once: 0.7 * 0.5 = 0.35.
     update = agent._parse_final(
         "Le préavis est d'un mois [1].",
         _answer_state(tuned, conflicts=[conflict]),
         _ctx(tuned),
     )
-    assert update["final_answer"].confidence == 0.3
+    assert update["final_answer"].confidence == 0.35
+
+
+def test_conflict_dampening_exponent_is_capped():
+    """Many unresolved conflicts (parallel undated law versions) decay the
+    aggregate to dampening**max_dampenings, never toward zero."""
+    agent = ResponseGeneratorAgent()
+    conflicts = [
+        ConflictReport(
+            topic=f"Code du travail art. {90 + i}",
+            kept_chunk_id="a",
+            dropped_chunk_id="b",
+            reason="conflit non résolu",
+            resolved=False,
+        )
+        for i in range(5)
+    ]
+    tuned = Settings(confidence_unresolved_conflict_dampening=0.5)
+    # Base 0.7 x 0.5^3 (capped, not ^5) = 0.0875 -> 0.09.
+    update = agent._parse_final(
+        "Le préavis est d'un mois [1].",
+        _answer_state(tuned, conflicts=conflicts),
+        _ctx(tuned),
+    )
+    assert update["final_answer"].confidence == 0.09
 
 
 def test_excerpt_and_retrieval_mean_knobs():

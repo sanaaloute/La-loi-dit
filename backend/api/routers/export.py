@@ -14,12 +14,13 @@ import re
 from datetime import datetime
 from typing import Any, Callable
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from backend.api.deps import get_ctx
+from backend.api.deps import get_ctx, get_current_user
 from backend.core.models import Citation, FinalAnswer
+from backend.security.jwt import TokenPayload
 
 router = APIRouter(tags=["export"])
 
@@ -466,6 +467,10 @@ async def export_answer(
     request: Request,
     format: str,
     payload: ExportRequest,
+    # Auth: generation is CPU-heavy, so the endpoint is no longer anonymous.
+    # get_current_user (not require_user) keeps the development anonymous
+    # pass-through; production rejects missing/invalid tokens with a 401.
+    _user: TokenPayload = Depends(get_current_user),
 ) -> Response:
     """Export one answer or a whole conversation to PDF, Word, CSV or Markdown."""
     format = format.lower()

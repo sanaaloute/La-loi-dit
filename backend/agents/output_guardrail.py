@@ -99,6 +99,13 @@ class OutputGuardrailAgent(Agent):
                 caution = get_prompt("CLAIM_UNCERTAINTY_NOTE_EN" if english else "CLAIM_UNCERTAINTY_NOTE_FR")
                 if caution.strip() not in answer.answer:
                     answer.answer = answer.answer.rstrip() + caution
+            # Unresolved source conflicts get the same durable-note treatment:
+            # the conflicts list is internal-only in production (wiped below),
+            # so the note is what tells the user why confidence is reduced.
+            if any(not c.resolved for c in answer.conflicts):
+                conflict_note = get_prompt("CONFLICT_CAUTION_NOTE_EN" if english else "CONFLICT_CAUTION_NOTE_FR")
+                if conflict_note.strip() not in answer.answer:
+                    answer.answer = answer.answer.rstrip() + conflict_note
             if self._needs_full_disclaimer(state, answer, ctx):
                 disclaimer = full
             else:

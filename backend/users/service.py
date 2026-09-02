@@ -308,6 +308,26 @@ class UserStore:
             row = (await session.execute(select(t).where(t.c.id == user_id))).first()
         return self._row_to_record(row) if row else None
 
+    async def find_by_identifier(self, identifier: str) -> Optional[UserRecord]:
+        """Look up a user by email or phone WITHOUT a password check.
+
+        Used by the password-reset flow; callers must not reveal whether a
+        match was found (enumeration).
+        """
+        if not await self._ensure_db():
+            return None
+        from sqlalchemy import or_, select
+
+        email = identifier.lower().strip()
+        phone = normalize_phone(identifier)
+        conditions = [TABLES["users"].c.email == email]
+        if phone:
+            conditions.append(TABLES["users"].c.phone == phone)
+        t = TABLES["users"]
+        async with self._session_factory() as session:
+            row = (await session.execute(select(t).where(or_(*conditions)))).first()
+        return self._row_to_record(row) if row else None
+
     async def list_users(self, limit: int = 500) -> list[UserRecord]:
         """All accounts, newest first.
 
@@ -379,6 +399,45 @@ class UserStore:
             result = await session.execute(update(t).where(t.c.id == user_id).values(role=role_value))
             await session.commit()
         return bool(result.rowcount)
+
+    async def set_password(self, user_id: str, new_password: str) -> bool:
+        """Replace a user's password hash; False on missing user or DB down."""
+        if not await self._ensure_db():
+            return False
+        from sqlalchemy import update
+
+        t = TABLES["users"]
+        async with self._session_factory() as session:
+            result = await session.execute(
+                update(t).where(t.c.id == user_id).values(password_hash=hash_password(new_password))
+            )
+            await session.commit()
+        return bool(result.rowcount)
+
+    async def delete_user(self, user_id: str) -> bool:
+        """Delete an account and its rows in this store's own tables.
+
+        Removes the user, their personal workspace, usage rows and the
+        prompt audit rows. Per-user memory/chat history is the memory
+        store's responsibility (the auth router purges it best-effort via
+        ``MemoryStore``). False when the user does not exist or DB down.
+        """
+        if not await self._ensure_db():
+            return False
+        from sqlalchemy import delete
+
+        async with self._session_factory() as session:
+            result = await session.execute(delete(TABLES["users"]).where(TABLES["users"].c.id == user_id))
+            if not result.rowcount:
+                await session.rollback()
+                return False
+            await session.execute(delete(TABLES["workspaces"]).where(TABLES["workspaces"].c.owner_id == user_id))
+            await session.execute(delete(TABLES["usage"]).where(TABLES["usage"].c.user_id == user_id))
+            await session.execute(
+                delete(TABLES["user_prompts"]).where(TABLES["user_prompts"].c.user_id == user_id)
+            )
+            await session.commit()
+        return True
 
     async def set_billing_state(
         self,

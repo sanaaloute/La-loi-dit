@@ -404,20 +404,28 @@ class ResponseGeneratorAgent(CompletionAgent):
                         "Réponse potentiellement incomplète : certaines dimensions de la "
                         "question ne sont pas couvertes par les sources indexées."
                     )
-            # Trust caps: unresolved contradictions and reflection-flagged gaps
-            # bound how confident the answer may claim to be.
+            # Trust adjustment: unresolved contradictions dampen the aggregate
+            # multiplicatively instead of a flat hard cap, so a single contested
+            # point no longer pins every answer to the same score. The exponent
+            # is capped (confidence_conflict_max_dampenings): with a corpus full
+            # of undated parallel versions, one question can yield many pairwise
+            # conflicts, and uncapped decay would drag every answer toward zero.
             unresolved = [c for c in state.get("conflicts", []) if not c.resolved]
             if unresolved:
-                confidence = min(confidence, settings.confidence_unresolved_conflict_cap)
+                exponent = min(len(unresolved), settings.confidence_conflict_max_dampenings)
+                confidence = round(
+                    confidence * settings.confidence_unresolved_conflict_dampening ** exponent,
+                    2,
+                )
                 if language.startswith("en"):
                     warnings.append(
-                        "Conflicting sources could not be resolved; the answer is capped "
-                        "at reduced confidence."
+                        f"{len(unresolved)} conflicting source(s) could not be resolved; "
+                        "confidence reduced accordingly."
                     )
                 else:
                     warnings.append(
-                        "Des sources se contredisent sans que le conflit ait pu être "
-                        "résolu ; la confiance est plafonnée."
+                        f"{len(unresolved)} source(s) se contredisent sans que le conflit "
+                        "ait pu être résolu ; la confiance est réduite en conséquence."
                     )
             reflection = state.get("reflection")
             if reflection is not None and not reflection.answered_all_questions:

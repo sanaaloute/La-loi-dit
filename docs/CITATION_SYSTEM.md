@@ -162,9 +162,11 @@ below `human_review_threshold`) and high-risk query patterns.
 
 `FinalAnswer.confidence` is a single aggregate: **0.4 × citation accuracy +
 0.6 × sub-question coverage** (weights in `response_generator`), with trust
-caps — unresolved conflicts cap it at 0.6, a reflection-flagged incomplete
-answer at 0.75, and citation verification scales it by the post-verification
-accuracy.
+adjustments — each unresolved conflict multiplies it by 0.85 (graded
+dampener, `confidence_unresolved_conflict_dampening`, exponent capped at
+`confidence_conflict_max_dampenings` = 3), a reflection-flagged incomplete answer caps it at 0.75, and citation verification scales it by the
+post-verification accuracy. Unresolved conflicts also append a durable
+user-facing note (production hides the conflicts list itself).
 
 The per-dimension detail lives in `ConfidenceBreakdown`:
 

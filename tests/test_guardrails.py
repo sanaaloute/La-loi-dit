@@ -292,3 +292,37 @@ async def test_no_caution_note_without_flagged_claims(ctx):
     state = _guardrail_state(_grounded_answer(), QuestionType.FACTUAL)
     text = (await OutputGuardrailAgent().run(state, ctx))["final_answer"].answer
     assert "Prudence" not in text
+
+
+# ---------------------------------------------------------------------------
+# Unresolved-conflict note (user-facing, survives production wiping)
+# ---------------------------------------------------------------------------
+
+
+async def test_conflict_note_appended_and_conflicts_wiped_in_production(ctx):
+    from backend.agents.output_guardrail import OutputGuardrailAgent
+
+    ctx.settings.env = "production"
+    state = _guardrail_state(_answer_with_diagnostics(), QuestionType.FACTUAL)
+    answer = (await OutputGuardrailAgent().run(state, ctx))["final_answer"]
+    # Internal conflicts stay hidden, but the user now sees WHY confidence dropped.
+    assert answer.conflicts == []
+    assert "se contredisent" in answer.answer
+
+
+async def test_no_conflict_note_when_conflicts_resolved(ctx):
+    from backend.agents.output_guardrail import OutputGuardrailAgent
+
+    answer = _grounded_answer()
+    answer.conflicts = [
+        ConflictReport(
+            topic="art. 2",
+            kept_chunk_id="a",
+            dropped_chunk_id="b",
+            reason="source d'autorité supérieure retenue",
+            resolved=True,
+        )
+    ]
+    state = _guardrail_state(answer, QuestionType.FACTUAL)
+    text = (await OutputGuardrailAgent().run(state, ctx))["final_answer"].answer
+    assert "se contredisent" not in text
