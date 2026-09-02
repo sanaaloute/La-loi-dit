@@ -1,16 +1,20 @@
-# Deployment: Mac Mini + EC2 public relay
+# Deployment: Mac Mini + Cloudflare Tunnel
 
-Architecture: the full stack runs on a Mac Mini (32 GB RAM) reachable only
-through Tailscale; a small EC2 instance is a dumb public nginx relay. The
-public domain (Spaceship DNS) points at the EC2's Elastic IP.
+Architecture: the full stack runs on a Mac Mini (32 GB RAM). Public access
+goes through a dedicated Cloudflare Tunnel (`yawoto`) — no public inbound
+port, no relay VM, no Tailscale dependency for traffic. The zone
+`neobytech.net` is hosted on Cloudflare DNS.
 
 ```
-public → https://your-domain (Spaceship → EC2 Elastic IP) → nginx on EC2
-       → Tailscale tunnel → Mac Mini (100.x.y.z:3000) → docker compose stack
+public → https://yawoto.neobytech.net (Cloudflare DNS + proxy)
+       → cloudflared tunnel "yawoto" on the Mac (outbound only)
+       → 127.0.0.1:3100 → docker compose frontend → api / postgres / …
 ```
 
-> The Tailscale IP (`100.64.0.0/10`) is NOT publicly routable — never point
-> public DNS at it. The EC2 relay is what makes the platform public.
+> The tunnel is **dedicated** to this project: its own config
+> (`~/.cloudflared/config-yawoto.yml`), credentials and LaunchAgent
+> (`com.yawoto.cloudflared`). Other projects on the same Mac (e.g.
+> ai-website) run their own tunnels — do not share ingress configs.
 
 ## Phase 0 — arm64 wheels (critical)
 
@@ -27,8 +31,7 @@ python -m pip download -r requirements.txt -d docker/wheels \
 
 The one risk is **paddlepaddle** (OCR): if no manylinux aarch64 wheel is
 found, the build cannot succeed — check before going further. All other
-services (postgres, redis, milvus, etcd, minio, temporal, grafana,
-prometheus) ship arm64 images.
+services (postgres, redis, milvus, etcd, minio) ship arm64 images.
 
 ## Phase 1 — Mac Mini base setup
 
@@ -36,18 +39,17 @@ prometheus) ship arm64 images.
 # Docker runtime (OrbStack is lighter than Docker Desktop):
 brew install orbstack && open -a OrbStack
 
-# Ollama natively (Metal acceleration, much faster than EC2 CPU):
+# Ollama natively (Metal acceleration):
 brew install ollama && brew services start ollama
 ollama pull qwen3-embedding:latest
 
-# Tailscale:
-brew install --cask tailscale   # sign in from the menu bar icon
-tailscale ip -4                  # note the 100.x.y.z — this is MAC_TS_IP
+# cloudflared:
+brew install cloudflared
+cloudflared login          # opens the browser, writes ~/.cloudflared/cert.pem
 ```
 
-In the Tailscale admin console: **disable key expiry** for the Mac
-(Machines → ⋯ → Disable key expiry), or the tunnel dies silently after
-90 days.
+Tailscale is **optional** and no longer part of the serving path — keep it
+only if you want remote SSH/admin access to the Mac.
 
 ## Phase 2 — The stack on the Mac Mini
 
@@ -62,93 +64,104 @@ cp .env.example .env
 LEGAL_AI_WEB_WORKERS=3                                       # 32 GB: fine
 LEGAL_AI_EMBEDDING_API_BASE=http://host.docker.internal:11434  # Mac-native Ollama
 API_PROXY_TARGET=http://api:8000
-MAC_TS_IP=100.x.y.z                                          # from Phase 1
 # Standalone Milvus server (compose services etcd+minio+milvus), shared by
 # every api worker — do NOT point this at the embedded Lite file:
 LEGAL_AI_MILVUS_ENABLED=true
 LEGAL_AI_MILVUS_HOST=milvus
 LEGAL_AI_MILVUS_PORT=19530
 LEGAL_AI_MILVUS_URI=            # empty -> http://milvus:19530
-# POSTGRES_* secrets, STT provider, etc. as on the EC2
+# POSTGRES_* secrets, STT provider, etc.
 ```
 
-On the `minimac` branch the main `docker-compose.yml` IS the minimal stack
-(`api`, `frontend`, `postgres`, `redis`, `etcd`, `minio`, `milvus`). The cut
-services and why they are safe to drop:
-
-- **temporal + temporal-ui + celery-worker** — dormant subsystems: nothing in
-  the API/request path imported them (the code is removed on this branch);
-- **prometheus + grafana** — optional observability; `/metrics` keeps working;
-- **ollama-relay** — a WSL-only workaround; Ollama runs natively on the Mac.
-
-> Note: the stack previously ran embedded Milvus Lite
-> (`LEGAL_AI_MILVUS_URI=/app/data/milvus_lite.db`). Lite is single-process:
-> with more than one api worker, the others silently fell back to an empty
-> in-memory store — which is why the standalone server stack is back.
+The frontend binds **127.0.0.1:3100** (see `docker-compose.yml`) — the
+tunnel reaches it on localhost, and nothing is exposed on the LAN. Port 3100
+rather than 3000 because another project's frontend already owns
+localhost:3000 on this Mac; pick any free port and keep the tunnel config in
+sync.
 
 Then:
 
 ```bash
-# Copy data (OCR/STT models, legal docs) from the EC2:
-rsync -avz ec2:/path/to/yawoto/data/ ./data/
-
 docker compose build
 docker compose up -d
 docker compose ps                    # all healthy
-curl http://100.x.y.z:3000           # answers over Tailscale
+curl http://127.0.0.1:3100           # answers locally
 
 # Ingest the corpus (no Milvus server readiness check on this branch):
 bash scripts/reindex.sh
 ```
 
-## Phase 3 — EC2 becomes a pure relay
+## Phase 3 — Cloudflare Tunnel
+
+Prerequisite: the zone (`neobytech.net`) is added to your Cloudflare account
+and its nameservers are set at the registrar (Spaceship → Domain →
+Nameservers → the two `*.ns.cloudflare.com` assigned by Cloudflare).
 
 ```bash
-# 1. Assign an Elastic IP (AWS console) so the address survives restarts.
+# Dedicated tunnel (credentials land in ~/.cloudflared/<id>.json):
+cloudflared tunnel create yawoto
 
-# 2. Spaceship: Domain → DNS records → A record:
-#    Host: @ (and/or www)   Value: <EC2 Elastic IP>   TTL: 300
-
-# 3. Stop the heavyweight stack on the EC2 — only nginx stays:
-cd /path/to/yawoto && docker compose down
-
-# 4. Tailscale + nginx + certbot:
-curl -fsSL https://tailscale.com/install.sh | sh
-sudo tailscale up
-ping 100.x.y.z                       # MAC_TS_IP must answer
-sudo apt install -y nginx certbot python3-certbot-nginx
+# DNS route — creates the proxied CNAME yawoto.neobytech.net → tunnel:
+cloudflared tunnel route dns --overwrite-dns yawoto yawoto.neobytech.net
 ```
 
-Disable key expiry for the EC2 in the Tailscale console too.
+> If the CLI cannot see the zone yet (fresh zone still "pending"), create
+> the record by hand instead: zone → DNS → Records → CNAME `yawoto` →
+> `<tunnel-id>.cfargotunnel.com`, proxy enabled. Same result.
+> Never let the record fall into another zone: a suffix-matching mistake
+> creates hostnames like `yawoto.neobytech.net.<other-zone>`.
 
-Install `docker/host-nginx/yawoto.neobytech.net.conf` with the proxy target
-pointing at the Mac over Tailscale:
+Config `~/.cloudflared/config-yawoto.yml`:
+
+```yaml
+tunnel: <tunnel-id>
+credentials-file: /Users/<you>/.cloudflared/<tunnel-id>.json
+
+ingress:
+  - hostname: yawoto.neobytech.net
+    service: http://localhost:3100
+  - service: http_status:404
+```
+
+The frontend proxies `/backend-api/*` to the api container, so the frontend
+port is the **only** service to expose. SSE chat streaming works through the
+tunnel with no extra settings.
+
+LaunchAgent `~/Library/LaunchAgents/com.yawoto.cloudflared.plist` (model it
+on any existing cloudflared plist; add `--config
+/Users/<you>/.cloudflared/config-yawoto.yml` before `run`), then:
 
 ```bash
-sudo sed 's/__DOMAIN__/your-domain.com/g; s|http://127.0.0.1:3000|http://100.x.y.z:3000|g' \
-  docker/host-nginx/yawoto.neobytech.net.conf | sudo tee /etc/nginx/sites-available/yawoto
-sudo ln -s /etc/nginx/sites-available/yawoto /etc/nginx/sites-enabled/
-sudo certbot --nginx -d your-domain.com   # provisions TLS, fills cert paths
-sudo nginx -t && sudo systemctl reload nginx
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.yawoto.cloudflared.plist
+# logs: /tmp/cloudflared-yawoto-{out,err}.log — expect 4 "Registered tunnel connection"
 ```
 
-EC2 security group: inbound **80/tcp and 443/tcp** only (plus SSH). Milvus,
-Postgres and friends now live exclusively on the tailnet.
+The apex `neobytech.net` stays a plain DNS record (company site) — only the
+`yawoto` hostname routes to this app.
 
 ## Phase 4 — Verify and harden
 
-- `https://your-domain.com` publicly: the login/register gate shows; ask a
-  legal question; upload a document from the admin panel.
-- Tailscale ACLs (admin console): allow the EC2 node to reach the Mac only
-  on port 3000 — a compromised relay still can't touch the databases.
+- `https://yawoto.neobytech.net`: the login gate shows; ask a legal
+  question (SSE stream); upload a document from the admin panel.
+- `curl https://yawoto.neobytech.net/backend-api/health` → `{"status":"ok"}`.
 - Mac Mini: System Settings → Energy → prevent sleep + start up after power
-  failure; OrbStack, Ollama (`brew services`) and Tailscale launch at login.
-- Backups: nightly `pg_dump` + rsync of `data/` to the EC2 (it has the disk
-  and does almost nothing else now).
+  failure; OrbStack, Ollama (`brew services`) and both LaunchAgents start at
+  login.
+- Backups: nightly `pg_dump` + copy of `data/` to an external disk or offsite
+  storage (there is no longer an EC2 to rsync to).
 
 ## Caveats
 
-- Your home/office **uplink** is now the user-facing bandwidth — fine for a
-  legal tool's traffic profile, but keep it in mind for large PDF uploads.
+- Cloudflare free plan caps request bodies at **100 MB** — matches the
+  backend's admin upload limit (100 MB), fine as-is.
+- Cloudflare kills requests with **>100 s to first byte** (error 524). The
+  frontend uses the SSE endpoint (`/api/v1/chat/stream`) whose heartbeats
+  keep the stream open, so long agent runs are fine; avoid adding
+  non-streaming endpoints that answer only at the end.
+- Your home/office **uplink** is the user-facing bandwidth — fine for a
+  legal tool's traffic profile.
 - The Mac is production hardware: UPS recommended, and mind confidentiality
   obligations for legal data stored on premises.
+- `docker/host-nginx/yawoto.neobytech.net.conf` is **legacy** — it was the
+  EC2 relay's nginx config (public → EC2 → Tailscale → Mac) and is kept for
+  reference only; the tunnel replaced that whole path.

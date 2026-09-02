@@ -165,8 +165,10 @@ services:
     networks: [legal-net]
 
   # --- Frontend ---
-  # Bound to the Mac's Tailscale IP (MAC_TS_IP in .env) so the public EC2
-  # relay can reach it; falls back to localhost when unset.
+  # Public access is via the dedicated Cloudflare tunnel on this Mac
+  # (~/.cloudflared/config-yawoto.yml), which connects to 127.0.0.1:3100
+  # (localhost:3000 is taken by ai-website-frontend). Localhost-only: no
+  # direct exposure on the LAN or Tailscale.
   # NEXT_PUBLIC_API_URL is baked into the client bundle at build time; leaving
   # it empty makes the browser use the same-origin /backend-api proxy,
   # rewritten to API_PROXY_TARGET.
@@ -182,7 +184,8 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
       API_PROXY_TARGET: ${API_PROXY_TARGET}
     ports:
-      - "${MAC_TS_IP:-127.0.0.1}:3000:3000"
+      # 3100, not 3000: ai-website-frontend already owns 127.0.0.1:3000.
+      - "127.0.0.1:3100:3000"
     depends_on:
       api:
         condition: service_healthy

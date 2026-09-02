@@ -8,7 +8,7 @@
 | Service | Image | Port | Role |
 |---|---|---|---|
 | api | `docker/backend.Dockerfile` | 8000 (localhost only) | FastAPI app (uvicorn) |
-| frontend | `frontend/Dockerfile` | 3000 (Tailscale IP / localhost) | Next.js UI — proxy from your external nginx |
+| frontend | `frontend/Dockerfile` | 3100 (localhost only) | Next.js UI — exposed publicly via the Cloudflare tunnel |
 | postgres | postgres:16-alpine | — (internal only) | system of record |
 | redis | redis:7-alpine | — (internal only) | cache + session store |
 
@@ -31,6 +31,11 @@ Set `LEGAL_AI_INGEST_ON_STARTUP=true` to have the API index
 against multi-worker double runs).
 
 ## Host nginx (external reverse proxy)
+
+> **Legacy on the Mac Mini deployment**: the dedicated Cloudflare tunnel now
+> terminates TLS and proxies straight to the frontend — no host nginx, no
+> certbot. See [deployment-macmini.md](deployment-macmini.md). The section
+> below only applies to the old EC2-relay setup.
 
 The compose stack does **not** include an nginx container. The host's nginx is
 managed by:
