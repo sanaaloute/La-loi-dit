@@ -1,0 +1,3 @@
+# Binaries must never be committed (they are rebuilt by EAS).
+*.aab
+*.apk
