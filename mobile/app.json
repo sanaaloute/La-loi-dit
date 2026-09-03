@@ -48,7 +48,8 @@
       "expo-status-bar",
       "expo-font",
       "expo-asset",
-      "expo-system-ui"
+      "expo-system-ui",
+      "@react-native-community/datetimepicker"
     ],
     "extra": {
       "apiUrl": "https://api-yawoto.neobytech.net",

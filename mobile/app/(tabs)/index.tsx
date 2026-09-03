@@ -14,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   AudioModule,
@@ -62,13 +63,17 @@ const SUGGESTIONS = [
 /** Public web app origin — shared answer pages live under /partage/<token>. */
 const PUBLIC_WEB_ORIGIN = "https://yawoto.neobytech.net";
 
-/** Strict YYYY-MM-DD validation (real calendar dates only). */
-function isValidScenarioDate(value: string): boolean {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
-  if (!m) return false;
-  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
-  const d = new Date(year, month - 1, day);
-  return d.getFullYear() === year && d.getMonth() === month - 1 && d.getDate() === day;
+/** Parse "YYYY-MM-DD" into a local Date (noon sidesteps DST edges). */
+function parseScenarioDate(value: string): Date {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day, 12);
+}
+
+/** Format a picker Date back to the API's "YYYY-MM-DD" contract. */
+function formatScenarioDate(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
 }
 
 const AUDIO_MIME: Record<string, string> = {
@@ -98,9 +103,10 @@ export default function ChatScreen() {
 
   // Scenario date ("Loi en vigueur au …"): sent as scenario_date, YYYY-MM-DD.
   const [scenarioDate, setScenarioDate] = useState<string | null>(null);
-  const [dateModalOpen, setDateModalOpen] = useState(false);
-  const [dateInput, setDateInput] = useState("");
-  const [dateError, setDateError] = useState<string | null>(null);
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
+  // Draft selection inside the iOS sheet (applied via "Valider"); Android's
+  // system dialog confirms atomically and never touches this.
+  const [pickerDate, setPickerDate] = useState<Date>(new Date());
 
   // Saved answers: message id -> bookmark id (local mirror of /bookmarks).
   const [savedBookmarks, setSavedBookmarks] = useState<Record<string, string>>({});
@@ -317,28 +323,11 @@ export default function ChatScreen() {
   const sendDisabled = input.trim().length === 0 || wordCount > MAX_WORDS || busy;
 
   // -------------------------------------------------------------------------
-  // Scenario date modal
+  // Scenario date picker (native calendar; no keyboard involved)
   // -------------------------------------------------------------------------
-  function openDateModal() {
-    setDateInput(scenarioDate ?? "");
-    setDateError(null);
-    setDateModalOpen(true);
-  }
-
-  function applyScenarioDate() {
-    const value = dateInput.trim();
-    if (!value) {
-      // Empty input = clear the scenario date.
-      setScenarioDate(null);
-      setDateModalOpen(false);
-      return;
-    }
-    if (!isValidScenarioDate(value)) {
-      setDateError("Date invalide. Utilisez le format AAAA-MM-JJ (ex. 2024-01-15).");
-      return;
-    }
-    setScenarioDate(value);
-    setDateModalOpen(false);
+  function openDatePicker() {
+    setPickerDate(scenarioDate ? parseScenarioDate(scenarioDate) : new Date());
+    setDatePickerOpen(true);
   }
 
   // -------------------------------------------------------------------------
@@ -541,6 +530,17 @@ export default function ChatScreen() {
         <Text style={styles.headerTitle}>Yawoto</Text>
         <View style={styles.headerActions}>
           <Pressable
+            onPress={openDatePicker}
+            style={styles.headerButton}
+            accessibilityLabel="Choisir une date de scénario (loi en vigueur au…)"
+          >
+            <Ionicons
+              name="calendar-outline"
+              size={18}
+              color={scenarioDate ? colors.accent : colors.inkSoft}
+            />
+          </Pressable>
+          <Pressable
             onPress={() => {
               setTab("agents");
               setPanelOpen(true);
@@ -699,17 +699,6 @@ export default function ChatScreen() {
                   <Ionicons name="mic" size={17} color={colors.inkSoft} />
                 </Pressable>
                 <Pressable
-                  onPress={openDateModal}
-                  style={[styles.roundButton, styles.roundButtonMuted]}
-                  accessibilityLabel="Choisir une date de scénario (loi en vigueur au…)"
-                >
-                  <Ionicons
-                    name="calendar-outline"
-                    size={17}
-                    color={scenarioDate ? colors.accent : colors.inkSoft}
-                  />
-                </Pressable>
-                <Pressable
                   onPress={() => {
                     const q = input;
                     setInput("");
@@ -795,45 +784,50 @@ export default function ChatScreen() {
         </View>
       </Modal>
 
-      {/* Scenario date sheet: YYYY-MM-DD input (dependency-free). */}
+      {/* Scenario date: native calendar picker. Android shows the system
+          calendar dialog; iOS gets the inline picker inside our sheet. */}
+      {Platform.OS === "android" && datePickerOpen ? (
+        <DateTimePicker
+          value={pickerDate}
+          mode="date"
+          display="calendar"
+          onChange={(event, date) => {
+            setDatePickerOpen(false);
+            if (event.type === "set" && date) {
+              setScenarioDate(formatScenarioDate(date));
+            }
+          }}
+        />
+      ) : null}
+      {Platform.OS !== "android" ? (
       <Modal
-        visible={dateModalOpen}
+        visible={datePickerOpen}
         animationType="slide"
         transparent
-        onRequestClose={() => setDateModalOpen(false)}
+        onRequestClose={() => setDatePickerOpen(false)}
       >
-        <KeyboardAvoidingView
-          style={styles.modalContainer}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-        >
-          <Pressable style={styles.modalBackdrop} onPress={() => setDateModalOpen(false)} />
+        <View style={styles.modalContainer}>
+          <Pressable style={styles.modalBackdrop} onPress={() => setDatePickerOpen(false)} />
           <View style={styles.dateSheet}>
             <Text style={styles.sheetTitle}>Loi en vigueur au…</Text>
             <Text style={styles.dateHint}>
               La réponse tiendra compte des textes en vigueur à cette date.
             </Text>
-            <TextInput
-              value={dateInput}
-              onChangeText={(v) => {
-                setDateInput(v);
-                setDateError(null);
+            <DateTimePicker
+              value={pickerDate}
+              mode="date"
+              display="inline"
+              onChange={(_event, date) => {
+                if (date) setPickerDate(date);
               }}
-              placeholder="AAAA-MM-JJ"
-              placeholderTextColor={colors.faint}
-              keyboardType="numbers-and-punctuation"
-              autoCapitalize="none"
-              autoCorrect={false}
-              maxLength={10}
-              style={styles.dateInput}
-              onSubmitEditing={applyScenarioDate}
+              style={styles.datePicker}
             />
-            {dateError ? <Text style={styles.dateError}>{dateError}</Text> : null}
             <View style={styles.dateActions}>
               {scenarioDate ? (
                 <Pressable
                   onPress={() => {
                     setScenarioDate(null);
-                    setDateModalOpen(false);
+                    setDatePickerOpen(false);
                   }}
                   style={styles.dateButton}
                   accessibilityLabel="Retirer la date"
@@ -841,16 +835,23 @@ export default function ChatScreen() {
                   <Text style={styles.dateRemoveText}>Retirer</Text>
                 </Pressable>
               ) : null}
-              <Pressable onPress={() => setDateModalOpen(false)} style={styles.dateButton}>
+              <Pressable onPress={() => setDatePickerOpen(false)} style={styles.dateButton}>
                 <Text style={styles.dateCancelText}>Annuler</Text>
               </Pressable>
-              <Pressable onPress={applyScenarioDate} style={styles.dateApplyButton}>
+              <Pressable
+                onPress={() => {
+                  setScenarioDate(formatScenarioDate(pickerDate));
+                  setDatePickerOpen(false);
+                }}
+                style={styles.dateApplyButton}
+              >
                 <Text style={styles.dateApplyText}>Valider</Text>
               </Pressable>
             </View>
           </View>
-        </KeyboardAvoidingView>
+        </View>
       </Modal>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -1033,17 +1034,7 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
     gap: 10,
   },
   dateHint: { fontSize: 12, color: colors.muted },
-  dateInput: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    backgroundColor: colors.surface,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-    color: colors.ink,
-  },
-  dateError: { fontSize: 12, color: colors.danger },
+  datePicker: { alignSelf: "center" },
   dateActions: { flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 4 },
   dateButton: { paddingHorizontal: 12, paddingVertical: 10 },
   dateCancelText: { fontSize: 14, color: colors.muted },

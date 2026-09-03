@@ -736,7 +736,12 @@ export async function transcribeAudio(
       signal: controller.signal,
     });
   } catch (err) {
-    if (err instanceof Error && err.name === "AbortError") {
+    // Log the underlying cause (like the web app does): the message shown to
+    // the user is a generic one, the console keeps the actionable detail.
+    console.error("Transcription request failed", err);
+    // Classify on our own signal rather than the error name: RN's fetch does
+    // not always reject aborts with an "AbortError"-named error.
+    if (controller.signal.aborted) {
       throw new Error("La transcription a expiré. Réessayez avec un extrait plus court.");
     }
     throw new Error(
