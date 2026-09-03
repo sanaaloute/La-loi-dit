@@ -1,497 +1,807 @@
 {
-  "version": 1,
-  "search_registry": [
-    {
-      "name": "Portail du Gouvernement du Burkina Faso",
-      "base_url": "https://www.gouv.bf",
-      "authority": "official_news",
-      "kind": "government",
-      "government_body": "Gouvernement du Burkina Faso",
-      "search_path": "/recherche?search_api_fulltext={query}",
-      "rss_path": "/rss.xml"
-    },
-    {
-      "name": "Journal Officiel du Burkina Faso",
-      "base_url": "https://www.jo.gouv.bf",
-      "authority": "official_gazette",
-      "kind": "regulation",
-      "government_body": "Secrétariat général du Gouvernement",
-      "search_path": "/recherche?search_api_fulltext={query}"
-    },
-    {
-      "name": "Assemblée nationale du Burkina Faso",
-      "base_url": "https://www.assembleenationale.bf",
-      "authority": "law",
-      "kind": "regulation",
-      "government_body": "Assemblée nationale",
-      "rss_path": "/rss.xml"
-    },
-    {
-      "name": "Conseil constitutionnel du Burkina Faso",
-      "base_url": "https://www.conseil-constitutionnel.bf",
-      "authority": "constitution",
-      "kind": "case_law",
-      "government_body": "Conseil constitutionnel"
-    },
-    {
-      "name": "Cour suprême / Cour de cassation du Burkina Faso",
-      "base_url": "https://www.coursupreme.bf",
-      "authority": "case_law",
-      "kind": "case_law",
-      "government_body": "Cour suprême"
-    },
-    {
-      "name": "OHADA — Organisation pour l'Harmonisation en Afrique du Droit des Affaires",
-      "base_url": "https://www.ohada.org",
-      "authority": "treaty_ohada",
-      "kind": "regulation",
-      "government_body": "OHADA",
-      "search_path": "/recherche/?search_api_fulltext={query}"
-    },
-    {
-      "name": "Ministère de l'Économie, des Finances et de la Prospective",
-      "base_url": "https://www.finances.gov.bf",
-      "authority": "official_news",
-      "kind": "government",
-      "government_body": "Ministère des Finances",
-      "rss_path": "/rss.xml"
-    },
-    {
-      "name": "Ministère de la Justice",
-      "base_url": "https://www.justice.gov.bf",
-      "authority": "ministerial_circular",
-      "kind": "government",
-      "government_body": "Ministère de la Justice"
-    },
-    {
-      "name": "Ministère du Travail, de l'Emploi et de la Protection sociale",
-      "base_url": "https://www.travail.gov.bf",
-      "authority": "ministerial_circular",
-      "kind": "government",
-      "government_body": "Ministère du Travail"
-    }
-  ],
-  "crawler_allowed_domains": [
-    "gouvernement.gov.bf",
-    "assembleenationale.bf",
-    "legiburkina.bf",
-    "presidencedufaso.bf",
-    "sig.gov.bf",
-    "ohada.org"
-  ],
-  "freshness_registry": [
-    {
-      "name": "OHADA — Actualités",
-      "url": "https://www.ohada.org/feed/",
-      "kind": "rss",
-      "metadata": {
-        "authority": "treaty_ohada",
-        "government_body": "OHADA"
-      }
-    },
-    {
-      "name": "Législation du Burkina Faso (LégiBurkina)",
-      "url": "https://www.legiburkina.bf/",
-      "kind": "web",
-      "metadata": {
-        "authority": "law",
-        "government_body": "Gouvernement du Burkina Faso"
-      }
-    },
-    {
-      "name": "Assemblée Nationale du Burkina Faso",
-      "url": "https://www.assembleenationale.bf/",
-      "kind": "web",
-      "metadata": {
-        "authority": "law",
-        "government_body": "Assemblée Nationale"
-      }
-    },
-    {
-      "name": "Portail du Gouvernement du Burkina Faso",
-      "url": "https://www.gouvernement.gov.bf/",
-      "kind": "web",
-      "metadata": {
-        "authority": "official_news",
-        "government_body": "Gouvernement du Burkina Faso"
-      }
-    }
-  ],
-  "document_titles": {
-    "assemblee_Loi_constitutionnelle_n033-2024ALT_du_29_octobre_2024_portant_révision_de_la_Constitution.pdf": "Loi_constitutionnelle n°033-2024 du 29 octobre tion — portant révision de la Constitution",
-    "assemblee_Loi_n029-2024ALT_du_15_octobre_2024_portant_autorisation_de_ratification_de_lAccord_de_financement_signé_le_26_septembre.pdf": "Loi n°029-2024 du 15 octobre mbre — portant autorisation de ratification de lAccord de financement signé le 26 septembre",
-    "assemblee_Loi_n030-2024ALT_du_17_octobre_2024_portant_autorisation_de_ratification_du_Protocole_a_la_Charte_africaine_des_droits_d.pdf": "Loi n°030-2024 du 17 octobre ts_d — portant autorisation de ratification du Protocole a la Charte africaine des droits d",
-    "assemblee_Loi_n031-2024ALT_portant_autorisation_de_ratification_de_laccord_établissant_la_banque_de_développement_Shelter_Afrique_.pdf": "Loi n°031-2024 — portant autorisation de ratification de laccord établissant la banque de développement Shelter Afrique",
-    "assemblee_Loi_n032-2024ALT_du_17_octobre_2024_portant_autorisation_de_ratification_de_lAccord_sur_les_privilèges_et_immunité_de_la.pdf": "Loi n°032-2024 du 17 octobre e_la — portant autorisation de ratification de lAccord sur les privilèges et immunité de la",
-    "assemblee_Loi_n035-2024ALT_du_08_novembre_2024_portant_administration_du_travail_dintérêt_général_au_Burkina_Faso.pdf": "Loi n°035-2024 du 08 novembre Faso — portant administration du travail dintérêt général au Burkina Faso",
-    "assemblee_Loi_n036-2024ALT_du_12_novembre_2024_portant_loi_de_règlement_au_titre_du_budget_de_lÉtat_exercice_2023.pdf": "Loi n°036-2024 du 12 novembre 2023 — portant loi de règlement au titre du budget de lÉtat exercice 2023",
-    "assemblee_Loi_n039-2024ALT_portant_statut_général_des_personnels_des_forces_armées_nationales.pdf": "Loi n°039-2024 — portant statut général des personnels des forces armées nationales",
-    "burkina-faso_arrete_sante_2015_images-tabac.pdf": "Arrêté conjoint 2015 — Images tabac au Burkina Faso",
-    "burkina-faso_code_civil_1804_code-civil.pdf": "Code civil de 1804 (édition annotée applicable au Burkina Faso)",
-    "burkina-faso_code_famille_012-2025-alt_code-des-personnes-et-de-la-famille.pdf": "Code des personnes et de la famille du Burkina Faso (Loi n°012-2025/ALT)",
-    "burkina-faso_code_mines_016-2024-alt_code-minier.pdf": "Code minier du Burkina Faso (Loi n°016-2024/ALT du 18 juillet 2024)",
-    "burkina-faso_code_penal_1996_code-penal.pdf": "Code pénal du Burkina Faso (1996)",
-    "burkina-faso_code_procedure-civile_022-1999-an_code-de-procedure-civile.pdf": "Code de procédure civile du Burkina Faso (Loi n°022-1999/AN)",
-    "burkina-faso_code_travail_028-2008-an_code-du-travail.pdf": "Code du travail du Burkina Faso (Loi n°028-2008/AN)",
-    "burkina-faso_constitution_etat_002-1997-adp_constitution.pdf": "Constitution du Burkina Faso (Loi n°002/97/ADP du 27 janvier 1997)",
-    "burkina-faso_decret_justice_1997-084_definition-sanction-contraventions.pdf": "Décret n°97-84/PRES/PM/MJ — Définition et sanction des contraventions",
-    "burkina-faso_decret_securite_2016-1052_police-de-proximite.pdf": "Décret n°2016-1052/PRES — Police de proximité",
-    "burkina-faso_decret_transport_2003-418_contraventions-circulation-routiere.pdf": "Décret n°2003-418/PRES — Contraventions en matière de circulation routière",
-    "burkina-faso_loi_anticorruption_004-2015-cnt_prevention-repression-corruption.pdf": "Loi n°004-2015/CNT — Prévention et répression de la corruption au Burkina Faso",
-    "burkina-faso_loi_concurrence_016-2017-an_organisation-de-la-concurrence.pdf": "Loi n°016-2017/AN — Organisation de la concurrence au Burkina Faso",
-    "burkina-faso_loi_constitution_2020_003-2020-an_fixation-de-quota-et-modalités-de-positionnement-des-candida.pdf": "Loi n°003-2020-an — fixation de quota et modalités de positionnement des candida (2020)",
-    "burkina-faso_loi_constitution_2024_033-2024-alt_révision-de-la-constitution.pdf": "Loi n°033-2024-alt — révision de la constitution (2024)",
-    "burkina-faso_loi_culture_2018_004-2018-an_attributions-composition-organisation-et-fonctionnement-du.pdf": "Loi n°2018 — 004 2018 an attributions composition organisation et fonctionnement du",
-    "burkina-faso_loi_culture_2019_020-2019-an_accès-aux-ressources-phylogénétique-pour-lalimentation-et-l.pdf": "Loi n°020-2019-an — accès aux ressources phylogénétique pour lalimentation et l (2019)",
-    "burkina-faso_loi_culture_2023_041-2023-alt_attributions-composition-organisation-et-fonctionnement-du.pdf": "Loi n°041-2023-alt — attributions composition organisation et fonctionnement du (2023)",
-    "burkina-faso_loi_culture_2024_041-2024-alt_organisation-du-cinéma-de-laudiovisuel-et-de-limage-animé.pdf": "Loi n°041-2024-alt — organisation du cinéma de laudiovisuel et de limage animé (2024)",
-    "burkina-faso_loi_defense_2018_027-2018-an_statut-du-cadre-de-la-police-nationale.pdf": "Loi n°2018 — 027 2018 an statut du cadre de la police nationale",
-    "burkina-faso_loi_defense_2020_002-2020-an_institution-de-volontaires-pour-la-défense-de-la-patrie.pdf": "Loi n°002-2020-an — institution de volontaires pour la défense de la patrie (2020)",
-    "burkina-faso_loi_defense_2020_029-2020-an_statut-du-cadre-de-la-police-nationale.pdf": "Loi n°029-2020-an — statut du cadre de la police nationale (2020)",
-    "burkina-faso_loi_defense_2022_001-2022-alt_habilitation-du-gouvernement-à-prendre-des-mesures-dans-le-c.pdf": "Loi n°001-2022-alt — habilitation du gouvernement à prendre des mesures dans le c (2022)",
-    "burkina-faso_loi_defense_2022_028-2022-alt_loi-n028-2022alt-du-17-décembre-2022-instituant-les-volont.pdf": "Loi n°028-2022-alt — loi n028 2022alt du 17 décembre 2022 instituant les volont (2022)",
-    "burkina-faso_loi_defense_2023_005-2023-alt_autorisation-de-ratification-de-la-garantie-souveraine-au-pr.pdf": "Loi n°005-2023-alt — autorisation de ratification de la garantie souveraine au pr (2023)",
-    "burkina-faso_loi_defense_2023_006-2023-alt_sécurité-nationale.pdf": "Loi n°006-2023-alt — sécurité nationale (2023)",
-    "burkina-faso_loi_defense_2024_014-2024-alt_sécurité-des-systèmes-dinformation-au-burkina-faso.pdf": "Loi n°014-2024-alt — sécurité des systèmes dinformation au burkina faso (2024)",
-    "burkina-faso_loi_defense_2024_039-2024-alt_statut-général-des-personnels-des-forces-armées-nationales.pdf": "Loi n°039-2024-alt — statut général des personnels des forces armées nationales (2024)",
-    "burkina-faso_loi_divers_2018_012-2018-an_code-général-des-collectivités-territoriales-au-burkina-faso.pdf": "Code n°012-2018-an — code général des collectivités territoriales au burkina faso (2018)",
-    "burkina-faso_loi_divers_2021_043-2021-an_code-électoral.pdf": "Code n°043-2021-an — code électoral (2021)",
-    "burkina-faso_loi_divers_2022_002-2022-alt_attributions-composition-organisation-et-fonctionnement-du.pdf": "Loi n°002-2022-alt — attributions composition organisation et fonctionnement du (2022)",
-    "burkina-faso_loi_divers_2024_004-2o23-alt_autorisation-de-ratification-du-contrat-de-crédit-acheteur-s.pdf": "Loi n°004-2023/ALT — Autorisation de ratification du contrat de crédit acheteur (2024)",
-    "burkina-faso_loi_divers_2024_006-2024-alt_statut-de-la-magistrature.pdf": "Loi n°006-2024-alt — statut de la magistrature (2024)",
-    "burkina-faso_loi_divers_2024_007-2024-alt_attributions-composition-organisation-et-fonctionnement-du.pdf": "Loi n°007-2024-alt — attributions composition organisation et fonctionnement du (2024)",
-    "burkina-faso_loi_economie_2018_017-2018-an_code-des-investissements-agro-sylvo-pastoral-halieutique-et.pdf": "Code n°017-2018-an — code des investissements agro sylvo pastoral halieutique et (2018)",
-    "burkina-faso_loi_economie_2018_038-2018-an_code-des-investissements-au-burkina-faso.pdf": "Code n°038-2018-an — code des investissements au burkina faso (2018)",
-    "burkina-faso_loi_economie_2019_014-2019-an_mise-en-œuvre-du-traité-sur-le-commerce-des-armes-au-burkina.pdf": "Loi n°014-2019-an — mise en œuvre du traité sur le commerce des armes au burkina (2019)",
-    "burkina-faso_loi_economie_2020_030-2020-an_autorisation-de-ratification-de-la-souscription-du-burkina-f.pdf": "Loi n°030-2020-an — autorisation de ratification de la souscription du burkina f (2020)",
-    "burkina-faso_loi_economie_2021_033-2021-an_autorisation-de-ratification-de-laccord-de-création-de-lag.pdf": "Loi n°033-2021-an — autorisation de ratification de laccord de création de lag (2021)",
-    "burkina-faso_loi_economie_2023_039-2023-alt_création-organisation-attributions-et-fonctionnement-de-la.pdf": "Loi n°039-2023-alt — création organisation attributions et fonctionnement de la (2023)",
-    "burkina-faso_loi_economie_2024_021-2024-alt_autorisation-de-ratification-de-laccord-cadre-et-de-laccor.pdf": "Loi n°2024 — 021 2024 alt autorisation de ratification de laccord cadre et de laccor",
-    "burkina-faso_loi_economie_2024_026-2024-alt_autorisation-de-ratification-de-laccord-signé-le-30-mai-202.pdf": "Loi n°026-2024/ALT — Autorisation de ratification de l'accord signé le 30 mai 2024 (2024)",
-    "burkina-faso_loi_economie_2024_031-2024-alt_autorisation-de-ratification-de-laccord-établissant-la-banq.pdf": "Loi n°2024 — 031 2024 alt autorisation de ratification de laccord établissant la banq",
-    "burkina-faso_loi_environnement_2024_019-2024-alt_création-attributions-et-organisation-du-bureau-national-de.pdf": "Loi n°2024 — 019 2024 alt création attributions et organisation du bureau national de",
-    "burkina-faso_loi_finances_2018_018-2018-an_création-et-règlementation-de-lordre-des-urbanistes-du-burk.pdf": "Loi n°2018 — 018 2018 an création et règlementation de lordre des urbanistes du burk",
-    "burkina-faso_loi_finances_2018_026-2018-an_règlementation-générale-du-renseignement-au-burkina-faso.pdf": "Loi n°2018 — 026 2018 an règlementation générale du renseignement au burkina faso",
-    "burkina-faso_loi_finances_2019_006-2019-an_autorisation-de-ratification-de-la-convention-concernant-la.pdf": "Loi n°2019 — 006 2019 an autorisation de ratification de la convention concernant la",
-    "burkina-faso_loi_finances_2019_007-2019-an_s-aux-conventions-fiscales-pour-prévenir-lérosion-de-la-bas.pdf": "Loi n°2019 — 007 2019 an s aux conventions fiscales pour prévenir lérosion de la bas",
-    "burkina-faso_loi_finances_2019_009-2019-an_règlementation-générale-des-réseaux-et-services-de-communica.pdf": "Loi n°2019 — 009 2019 an règlementation générale des réseaux et services de communica",
-    "burkina-faso_loi_finances_2019_023-2019-an_règlementation-de-létat-de-siège-et-de-létat-durgence-au.pdf": "Loi n°2019 — 023 2019 an règlementation de létat de siège et de létat durgence au",
-    "burkina-faso_loi_finances_2019_024-2019-an_règlementation-des-bureaux-dinformations-sur-le-crédit-au-b.pdf": "Loi n°2019 — 024 2019 an règlementation des bureaux dinformations sur le crédit au b",
-    "burkina-faso_loi_finances_2023_010-2023-alt_institution-de-mesures-dincitations-fiscales-et-douanières.pdf": "Loi n°2023 — 010 2023 alt institution de mesures dincitations fiscales et douanières",
-    "burkina-faso_loi_finances_2023_037-2023-alt_règlementation-des-systèmes-financiers-décentralisés-sfd.pdf": "Loi n°2023 — 037 2023 alt règlementation des systèmes financiers décentralisés sfd",
-    "burkina-faso_loi_finances_2023_040-2023-alt_règlementation-du-système-de-récépissé-dentreposage-de-prod.pdf": "Loi n°2023 — 040 2023 alt règlementation du système de récépissé dentreposage de prod",
-    "burkina-faso_loi_finances_2024_005-2024-alt_règlementation-générale-de-la-commande-publique-au-burkina-f.pdf": "Loi n°2024 — 005 2024 alt règlementation générale de la commande publique au burkina f",
-    "burkina-faso_loi_foncier_034-2009-an_regime-foncier-rural.pdf": "Loi n°034-2009/AN — Régime foncier rural au Burkina Faso",
-    "burkina-faso_loi_foncier_034-2012-an_reorganisation-agraire-et-fonciere.pdf": "Loi n°034-2012/AN — Réorganisation agraire et foncière au Burkina Faso",
-    "burkina-faso_loi_justice_010-1993-adp_organisation-judiciaire.pdf": "Loi n°010/93/ADP — Organisation judiciaire au Burkina Faso",
-    "burkina-faso_loi_justice_2018_015-2018-an_autorisation-de-ratification-de-la-convention-dentraide-jud.pdf": "Loi n°2018 — 015 2018 an autorisation de ratification de la convention dentraide jud",
-    "burkina-faso_loi_justice_2018_025-2018-an_code-pénal.pdf": "Code n°025-2018-an — code pénal (2018)",
-    "burkina-faso_loi_justice_2018_032-2018-an_composition-organisation-attributions-fonctionnement-du-c.pdf": "Loi n°032-2018-an — composition organisation attributions fonctionnement du c (2018)",
-    "burkina-faso_loi_justice_2023_001-2023-alt_code-de-justice-militaire.pdf": "Code n°2023 — 001 2023 alt code de justice militaire",
-    "burkina-faso_loi_justice_2024_046-2024-alt_a-la-lutte-contre-le-blanchiment-de-capitaux-le-financement.pdf": "Loi n°2024 — 046 2024 alt a la lutte contre le blanchiment de capitaux le financement",
-    "burkina-faso_loi_libertes-publiques_022-1997-as_reunions-manifestations-voie-publique.pdf": "Loi n°022/97/11/AS — Liberté de réunions et de manifestations sur la voie publique",
-    "burkina-faso_loi_mines-energie_2023_002-2023-alt_renforcement-de-la-neutralité-politique-et-de-la-méritocrati.pdf": "Loi n°2023 — 002 2023 alt renforcement de la neutralité politique et de la méritocrati",
-    "burkina-faso_loi_mines-energie_2023_012-2023-alt_code-minier-du-burkina-faso.pdf": "Code n°2023 — 012 2023 alt code minier du burkina faso",
-    "burkina-faso_loi_mines-energie_2024_016-2024-alt_code-minier-du-burkina-faso.pdf": "Code n°2024 — 016 2024 alt code minier du burkina faso",
-    "burkina-faso_loi_mines-energie_2024_017-2024-alt_au-contenu-local-dans-le-secteur-minier-au-burkina-faso.pdf": "Loi n°2024 — 017 2024 alt au contenu local dans le secteur minier au burkina faso",
-    "burkina-faso_loi_mines-energie_2024_032-2024-alt_autorisation-de-ratification-de-laccord-sur-les-privilèges.pdf": "Loi n°2024 — 032 2024 alt autorisation de ratification de laccord sur les privilèges",
-    "burkina-faso_loi_mines-energie_2024_035-2024-alt_administration-du-travail-dintérêt-général-au-burkina-faso.pdf": "Loi n°2024 — 035 2024 alt administration du travail dintérêt général au burkina faso",
-    "burkina-faso_loi_numerique_045-2009-an_services-transactions-electroniques.pdf": "Loi n°045-2009/AN — Services et transactions électroniques au Burkina Faso",
-    "burkina-faso_loi_numerique_2024_027-2024-alt_identification-unique-électronique-de-la-personne-physique.pdf": "Loi n°2024 — 027 2024 alt identification unique électronique de la personne physique",
-    "burkina-faso_loi_protection-personnes_061-2015-cnt_violences-femmes-filles.pdf": "Loi n°061-2015/CNT — Violences à l'égard des femmes et des filles",
-    "burkina-faso_loi_protection_2018_009-2018-an_expropriation-pour-cause-dutilité-publique-et-indemnisation.pdf": "Loi n°2018 — 009 2018 an expropriation pour cause dutilité publique et indemnisation",
-    "burkina-faso_loi_protection_2018_036-2018-an_autorisation-de-ratification-du-statut-de-lorganisation-pou.pdf": "Loi n°2018 — 036 2018 an autorisation de ratification du statut de lorganisation pou",
-    "burkina-faso_loi_protection_2023_022-2023-alt_protection-sauvegarde-et-valorisation-du-patrimoine-cultur.pdf": "Loi n°2023 — 022 2023 alt protection sauvegarde et valorisation du patrimoine cultur",
-    "burkina-faso_loi_protection_2024_029-2024-alt_autorisation-de-ratification-de-laccord-de-financement-sign.pdf": "Loi n°2024 — 029 2024 alt autorisation de ratification de laccord de financement sign",
-    "burkina-faso_loi_protection_2024_030-2024-alt_autorisation-de-ratification-du-protocole-a-la-charte-africa.pdf": "Loi n°2024 — 030 2024 alt autorisation de ratification du protocole a la charte africa",
-    "burkina-faso_loi_transport_005-2018-an_permis-de-conduire.pdf": "Loi n°005-2018/AN — Permis de conduire au Burkina Faso",
-    "burkina-faso_loi_transport_2018_041-2018-an_autorisation-de-ratification-de-la-convention-de-concession.pdf": "Loi n°2018 — 041 2018 an autorisation de ratification de la convention de concession",
-    "burkina-faso_loi_transport_2019_013-2019-an_code-de-laviation-civile-au-burkina-faso.pdf": "Code n°2019 — 013 2019 an code de laviation civile au burkina faso",
-    "burkina-faso_loi_travail_2021_003-2021-an_régime-de-sécurité-sociale-applicable-aux-agents-publics-de.pdf": "Loi n°2021 — 003 2021 an régime de sécurité sociale applicable aux agents publics de",
-    "burkina-faso_loi_travail_2021_004-2021-an_régime-de-sécurité-sociale-applicable-aux-travailleurs-salar.pdf": "Loi n°2021 — 004 2021 an régime de sécurité sociale applicable aux travailleurs salar",
-    "burkina-faso_loi_travail_2024_010-2024-alt_coordination-du-régime-de-sécurité-sociale-applicable-aux-ag.pdf": "Loi n°2024 — 010 2024 alt coordination du régime de sécurité sociale applicable aux ag",
-    "burkina-faso_ordonnance_procedure-penale_68-7-1968_code-de-procedure-penale.pdf": "Code de procédure pénale (Ordonnance n°68-7 du 21 février 1968)",
-    "ohada_acte-uniforme_commercial_2010_droit-commercial-general.pdf": "Acte uniforme OHADA portant droit commercial général (AUDCG, 2010)",
-    "ohada_acte-uniforme_societes-cooperatives_2010_droit-des-societes-cooperatives.pdf": "Acte uniforme OHADA relatif au droit des sociétés coopératives (2010)",
-    "ohada_acte-uniforme_societes_2014_societes-commerciales-gie.pdf": "Acte uniforme OHADA relatif au droit des sociétés commerciales et du GIE (AUSCGIE, 2014)",
-    "ohada_acte-uniforme_suretes_2010_organisation-des-suretes.pdf": "Acte uniforme OHADA portant organisation des sûretés (AUS, 2010)",
-    "ohada_traite_institutions_1993-2008_traite-ohada.pdf": "Traité OHADA (1993, révisé 2008)"
+ "version": 1,
+ "search_registry": [
+  {
+   "name": "Portail du Gouvernement du Burkina Faso",
+   "base_url": "https://www.gouv.bf",
+   "authority": "official_news",
+   "kind": "government",
+   "government_body": "Gouvernement du Burkina Faso",
+   "search_path": "/recherche?search_api_fulltext={query}",
+   "rss_path": "/rss.xml"
   },
-  "document_metadata": {
-    "burkina-faso_code_mines_016-2024-alt_code-minier.pdf": {
-      "document_name": "Code minier du Burkina Faso (Loi n°016-2024/ALT du 18 juillet 2024)",
-      "authority": "law",
-      "document_type": "code",
-      "law_number": "016-2024/ALT",
-      "legal_domains": [
-        "land_law"
-      ],
-      "government_body": "Assemblée législative de transition du Burkina Faso",
-      "publication_date": "2024-07-18"
-    },
-    "burkina-faso_code_procedure-civile_022-1999-an_code-de-procedure-civile.pdf": {
-      "document_name": "Code de procédure civile du Burkina Faso (Loi n°022-1999/AN)",
-      "authority": "law",
-      "document_type": "code",
-      "law_number": "022-1999/AN",
-      "legal_domains": [
-        "government_procedures"
-      ],
-      "government_body": "Assemblée nationale du Burkina Faso",
-      "publication_date": "1999-05-18"
-    },
-    "burkina-faso_arrete_sante_2015_images-tabac.pdf": {
-      "document_name": "Arrêté conjoint 2015 — Images tabac au Burkina Faso",
-      "authority": "order",
-      "document_type": "decree",
-      "legal_domains": [
-        "health_regulations"
-      ],
-      "government_body": "Ministère de la Santé / Ministère de l'Industrie, du Commerce et de l'Artisanat"
-    },
-    "burkina-faso_code_famille_012-2025-alt_code-des-personnes-et-de-la-famille.pdf": {
-      "document_name": "Code des personnes et de la famille du Burkina Faso (Loi n°012-2025/ALT)",
-      "authority": "law",
-      "document_type": "code",
-      "law_number": "012-2025/ALT",
-      "legal_domains": [
-        "family_code"
-      ],
-      "government_body": "Assemblée législative de transition du Burkina Faso",
-      "publication_date": "2025-09-01",
-      "effective_date": "2025-09-01"
-    },
-    "burkina-faso_code_civil_1804_code-civil.pdf": {
-      "document_name": "Code civil de 1804 (édition annotée applicable au Burkina Faso)",
-      "authority": "law",
-      "document_type": "code",
-      "legal_domains": [
-        "civil_law"
-      ]
-    },
-    "burkina-faso_code_penal_1996_code-penal.pdf": {
-      "document_name": "Code pénal du Burkina Faso (1996)",
-      "authority": "law",
-      "document_type": "code",
-      "legal_domains": [
-        "criminal_law"
-      ]
-    },
-    "burkina-faso_constitution_etat_002-1997-adp_constitution.pdf": {
-      "document_name": "Constitution du Burkina Faso (Loi n°002/97/ADP du 27 janvier 1997)",
-      "authority": "constitution",
-      "document_type": "law",
-      "law_number": "002-1997/ADP",
-      "legal_domains": [
-        "constitution"
-      ],
-      "publication_date": "1997-01-27"
-    },
-    "burkina-faso_decret_justice_1997-084_definition-sanction-contraventions.pdf": {
-      "document_name": "Décret n°97-84/PRES/PM/MJ — Définition et sanction des contraventions",
-      "authority": "decree",
-      "document_type": "decree",
-      "law_number": "1997-084/PRES/PM/MJ",
-      "legal_domains": [
-        "criminal_law"
-      ],
-      "government_body": "Président du Faso",
-      "publication_date": "1997-02-28"
-    },
-    "burkina-faso_decret_transport_2003-418_contraventions-circulation-routiere.pdf": {
-      "document_name": "Décret n°2003-418/PRES — Contraventions en matière de circulation routière",
-      "authority": "decree",
-      "document_type": "decree",
-      "law_number": "2003-418/PRES",
-      "legal_domains": [
-        "traffic_law"
-      ],
-      "government_body": "Président du Faso",
-      "publication_date": "2003-08-12"
-    },
-    "burkina-faso_loi_transport_005-2018-an_permis-de-conduire.pdf": {
-      "document_name": "Loi n°005-2018/AN — Permis de conduire au Burkina Faso",
-      "authority": "law",
-      "document_type": "law",
-      "law_number": "005-2018/AN",
-      "legal_domains": [
-        "traffic_law"
-      ],
-      "government_body": "Assemblée nationale du Burkina Faso",
-      "publication_date": "2018-04-19"
-    },
-    "burkina-faso_loi_libertes-publiques_022-1997-as_reunions-manifestations-voie-publique.pdf": {
-      "document_name": "Loi n°022/97/11/AS — Liberté de réunions et de manifestations sur la voie publique",
-      "authority": "law",
-      "document_type": "law",
-      "law_number": "022-1997/AS",
-      "legal_domains": [
-        "administrative_law"
-      ],
-      "government_body": "Assemblée nationale du Burkina Faso",
-      "publication_date": "1997-10-21"
-    },
-    "burkina-faso_loi_numerique_045-2009-an_services-transactions-electroniques.pdf": {
-      "document_name": "Loi n°045-2009/AN — Services et transactions électroniques au Burkina Faso",
-      "authority": "law",
-      "document_type": "law",
-      "law_number": "045-2009/AN",
-      "legal_domains": [
-        "commercial_law"
-      ],
-      "government_body": "Assemblée nationale du Burkina Faso",
-      "publication_date": "2009-11-10"
-    },
-    "burkina-faso_loi_justice_010-1993-adp_organisation-judiciaire.pdf": {
-      "document_name": "Loi n°010/93/ADP — Organisation judiciaire au Burkina Faso",
-      "authority": "law",
-      "document_type": "law",
-      "law_number": "010-1993/ADP",
-      "legal_domains": [
-        "government_procedures"
-      ],
-      "government_body": "Assemblée des députés du peuple",
-      "publication_date": "1993-05-17"
-    },
-    "burkina-faso_loi_protection-personnes_061-2015-cnt_violences-femmes-filles.pdf": {
-      "document_name": "Loi n°061-2015/CNT — Violences à l'égard des femmes et des filles",
-      "authority": "law",
-      "document_type": "law",
-      "law_number": "061-2015/CNT",
-      "legal_domains": [
-        "criminal_law"
-      ],
-      "government_body": "Conseil national de la Transition",
-      "publication_date": "2015-09-06"
-    },
-    "burkina-faso_decret_securite_2016-1052_police-de-proximite.pdf": {
-      "document_name": "Décret n°2016-1052/PRES — Police de proximité",
-      "authority": "decree",
-      "document_type": "decree",
-      "law_number": "2016-1052/PRES",
-      "legal_domains": [
-        "administrative_law"
-      ],
-      "government_body": "Président du Faso"
-    },
-    "burkina-faso_loi_concurrence_016-2017-an_organisation-de-la-concurrence.pdf": {
-      "document_name": "Loi n°016-2017/AN — Organisation de la concurrence au Burkina Faso",
-      "authority": "law",
-      "document_type": "law",
-      "law_number": "016-2017/AN",
-      "legal_domains": [
-        "commercial_law"
-      ],
-      "government_body": "Assemblée nationale du Burkina Faso",
-      "publication_date": "2017-04-27"
-    },
-    "burkina-faso_loi_foncier_034-2012-an_reorganisation-agraire-et-fonciere.pdf": {
-      "document_name": "Loi n°034-2012/AN — Réorganisation agraire et foncière au Burkina Faso",
-      "authority": "law",
-      "document_type": "law",
-      "law_number": "034-2012/AN",
-      "legal_domains": [
-        "land_law"
-      ],
-      "government_body": "Assemblée nationale du Burkina Faso",
-      "publication_date": "2012-07-02"
-    },
-    "burkina-faso_code_travail_028-2008-an_code-du-travail.pdf": {
-      "document_name": "Code du travail du Burkina Faso (Loi n°028-2008/AN)",
-      "authority": "law",
-      "document_type": "code",
-      "law_number": "028-2008/AN",
-      "legal_domains": [
-        "labor_code"
-      ],
-      "government_body": "Assemblée nationale du Burkina Faso",
-      "publication_date": "2008-05-21"
-    },
-    "burkina-faso_ordonnance_procedure-penale_68-7-1968_code-de-procedure-penale.pdf": {
-      "document_name": "Code de procédure pénale (Ordonnance n°68-7 du 21 février 1968)",
-      "authority": "order",
-      "document_type": "code",
-      "law_number": "068-1968-007",
-      "legal_domains": [
-        "criminal_law"
-      ],
-      "publication_date": "1968-02-21"
-    },
-    "burkina-faso_loi_anticorruption_004-2015-cnt_prevention-repression-corruption.pdf": {
-      "document_name": "Loi n°004-2015/CNT — Prévention et répression de la corruption au Burkina Faso",
-      "authority": "law",
-      "document_type": "law",
-      "law_number": "004-2015/CNT",
-      "legal_domains": [
-        "administrative_law"
-      ],
-      "government_body": "Conseil national de la Transition",
-      "publication_date": "2015-03-17"
-    },
-    "burkina-faso_loi_foncier_034-2009-an_regime-foncier-rural.pdf": {
-      "document_name": "Loi n°034-2009/AN — Régime foncier rural au Burkina Faso",
-      "authority": "law",
-      "document_type": "law",
-      "law_number": "034-2009/AN",
-      "legal_domains": [
-        "land_law"
-      ],
-      "government_body": "Assemblée nationale du Burkina Faso",
-      "publication_date": "2009-06-16"
-    },
-    "ohada_acte-uniforme_commercial_2010_droit-commercial-general.pdf": {
-      "document_name": "Acte uniforme OHADA portant droit commercial général (AUDCG, 2010)",
-      "authority": "treaty_ohada",
-      "document_type": "treaty",
-      "legal_domains": [
-        "commercial_law",
-        "ohada_law"
-      ],
-      "government_body": "OHADA",
-      "publication_date": "2010-12-15"
-    },
-    "ohada_acte-uniforme_suretes_2010_organisation-des-suretes.pdf": {
-      "document_name": "Acte uniforme OHADA portant organisation des sûretés (AUS, 2010)",
-      "authority": "treaty_ohada",
-      "document_type": "treaty",
-      "legal_domains": [
-        "commercial_law",
-        "ohada_law"
-      ],
-      "government_body": "OHADA",
-      "publication_date": "2010-12-15"
-    },
-    "ohada_acte-uniforme_societes-cooperatives_2010_droit-des-societes-cooperatives.pdf": {
-      "document_name": "Acte uniforme OHADA relatif au droit des sociétés coopératives (2010)",
-      "authority": "treaty_ohada",
-      "document_type": "treaty",
-      "legal_domains": [
-        "commercial_law",
-        "ohada_law"
-      ],
-      "government_body": "OHADA",
-      "publication_date": "2010-12-15"
-    },
-    "ohada_acte-uniforme_societes_2014_societes-commerciales-gie.pdf": {
-      "document_name": "Acte uniforme OHADA relatif au droit des sociétés commerciales et du GIE (AUSCGIE, 2014)",
-      "authority": "treaty_ohada",
-      "document_type": "treaty",
-      "legal_domains": [
-        "commercial_law",
-        "ohada_law"
-      ],
-      "government_body": "OHADA",
-      "publication_date": "2014-01-30"
-    },
-    "ohada_traite_institutions_1993-2008_traite-ohada.pdf": {
-      "document_name": "Traité OHADA (1993, révisé 2008)",
-      "authority": "treaty_ohada",
-      "document_type": "treaty",
-      "legal_domains": [
-        "ohada_law"
-      ],
-      "government_body": "OHADA",
-      "publication_date": "2008-10-17"
-    }
+  {
+   "name": "Journal Officiel du Burkina Faso",
+   "base_url": "https://www.jo.gouv.bf",
+   "authority": "official_gazette",
+   "kind": "regulation",
+   "government_body": "Secrétariat général du Gouvernement",
+   "search_path": "/recherche?search_api_fulltext={query}"
+  },
+  {
+   "name": "Assemblée nationale du Burkina Faso",
+   "base_url": "https://www.assembleenationale.bf",
+   "authority": "law",
+   "kind": "regulation",
+   "government_body": "Assemblée nationale",
+   "rss_path": "/rss.xml"
+  },
+  {
+   "name": "Conseil constitutionnel du Burkina Faso",
+   "base_url": "https://www.conseil-constitutionnel.bf",
+   "authority": "constitution",
+   "kind": "case_law",
+   "government_body": "Conseil constitutionnel"
+  },
+  {
+   "name": "Cour suprême / Cour de cassation du Burkina Faso",
+   "base_url": "https://www.coursupreme.bf",
+   "authority": "case_law",
+   "kind": "case_law",
+   "government_body": "Cour suprême"
+  },
+  {
+   "name": "OHADA — Organisation pour l'Harmonisation en Afrique du Droit des Affaires",
+   "base_url": "https://www.ohada.org",
+   "authority": "treaty_ohada",
+   "kind": "regulation",
+   "government_body": "OHADA",
+   "search_path": "/recherche/?search_api_fulltext={query}"
+  },
+  {
+   "name": "Ministère de l'Économie, des Finances et de la Prospective",
+   "base_url": "https://www.finances.gov.bf",
+   "authority": "official_news",
+   "kind": "government",
+   "government_body": "Ministère des Finances",
+   "rss_path": "/rss.xml"
+  },
+  {
+   "name": "Ministère de la Justice",
+   "base_url": "https://www.justice.gov.bf",
+   "authority": "ministerial_circular",
+   "kind": "government",
+   "government_body": "Ministère de la Justice"
+  },
+  {
+   "name": "Ministère du Travail, de l'Emploi et de la Protection sociale",
+   "base_url": "https://www.travail.gov.bf",
+   "authority": "ministerial_circular",
+   "kind": "government",
+   "government_body": "Ministère du Travail"
   }
+ ],
+ "crawler_allowed_domains": [
+  "gouvernement.gov.bf",
+  "assembleenationale.bf",
+  "legiburkina.bf",
+  "presidencedufaso.bf",
+  "sig.gov.bf",
+  "ohada.org"
+ ],
+ "freshness_registry": [
+  {
+   "name": "OHADA — Actualités",
+   "url": "https://www.ohada.org/feed/",
+   "kind": "rss",
+   "metadata": {
+    "authority": "treaty_ohada",
+    "government_body": "OHADA"
+   }
+  },
+  {
+   "name": "Législation du Burkina Faso (LégiBurkina)",
+   "url": "https://www.legiburkina.bf/",
+   "kind": "web",
+   "metadata": {
+    "authority": "law",
+    "government_body": "Gouvernement du Burkina Faso"
+   }
+  },
+  {
+   "name": "Assemblée Nationale du Burkina Faso",
+   "url": "https://www.assembleenationale.bf/",
+   "kind": "web",
+   "metadata": {
+    "authority": "law",
+    "government_body": "Assemblée Nationale"
+   }
+  },
+  {
+   "name": "Portail du Gouvernement du Burkina Faso",
+   "url": "https://www.gouvernement.gov.bf/",
+   "kind": "web",
+   "metadata": {
+    "authority": "official_news",
+    "government_body": "Gouvernement du Burkina Faso"
+   }
+  }
+ ],
+ "document_titles": {
+  "assemblee_Loi_constitutionnelle_n033-2024ALT_du_29_octobre_2024_portant_révision_de_la_Constitution.pdf": "Loi_constitutionnelle n°033-2024 du 29 octobre tion — portant révision de la Constitution",
+  "assemblee_Loi_n029-2024ALT_du_15_octobre_2024_portant_autorisation_de_ratification_de_lAccord_de_financement_signé_le_26_septembre.pdf": "Loi n°029-2024 du 15 octobre mbre — portant autorisation de ratification de lAccord de financement signé le 26 septembre",
+  "assemblee_Loi_n030-2024ALT_du_17_octobre_2024_portant_autorisation_de_ratification_du_Protocole_a_la_Charte_africaine_des_droits_d.pdf": "Loi n°030-2024 du 17 octobre ts_d — portant autorisation de ratification du Protocole a la Charte africaine des droits d",
+  "assemblee_Loi_n031-2024ALT_portant_autorisation_de_ratification_de_laccord_établissant_la_banque_de_développement_Shelter_Afrique_.pdf": "Loi n°031-2024 — portant autorisation de ratification de laccord établissant la banque de développement Shelter Afrique",
+  "assemblee_Loi_n032-2024ALT_du_17_octobre_2024_portant_autorisation_de_ratification_de_lAccord_sur_les_privilèges_et_immunité_de_la.pdf": "Loi n°032-2024 du 17 octobre e_la — portant autorisation de ratification de lAccord sur les privilèges et immunité de la",
+  "assemblee_Loi_n035-2024ALT_du_08_novembre_2024_portant_administration_du_travail_dintérêt_général_au_Burkina_Faso.pdf": "Loi n°035-2024 du 08 novembre Faso — portant administration du travail dintérêt général au Burkina Faso",
+  "assemblee_Loi_n036-2024ALT_du_12_novembre_2024_portant_loi_de_règlement_au_titre_du_budget_de_lÉtat_exercice_2023.pdf": "Loi n°036-2024 du 12 novembre 2023 — portant loi de règlement au titre du budget de lÉtat exercice 2023",
+  "assemblee_Loi_n039-2024ALT_portant_statut_général_des_personnels_des_forces_armées_nationales.pdf": "Loi n°039-2024 — portant statut général des personnels des forces armées nationales",
+  "burkina-faso_arrete_sante_2015_images-tabac.pdf": "Arrêté conjoint 2015 — Images tabac au Burkina Faso",
+  "burkina-faso_code_civil_1804_code-civil.pdf": "Code civil de 1804 (édition annotée applicable au Burkina Faso)",
+  "burkina-faso_code_famille_012-2025-alt_code-des-personnes-et-de-la-famille.pdf": "Code des personnes et de la famille du Burkina Faso (Loi n°012-2025/ALT)",
+  "burkina-faso_code_mines_016-2024-alt_code-minier.pdf": "Code minier du Burkina Faso (Loi n°016-2024/ALT du 18 juillet 2024)",
+  "burkina-faso_code_penal_1996_code-penal.pdf": "Code pénal du Burkina Faso (1996)",
+  "burkina-faso_code_procedure-civile_022-1999-an_code-de-procedure-civile.pdf": "Code de procédure civile du Burkina Faso (Loi n°022-1999/AN)",
+  "burkina-faso_code_travail_028-2008-an_code-du-travail.pdf": "Code du travail du Burkina Faso (Loi n°028-2008/AN)",
+  "burkina-faso_constitution_etat_002-1997-adp_constitution.pdf": "Constitution du Burkina Faso (Loi n°002/97/ADP du 27 janvier 1997)",
+  "burkina-faso_decret_justice_1997-084_definition-sanction-contraventions.pdf": "Décret n°97-84/PRES/PM/MJ — Définition et sanction des contraventions",
+  "burkina-faso_decret_securite_2016-1052_police-de-proximite.pdf": "Décret n°2016-1052/PRES — Police de proximité",
+  "burkina-faso_decret_transport_2003-418_contraventions-circulation-routiere.pdf": "Décret n°2003-418/PRES — Contraventions en matière de circulation routière",
+  "burkina-faso_loi_anticorruption_004-2015-cnt_prevention-repression-corruption.pdf": "Loi n°004-2015/CNT — Prévention et répression de la corruption au Burkina Faso",
+  "burkina-faso_loi_concurrence_016-2017-an_organisation-de-la-concurrence.pdf": "Loi n°016-2017/AN — Organisation de la concurrence au Burkina Faso",
+  "burkina-faso_loi_constitution_2020_003-2020-an_fixation-de-quota-et-modalités-de-positionnement-des-candida.pdf": "Loi n°003-2020-an — fixation de quota et modalités de positionnement des candida (2020)",
+  "burkina-faso_loi_constitution_2024_033-2024-alt_révision-de-la-constitution.pdf": "Loi n°033-2024-alt — révision de la constitution (2024)",
+  "burkina-faso_loi_culture_2018_004-2018-an_attributions-composition-organisation-et-fonctionnement-du.pdf": "Loi n°2018 — 004 2018 an attributions composition organisation et fonctionnement du",
+  "burkina-faso_loi_culture_2019_020-2019-an_accès-aux-ressources-phylogénétique-pour-lalimentation-et-l.pdf": "Loi n°020-2019-an — accès aux ressources phylogénétique pour lalimentation et l (2019)",
+  "burkina-faso_loi_culture_2023_041-2023-alt_attributions-composition-organisation-et-fonctionnement-du.pdf": "Loi n°041-2023-alt — attributions composition organisation et fonctionnement du (2023)",
+  "burkina-faso_loi_culture_2024_041-2024-alt_organisation-du-cinéma-de-laudiovisuel-et-de-limage-animé.pdf": "Loi n°041-2024-alt — organisation du cinéma de laudiovisuel et de limage animé (2024)",
+  "burkina-faso_loi_defense_2018_027-2018-an_statut-du-cadre-de-la-police-nationale.pdf": "Loi n°2018 — 027 2018 an statut du cadre de la police nationale",
+  "burkina-faso_loi_defense_2020_002-2020-an_institution-de-volontaires-pour-la-défense-de-la-patrie.pdf": "Loi n°002-2020-an — institution de volontaires pour la défense de la patrie (2020)",
+  "burkina-faso_loi_defense_2020_029-2020-an_statut-du-cadre-de-la-police-nationale.pdf": "Loi n°029-2020-an — statut du cadre de la police nationale (2020)",
+  "burkina-faso_loi_defense_2022_001-2022-alt_habilitation-du-gouvernement-à-prendre-des-mesures-dans-le-c.pdf": "Loi n°001-2022-alt — habilitation du gouvernement à prendre des mesures dans le c (2022)",
+  "burkina-faso_loi_defense_2022_028-2022-alt_loi-n028-2022alt-du-17-décembre-2022-instituant-les-volont.pdf": "Loi n°028-2022-alt — loi n028 2022alt du 17 décembre 2022 instituant les volont (2022)",
+  "burkina-faso_loi_defense_2023_005-2023-alt_autorisation-de-ratification-de-la-garantie-souveraine-au-pr.pdf": "Loi n°005-2023-alt — autorisation de ratification de la garantie souveraine au pr (2023)",
+  "burkina-faso_loi_defense_2023_006-2023-alt_sécurité-nationale.pdf": "Loi n°006-2023-alt — sécurité nationale (2023)",
+  "burkina-faso_loi_defense_2024_014-2024-alt_sécurité-des-systèmes-dinformation-au-burkina-faso.pdf": "Loi n°014-2024-alt — sécurité des systèmes dinformation au burkina faso (2024)",
+  "burkina-faso_loi_defense_2024_039-2024-alt_statut-général-des-personnels-des-forces-armées-nationales.pdf": "Loi n°039-2024-alt — statut général des personnels des forces armées nationales (2024)",
+  "burkina-faso_loi_divers_2018_012-2018-an_code-général-des-collectivités-territoriales-au-burkina-faso.pdf": "Code n°012-2018-an — code général des collectivités territoriales au burkina faso (2018)",
+  "burkina-faso_loi_divers_2021_043-2021-an_code-électoral.pdf": "Code n°043-2021-an — code électoral (2021)",
+  "burkina-faso_loi_divers_2022_002-2022-alt_attributions-composition-organisation-et-fonctionnement-du.pdf": "Loi n°002-2022-alt — attributions composition organisation et fonctionnement du (2022)",
+  "burkina-faso_loi_divers_2024_004-2o23-alt_autorisation-de-ratification-du-contrat-de-crédit-acheteur-s.pdf": "Loi n°004-2023/ALT — Autorisation de ratification du contrat de crédit acheteur (2024)",
+  "burkina-faso_loi_divers_2024_006-2024-alt_statut-de-la-magistrature.pdf": "Loi n°006-2024-alt — statut de la magistrature (2024)",
+  "burkina-faso_loi_divers_2024_007-2024-alt_attributions-composition-organisation-et-fonctionnement-du.pdf": "Loi n°007-2024-alt — attributions composition organisation et fonctionnement du (2024)",
+  "burkina-faso_loi_economie_2018_017-2018-an_code-des-investissements-agro-sylvo-pastoral-halieutique-et.pdf": "Code n°017-2018-an — code des investissements agro sylvo pastoral halieutique et (2018)",
+  "burkina-faso_loi_economie_2018_038-2018-an_code-des-investissements-au-burkina-faso.pdf": "Code n°038-2018-an — code des investissements au burkina faso (2018)",
+  "burkina-faso_loi_economie_2019_014-2019-an_mise-en-œuvre-du-traité-sur-le-commerce-des-armes-au-burkina.pdf": "Loi n°014-2019-an — mise en œuvre du traité sur le commerce des armes au burkina (2019)",
+  "burkina-faso_loi_economie_2020_030-2020-an_autorisation-de-ratification-de-la-souscription-du-burkina-f.pdf": "Loi n°030-2020-an — autorisation de ratification de la souscription du burkina f (2020)",
+  "burkina-faso_loi_economie_2021_033-2021-an_autorisation-de-ratification-de-laccord-de-création-de-lag.pdf": "Loi n°033-2021-an — autorisation de ratification de laccord de création de lag (2021)",
+  "burkina-faso_loi_economie_2023_039-2023-alt_création-organisation-attributions-et-fonctionnement-de-la.pdf": "Loi n°039-2023-alt — création organisation attributions et fonctionnement de la (2023)",
+  "burkina-faso_loi_economie_2024_021-2024-alt_autorisation-de-ratification-de-laccord-cadre-et-de-laccor.pdf": "Loi n°2024 — 021 2024 alt autorisation de ratification de laccord cadre et de laccor",
+  "burkina-faso_loi_economie_2024_026-2024-alt_autorisation-de-ratification-de-laccord-signé-le-30-mai-202.pdf": "Loi n°026-2024/ALT — Autorisation de ratification de l'accord signé le 30 mai 2024 (2024)",
+  "burkina-faso_loi_economie_2024_031-2024-alt_autorisation-de-ratification-de-laccord-établissant-la-banq.pdf": "Loi n°2024 — 031 2024 alt autorisation de ratification de laccord établissant la banq",
+  "burkina-faso_loi_environnement_2024_019-2024-alt_création-attributions-et-organisation-du-bureau-national-de.pdf": "Loi n°2024 — 019 2024 alt création attributions et organisation du bureau national de",
+  "burkina-faso_loi_finances_2018_018-2018-an_création-et-règlementation-de-lordre-des-urbanistes-du-burk.pdf": "Loi n°2018 — 018 2018 an création et règlementation de lordre des urbanistes du burk",
+  "burkina-faso_loi_finances_2018_026-2018-an_règlementation-générale-du-renseignement-au-burkina-faso.pdf": "Loi n°2018 — 026 2018 an règlementation générale du renseignement au burkina faso",
+  "burkina-faso_loi_finances_2019_006-2019-an_autorisation-de-ratification-de-la-convention-concernant-la.pdf": "Loi n°2019 — 006 2019 an autorisation de ratification de la convention concernant la",
+  "burkina-faso_loi_finances_2019_007-2019-an_s-aux-conventions-fiscales-pour-prévenir-lérosion-de-la-bas.pdf": "Loi n°2019 — 007 2019 an s aux conventions fiscales pour prévenir lérosion de la bas",
+  "burkina-faso_loi_finances_2019_009-2019-an_règlementation-générale-des-réseaux-et-services-de-communica.pdf": "Loi n°2019 — 009 2019 an règlementation générale des réseaux et services de communica",
+  "burkina-faso_loi_finances_2019_023-2019-an_règlementation-de-létat-de-siège-et-de-létat-durgence-au.pdf": "Loi n°2019 — 023 2019 an règlementation de létat de siège et de létat durgence au",
+  "burkina-faso_loi_finances_2019_024-2019-an_règlementation-des-bureaux-dinformations-sur-le-crédit-au-b.pdf": "Loi n°2019 — 024 2019 an règlementation des bureaux dinformations sur le crédit au b",
+  "burkina-faso_loi_finances_2023_010-2023-alt_institution-de-mesures-dincitations-fiscales-et-douanières.pdf": "Loi n°2023 — 010 2023 alt institution de mesures dincitations fiscales et douanières",
+  "burkina-faso_loi_finances_2023_037-2023-alt_règlementation-des-systèmes-financiers-décentralisés-sfd.pdf": "Loi n°2023 — 037 2023 alt règlementation des systèmes financiers décentralisés sfd",
+  "burkina-faso_loi_finances_2023_040-2023-alt_règlementation-du-système-de-récépissé-dentreposage-de-prod.pdf": "Loi n°2023 — 040 2023 alt règlementation du système de récépissé dentreposage de prod",
+  "burkina-faso_loi_finances_2024_005-2024-alt_règlementation-générale-de-la-commande-publique-au-burkina-f.pdf": "Loi n°2024 — 005 2024 alt règlementation générale de la commande publique au burkina f",
+  "burkina-faso_loi_foncier_034-2009-an_regime-foncier-rural.pdf": "Loi n°034-2009/AN — Régime foncier rural au Burkina Faso",
+  "burkina-faso_loi_foncier_034-2012-an_reorganisation-agraire-et-fonciere.pdf": "Loi n°034-2012/AN — Réorganisation agraire et foncière au Burkina Faso",
+  "burkina-faso_loi_justice_010-1993-adp_organisation-judiciaire.pdf": "Loi n°010/93/ADP — Organisation judiciaire au Burkina Faso",
+  "burkina-faso_loi_justice_2018_015-2018-an_autorisation-de-ratification-de-la-convention-dentraide-jud.pdf": "Loi n°2018 — 015 2018 an autorisation de ratification de la convention dentraide jud",
+  "burkina-faso_loi_justice_2018_025-2018-an_code-pénal.pdf": "Code n°025-2018-an — code pénal (2018)",
+  "burkina-faso_loi_justice_2018_032-2018-an_composition-organisation-attributions-fonctionnement-du-c.pdf": "Loi n°032-2018-an — composition organisation attributions fonctionnement du c (2018)",
+  "burkina-faso_loi_justice_2023_001-2023-alt_code-de-justice-militaire.pdf": "Code n°2023 — 001 2023 alt code de justice militaire",
+  "burkina-faso_loi_justice_2024_046-2024-alt_a-la-lutte-contre-le-blanchiment-de-capitaux-le-financement.pdf": "Loi n°2024 — 046 2024 alt a la lutte contre le blanchiment de capitaux le financement",
+  "burkina-faso_loi_libertes-publiques_022-1997-as_reunions-manifestations-voie-publique.pdf": "Loi n°022/97/11/AS — Liberté de réunions et de manifestations sur la voie publique",
+  "burkina-faso_loi_mines-energie_2023_002-2023-alt_renforcement-de-la-neutralité-politique-et-de-la-méritocrati.pdf": "Loi n°2023 — 002 2023 alt renforcement de la neutralité politique et de la méritocrati",
+  "burkina-faso_loi_mines-energie_2023_012-2023-alt_code-minier-du-burkina-faso.pdf": "Code n°2023 — 012 2023 alt code minier du burkina faso",
+  "burkina-faso_loi_mines-energie_2024_016-2024-alt_code-minier-du-burkina-faso.pdf": "Code n°2024 — 016 2024 alt code minier du burkina faso",
+  "burkina-faso_loi_mines-energie_2024_017-2024-alt_au-contenu-local-dans-le-secteur-minier-au-burkina-faso.pdf": "Loi n°2024 — 017 2024 alt au contenu local dans le secteur minier au burkina faso",
+  "burkina-faso_loi_mines-energie_2024_032-2024-alt_autorisation-de-ratification-de-laccord-sur-les-privilèges.pdf": "Loi n°2024 — 032 2024 alt autorisation de ratification de laccord sur les privilèges",
+  "burkina-faso_loi_mines-energie_2024_035-2024-alt_administration-du-travail-dintérêt-général-au-burkina-faso.pdf": "Loi n°2024 — 035 2024 alt administration du travail dintérêt général au burkina faso",
+  "burkina-faso_loi_numerique_045-2009-an_services-transactions-electroniques.pdf": "Loi n°045-2009/AN — Services et transactions électroniques au Burkina Faso",
+  "burkina-faso_loi_numerique_2024_027-2024-alt_identification-unique-électronique-de-la-personne-physique.pdf": "Loi n°2024 — 027 2024 alt identification unique électronique de la personne physique",
+  "burkina-faso_loi_protection-personnes_061-2015-cnt_violences-femmes-filles.pdf": "Loi n°061-2015/CNT — Violences à l'égard des femmes et des filles",
+  "burkina-faso_loi_protection_2018_009-2018-an_expropriation-pour-cause-dutilité-publique-et-indemnisation.pdf": "Loi n°2018 — 009 2018 an expropriation pour cause dutilité publique et indemnisation",
+  "burkina-faso_loi_protection_2018_036-2018-an_autorisation-de-ratification-du-statut-de-lorganisation-pou.pdf": "Loi n°2018 — 036 2018 an autorisation de ratification du statut de lorganisation pou",
+  "burkina-faso_loi_protection_2023_022-2023-alt_protection-sauvegarde-et-valorisation-du-patrimoine-cultur.pdf": "Loi n°2023 — 022 2023 alt protection sauvegarde et valorisation du patrimoine cultur",
+  "burkina-faso_loi_protection_2024_029-2024-alt_autorisation-de-ratification-de-laccord-de-financement-sign.pdf": "Loi n°2024 — 029 2024 alt autorisation de ratification de laccord de financement sign",
+  "burkina-faso_loi_protection_2024_030-2024-alt_autorisation-de-ratification-du-protocole-a-la-charte-africa.pdf": "Loi n°2024 — 030 2024 alt autorisation de ratification du protocole a la charte africa",
+  "burkina-faso_loi_transport_005-2018-an_permis-de-conduire.pdf": "Loi n°005-2018/AN — Permis de conduire au Burkina Faso",
+  "burkina-faso_loi_transport_2018_041-2018-an_autorisation-de-ratification-de-la-convention-de-concession.pdf": "Loi n°2018 — 041 2018 an autorisation de ratification de la convention de concession",
+  "burkina-faso_loi_transport_2019_013-2019-an_code-de-laviation-civile-au-burkina-faso.pdf": "Code n°2019 — 013 2019 an code de laviation civile au burkina faso",
+  "burkina-faso_loi_travail_2021_003-2021-an_régime-de-sécurité-sociale-applicable-aux-agents-publics-de.pdf": "Loi n°2021 — 003 2021 an régime de sécurité sociale applicable aux agents publics de",
+  "burkina-faso_loi_travail_2021_004-2021-an_régime-de-sécurité-sociale-applicable-aux-travailleurs-salar.pdf": "Loi n°2021 — 004 2021 an régime de sécurité sociale applicable aux travailleurs salar",
+  "burkina-faso_loi_travail_2024_010-2024-alt_coordination-du-régime-de-sécurité-sociale-applicable-aux-ag.pdf": "Loi n°2024 — 010 2024 alt coordination du régime de sécurité sociale applicable aux ag",
+  "burkina-faso_ordonnance_procedure-penale_68-7-1968_code-de-procedure-penale.pdf": "Code de procédure pénale (Ordonnance n°68-7 du 21 février 1968)",
+  "ohada_acte-uniforme_commercial_2010_droit-commercial-general.pdf": "Acte uniforme OHADA portant droit commercial général (AUDCG, 2010)",
+  "ohada_acte-uniforme_societes-cooperatives_2010_droit-des-societes-cooperatives.pdf": "Acte uniforme OHADA relatif au droit des sociétés coopératives (2010)",
+  "ohada_acte-uniforme_societes_2014_societes-commerciales-gie.pdf": "Acte uniforme OHADA relatif au droit des sociétés commerciales et du GIE (AUSCGIE, 2014)",
+  "ohada_acte-uniforme_suretes_2010_organisation-des-suretes.pdf": "Acte uniforme OHADA portant organisation des sûretés (AUS, 2010)",
+  "ohada_traite_institutions_1993-2008_traite-ohada.pdf": "Traité OHADA (1993, révisé 2008)"
+ },
+ "document_metadata": {
+  "burkina-faso_code_mines_016-2024-alt_code-minier.pdf": {
+   "document_name": "Code minier du Burkina Faso (Loi n°016-2024/ALT du 18 juillet 2024)",
+   "authority": "law",
+   "document_type": "code",
+   "law_number": "016-2024/ALT",
+   "legal_domains": [
+    "land_law"
+   ],
+   "government_body": "Assemblée législative de transition du Burkina Faso",
+   "publication_date": "2024-07-18"
+  },
+  "burkina-faso_code_procedure-civile_022-1999-an_code-de-procedure-civile.pdf": {
+   "document_name": "Code de procédure civile du Burkina Faso (Loi n°022-1999/AN)",
+   "authority": "law",
+   "document_type": "code",
+   "law_number": "022-1999/AN",
+   "legal_domains": [
+    "government_procedures"
+   ],
+   "government_body": "Assemblée nationale du Burkina Faso",
+   "publication_date": "1999-05-18"
+  },
+  "burkina-faso_arrete_sante_2015_images-tabac.pdf": {
+   "document_name": "Arrêté conjoint 2015 — Images tabac au Burkina Faso",
+   "authority": "order",
+   "document_type": "decree",
+   "legal_domains": [
+    "health_regulations"
+   ],
+   "government_body": "Ministère de la Santé / Ministère de l'Industrie, du Commerce et de l'Artisanat",
+   "publication_date": "2015-01-01"
+  },
+  "burkina-faso_code_famille_012-2025-alt_code-des-personnes-et-de-la-famille.pdf": {
+   "document_name": "Code des personnes et de la famille du Burkina Faso (Loi n°012-2025/ALT)",
+   "authority": "law",
+   "document_type": "code",
+   "law_number": "012-2025/ALT",
+   "legal_domains": [
+    "family_code"
+   ],
+   "government_body": "Assemblée législative de transition du Burkina Faso",
+   "publication_date": "2025-09-01",
+   "effective_date": "2025-09-01"
+  },
+  "burkina-faso_code_civil_1804_code-civil.pdf": {
+   "document_name": "Code civil de 1804 (édition annotée applicable au Burkina Faso)",
+   "authority": "law",
+   "document_type": "code",
+   "legal_domains": [
+    "civil_law"
+   ]
+  },
+  "burkina-faso_code_penal_1996_code-penal.pdf": {
+   "document_name": "Code pénal du Burkina Faso (1996)",
+   "authority": "law",
+   "document_type": "code",
+   "legal_domains": [
+    "criminal_law"
+   ]
+  },
+  "burkina-faso_constitution_etat_002-1997-adp_constitution.pdf": {
+   "document_name": "Constitution du Burkina Faso (Loi n°002/97/ADP du 27 janvier 1997)",
+   "authority": "constitution",
+   "document_type": "law",
+   "law_number": "002-1997/ADP",
+   "legal_domains": [
+    "constitution"
+   ],
+   "publication_date": "1997-01-27"
+  },
+  "burkina-faso_decret_justice_1997-084_definition-sanction-contraventions.pdf": {
+   "document_name": "Décret n°97-84/PRES/PM/MJ — Définition et sanction des contraventions",
+   "authority": "decree",
+   "document_type": "decree",
+   "law_number": "1997-084/PRES/PM/MJ",
+   "legal_domains": [
+    "criminal_law"
+   ],
+   "government_body": "Président du Faso",
+   "publication_date": "1997-02-28"
+  },
+  "burkina-faso_decret_transport_2003-418_contraventions-circulation-routiere.pdf": {
+   "document_name": "Décret n°2003-418/PRES — Contraventions en matière de circulation routière",
+   "authority": "decree",
+   "document_type": "decree",
+   "law_number": "2003-418/PRES",
+   "legal_domains": [
+    "traffic_law"
+   ],
+   "government_body": "Président du Faso",
+   "publication_date": "2003-08-12"
+  },
+  "burkina-faso_loi_transport_005-2018-an_permis-de-conduire.pdf": {
+   "document_name": "Loi n°005-2018/AN — Permis de conduire au Burkina Faso",
+   "authority": "law",
+   "document_type": "law",
+   "law_number": "005-2018/AN",
+   "legal_domains": [
+    "traffic_law"
+   ],
+   "government_body": "Assemblée nationale du Burkina Faso",
+   "publication_date": "2018-04-19"
+  },
+  "burkina-faso_loi_libertes-publiques_022-1997-as_reunions-manifestations-voie-publique.pdf": {
+   "document_name": "Loi n°022/97/11/AS — Liberté de réunions et de manifestations sur la voie publique",
+   "authority": "law",
+   "document_type": "law",
+   "law_number": "022-1997/AS",
+   "legal_domains": [
+    "administrative_law"
+   ],
+   "government_body": "Assemblée nationale du Burkina Faso",
+   "publication_date": "1997-10-21"
+  },
+  "burkina-faso_loi_numerique_045-2009-an_services-transactions-electroniques.pdf": {
+   "document_name": "Loi n°045-2009/AN — Services et transactions électroniques au Burkina Faso",
+   "authority": "law",
+   "document_type": "law",
+   "law_number": "045-2009/AN",
+   "legal_domains": [
+    "commercial_law"
+   ],
+   "government_body": "Assemblée nationale du Burkina Faso",
+   "publication_date": "2009-11-10"
+  },
+  "burkina-faso_loi_justice_010-1993-adp_organisation-judiciaire.pdf": {
+   "document_name": "Loi n°010/93/ADP — Organisation judiciaire au Burkina Faso",
+   "authority": "law",
+   "document_type": "law",
+   "law_number": "010-1993/ADP",
+   "legal_domains": [
+    "government_procedures"
+   ],
+   "government_body": "Assemblée des députés du peuple",
+   "publication_date": "1993-05-17"
+  },
+  "burkina-faso_loi_protection-personnes_061-2015-cnt_violences-femmes-filles.pdf": {
+   "document_name": "Loi n°061-2015/CNT — Violences à l'égard des femmes et des filles",
+   "authority": "law",
+   "document_type": "law",
+   "law_number": "061-2015/CNT",
+   "legal_domains": [
+    "criminal_law"
+   ],
+   "government_body": "Conseil national de la Transition",
+   "publication_date": "2015-09-06"
+  },
+  "burkina-faso_decret_securite_2016-1052_police-de-proximite.pdf": {
+   "document_name": "Décret n°2016-1052/PRES — Police de proximité",
+   "authority": "decree",
+   "document_type": "decree",
+   "law_number": "2016-1052/PRES",
+   "legal_domains": [
+    "administrative_law"
+   ],
+   "government_body": "Président du Faso",
+   "publication_date": "1052-01-01"
+  },
+  "burkina-faso_loi_concurrence_016-2017-an_organisation-de-la-concurrence.pdf": {
+   "document_name": "Loi n°016-2017/AN — Organisation de la concurrence au Burkina Faso",
+   "authority": "law",
+   "document_type": "law",
+   "law_number": "016-2017/AN",
+   "legal_domains": [
+    "commercial_law"
+   ],
+   "government_body": "Assemblée nationale du Burkina Faso",
+   "publication_date": "2017-04-27"
+  },
+  "burkina-faso_loi_foncier_034-2012-an_reorganisation-agraire-et-fonciere.pdf": {
+   "document_name": "Loi n°034-2012/AN — Réorganisation agraire et foncière au Burkina Faso",
+   "authority": "law",
+   "document_type": "law",
+   "law_number": "034-2012/AN",
+   "legal_domains": [
+    "land_law"
+   ],
+   "government_body": "Assemblée nationale du Burkina Faso",
+   "publication_date": "2012-07-02"
+  },
+  "burkina-faso_code_travail_028-2008-an_code-du-travail.pdf": {
+   "document_name": "Code du travail du Burkina Faso (Loi n°028-2008/AN)",
+   "authority": "law",
+   "document_type": "code",
+   "law_number": "028-2008/AN",
+   "legal_domains": [
+    "labor_code"
+   ],
+   "government_body": "Assemblée nationale du Burkina Faso",
+   "publication_date": "2008-05-21"
+  },
+  "burkina-faso_ordonnance_procedure-penale_68-7-1968_code-de-procedure-penale.pdf": {
+   "document_name": "Code de procédure pénale (Ordonnance n°68-7 du 21 février 1968)",
+   "authority": "order",
+   "document_type": "code",
+   "law_number": "068-1968-007",
+   "legal_domains": [
+    "criminal_law"
+   ],
+   "publication_date": "1968-02-21"
+  },
+  "burkina-faso_loi_anticorruption_004-2015-cnt_prevention-repression-corruption.pdf": {
+   "document_name": "Loi n°004-2015/CNT — Prévention et répression de la corruption au Burkina Faso",
+   "authority": "law",
+   "document_type": "law",
+   "law_number": "004-2015/CNT",
+   "legal_domains": [
+    "administrative_law"
+   ],
+   "government_body": "Conseil national de la Transition",
+   "publication_date": "2015-03-17"
+  },
+  "burkina-faso_loi_foncier_034-2009-an_regime-foncier-rural.pdf": {
+   "document_name": "Loi n°034-2009/AN — Régime foncier rural au Burkina Faso",
+   "authority": "law",
+   "document_type": "law",
+   "law_number": "034-2009/AN",
+   "legal_domains": [
+    "land_law"
+   ],
+   "government_body": "Assemblée nationale du Burkina Faso",
+   "publication_date": "2009-06-16"
+  },
+  "ohada_acte-uniforme_commercial_2010_droit-commercial-general.pdf": {
+   "document_name": "Acte uniforme OHADA portant droit commercial général (AUDCG, 2010)",
+   "authority": "treaty_ohada",
+   "document_type": "treaty",
+   "legal_domains": [
+    "commercial_law",
+    "ohada_law"
+   ],
+   "government_body": "OHADA",
+   "publication_date": "2010-12-15"
+  },
+  "ohada_acte-uniforme_suretes_2010_organisation-des-suretes.pdf": {
+   "document_name": "Acte uniforme OHADA portant organisation des sûretés (AUS, 2010)",
+   "authority": "treaty_ohada",
+   "document_type": "treaty",
+   "legal_domains": [
+    "commercial_law",
+    "ohada_law"
+   ],
+   "government_body": "OHADA",
+   "publication_date": "2010-12-15"
+  },
+  "ohada_acte-uniforme_societes-cooperatives_2010_droit-des-societes-cooperatives.pdf": {
+   "document_name": "Acte uniforme OHADA relatif au droit des sociétés coopératives (2010)",
+   "authority": "treaty_ohada",
+   "document_type": "treaty",
+   "legal_domains": [
+    "commercial_law",
+    "ohada_law"
+   ],
+   "government_body": "OHADA",
+   "publication_date": "2010-12-15"
+  },
+  "ohada_acte-uniforme_societes_2014_societes-commerciales-gie.pdf": {
+   "document_name": "Acte uniforme OHADA relatif au droit des sociétés commerciales et du GIE (AUSCGIE, 2014)",
+   "authority": "treaty_ohada",
+   "document_type": "treaty",
+   "legal_domains": [
+    "commercial_law",
+    "ohada_law"
+   ],
+   "government_body": "OHADA",
+   "publication_date": "2014-01-30"
+  },
+  "ohada_traite_institutions_1993-2008_traite-ohada.pdf": {
+   "document_name": "Traité OHADA (1993, révisé 2008)",
+   "authority": "treaty_ohada",
+   "document_type": "treaty",
+   "legal_domains": [
+    "ohada_law"
+   ],
+   "government_body": "OHADA",
+   "publication_date": "2008-10-17"
+  },
+  "assemblee_Loi_n031-2024ALT_portant_autorisation_de_ratification_de_laccord_établissant_la_banque_de_développement_Shelter_Afrique_.pdf": {
+   "document_name": "assemblee_Loi_n031-2024ALT_portant_autorisation_de_ratification_de_laccord_établissant_la_banque_de_développement_Shelter_Afrique_.pdf",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_protection_2024_030-2024-alt_autorisation-de-ratification-du-protocole-a-la-charte-africa.pdf": {
+   "document_name": "Loi n°2024 — 030 2024 alt autorisation de ratification du protocole a la charte africa",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_culture_2023_041-2023-alt_attributions-composition-organisation-et-fonctionnement-du.pdf": {
+   "document_name": "Loi n°041-2023-alt — attributions composition organisation et fonctionnement du (2023)",
+   "publication_date": "2023-01-01"
+  },
+  "burkina-faso_loi_finances_2023_037-2023-alt_règlementation-des-systèmes-financiers-décentralisés-sfd.pdf": {
+   "document_name": "Loi n°2023 — 037 2023 alt règlementation des systèmes financiers décentralisés sfd",
+   "publication_date": "2023-01-01"
+  },
+  "burkina-faso_loi_culture_2018_004-2018-an_attributions-composition-organisation-et-fonctionnement-du.pdf": {
+   "document_name": "Loi n°2018 — 004 2018 an attributions composition organisation et fonctionnement du",
+   "publication_date": "2018-01-01"
+  },
+  "burkina-faso_loi_justice_2018_015-2018-an_autorisation-de-ratification-de-la-convention-dentraide-jud.pdf": {
+   "document_name": "Loi n°2018 — 015 2018 an autorisation de ratification de la convention dentraide jud",
+   "publication_date": "2018-01-01"
+  },
+  "burkina-faso_loi_finances_2018_018-2018-an_création-et-règlementation-de-lordre-des-urbanistes-du-burk.pdf": {
+   "document_name": "Loi n°2018 — 018 2018 an création et règlementation de lordre des urbanistes du burk",
+   "publication_date": "2018-01-01"
+  },
+  "burkina-faso_loi_constitution_2020_003-2020-an_fixation-de-quota-et-modalités-de-positionnement-des-candida.pdf": {
+   "document_name": "Loi n°003-2020-an — fixation de quota et modalités de positionnement des candida (2020)",
+   "publication_date": "2020-01-01"
+  },
+  "burkina-faso_loi_economie_2021_033-2021-an_autorisation-de-ratification-de-laccord-de-création-de-lag.pdf": {
+   "document_name": "Loi n°033-2021-an — autorisation de ratification de laccord de création de lag (2021)",
+   "publication_date": "2021-01-01"
+  },
+  "burkina-faso_loi_divers_2024_007-2024-alt_attributions-composition-organisation-et-fonctionnement-du.pdf": {
+   "document_name": "Loi n°007-2024-alt — attributions composition organisation et fonctionnement du (2024)",
+   "publication_date": "2024-01-01"
+  },
+  "ohada_reglement_ccja-arbitrage_2017.pdf": {
+   "document_name": "ohada_reglement_ccja-arbitrage_2017.pdf",
+   "publication_date": "2017-01-01"
+  },
+  "burkina-faso_loi_protection_2024_029-2024-alt_autorisation-de-ratification-de-laccord-de-financement-sign.pdf": {
+   "document_name": "Loi n°2024 — 029 2024 alt autorisation de ratification de laccord de financement sign",
+   "publication_date": "2024-01-01"
+  },
+  "ohada_reglement_ccja-procedure_2014.pdf": {
+   "document_name": "ohada_reglement_ccja-procedure_2014.pdf",
+   "publication_date": "2014-01-01"
+  },
+  "ohada_acte-uniforme_arbitrage_2017.pdf": {
+   "document_name": "ohada_acte-uniforme_arbitrage_2017.pdf",
+   "publication_date": "2017-01-01"
+  },
+  "burkina-faso_loi_economie_2018_017-2018-an_code-des-investissements-agro-sylvo-pastoral-halieutique-et.pdf": {
+   "document_name": "Code n°017-2018-an — code des investissements agro sylvo pastoral halieutique et (2018)",
+   "publication_date": "2018-01-01"
+  },
+  "burkina-faso_loi_justice_2024_046-2024-alt_a-la-lutte-contre-le-blanchiment-de-capitaux-le-financement.pdf": {
+   "document_name": "Loi n°2024 — 046 2024 alt a la lutte contre le blanchiment de capitaux le financement",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_culture_2019_020-2019-an_accès-aux-ressources-phylogénétique-pour-lalimentation-et-l.pdf": {
+   "document_name": "Loi n°020-2019-an — accès aux ressources phylogénétique pour lalimentation et l (2019)",
+   "publication_date": "2019-01-01"
+  },
+  "burkina-faso_loi_divers_2018_012-2018-an_code-général-des-collectivités-territoriales-au-burkina-faso.pdf": {
+   "document_name": "Code n°012-2018-an — code général des collectivités territoriales au burkina faso (2018)",
+   "publication_date": "2018-01-01"
+  },
+  "burkina-faso_loi_economie_2024_021-2024-alt_autorisation-de-ratification-de-laccord-cadre-et-de-laccor.pdf": {
+   "document_name": "Loi n°2024 — 021 2024 alt autorisation de ratification de laccord cadre et de laccor",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_defense_2020_029-2020-an_statut-du-cadre-de-la-police-nationale.pdf": {
+   "document_name": "Loi n°029-2020-an — statut du cadre de la police nationale (2020)",
+   "publication_date": "2020-01-01"
+  },
+  "assemblee_Loi_n035-2024ALT_du_08_novembre_2024_portant_administration_du_travail_dintérêt_général_au_Burkina_Faso.pdf": {
+   "document_name": "assemblee_Loi_n035-2024ALT_du_08_novembre_2024_portant_administration_du_travail_dintérêt_général_au_Burkina_Faso.pdf",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_finances_2019_007-2019-an_s-aux-conventions-fiscales-pour-prévenir-lérosion-de-la-bas.pdf": {
+   "document_name": "Loi n°2019 — 007 2019 an s aux conventions fiscales pour prévenir lérosion de la bas",
+   "publication_date": "2019-01-01"
+  },
+  "burkina-faso_loi_economie_2024_026-2024-alt_autorisation-de-ratification-de-laccord-signé-le-30-mai-202.pdf": {
+   "document_name": "Loi n°026-2024/ALT — Autorisation de ratification de l'accord signé le 30 mai 2024 (2024)",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_finances_2019_006-2019-an_autorisation-de-ratification-de-la-convention-concernant-la.pdf": {
+   "document_name": "Loi n°2019 — 006 2019 an autorisation de ratification de la convention concernant la",
+   "publication_date": "2019-01-01"
+  },
+  "burkina-faso_loi_defense_2023_006-2023-alt_sécurité-nationale.pdf": {
+   "document_name": "Loi n°006-2023-alt — sécurité nationale (2023)",
+   "publication_date": "2023-01-01"
+  },
+  "burkina-faso_loi_defense_2023_005-2023-alt_autorisation-de-ratification-de-la-garantie-souveraine-au-pr.pdf": {
+   "document_name": "Loi n°005-2023-alt — autorisation de ratification de la garantie souveraine au pr (2023)",
+   "publication_date": "2023-01-01"
+  },
+  "burkina-faso_loi_defense_2022_001-2022-alt_habilitation-du-gouvernement-à-prendre-des-mesures-dans-le-c.pdf": {
+   "document_name": "Loi n°001-2022-alt — habilitation du gouvernement à prendre des mesures dans le c (2022)",
+   "publication_date": "2022-03-22"
+  },
+  "burkina-faso_loi_travail_2021_003-2021-an_régime-de-sécurité-sociale-applicable-aux-agents-publics-de.pdf": {
+   "document_name": "Loi n°2021 — 003 2021 an régime de sécurité sociale applicable aux agents publics de",
+   "publication_date": "2021-01-01"
+  },
+  "burkina-faso_loi_divers_2022_002-2022-alt_attributions-composition-organisation-et-fonctionnement-du.pdf": {
+   "document_name": "Loi n°002-2022-alt — attributions composition organisation et fonctionnement du (2022)",
+   "publication_date": "2022-01-01"
+  },
+  "burkina-faso_loi_protection_2023_022-2023-alt_protection-sauvegarde-et-valorisation-du-patrimoine-cultur.pdf": {
+   "document_name": "Loi n°2023 — 022 2023 alt protection sauvegarde et valorisation du patrimoine cultur",
+   "publication_date": "2023-01-01"
+  },
+  "burkina-faso_loi_culture_2024_041-2024-alt_organisation-du-cinéma-de-laudiovisuel-et-de-limage-animé.pdf": {
+   "document_name": "Loi n°041-2024-alt — organisation du cinéma de laudiovisuel et de limage animé (2024)",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_defense_2020_002-2020-an_institution-de-volontaires-pour-la-défense-de-la-patrie.pdf": {
+   "document_name": "Loi n°002-2020-an — institution de volontaires pour la défense de la patrie (2020)",
+   "publication_date": "2020-01-01"
+  },
+  "burkina-faso_loi_mines-energie_2023_002-2023-alt_renforcement-de-la-neutralité-politique-et-de-la-méritocrati.pdf": {
+   "document_name": "Loi n°2023 — 002 2023 alt renforcement de la neutralité politique et de la méritocrati",
+   "publication_date": "2023-01-01"
+  },
+  "burkina-faso_loi_transport_2018_041-2018-an_autorisation-de-ratification-de-la-convention-de-concession.pdf": {
+   "document_name": "Loi n°2018 — 041 2018 an autorisation de ratification de la convention de concession",
+   "publication_date": "2018-01-01"
+  },
+  "assemblee_Loi_n030-2024ALT_du_17_octobre_2024_portant_autorisation_de_ratification_du_Protocole_a_la_Charte_africaine_des_droits_d.pdf": {
+   "document_name": "assemblee_Loi_n030-2024ALT_du_17_octobre_2024_portant_autorisation_de_ratification_du_Protocole_a_la_Charte_africaine_des_droits_d.pdf",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_finances_2019_024-2019-an_règlementation-des-bureaux-dinformations-sur-le-crédit-au-b.pdf": {
+   "document_name": "Loi n°2019 — 024 2019 an règlementation des bureaux dinformations sur le crédit au b",
+   "publication_date": "2019-01-01"
+  },
+  "ohada_acte-uniforme_voies-dexecution_2023.pdf": {
+   "document_name": "ohada_acte-uniforme_voies-dexecution_2023.pdf",
+   "publication_date": "2023-01-01"
+  },
+  "uemoa_reglement-09-2010-regulation-bancaire.pdf": {
+   "document_name": "uemoa_reglement-09-2010-regulation-bancaire.pdf",
+   "publication_date": "2010-01-01"
+  },
+  "burkina-faso_loi_mines-energie_2024_017-2024-alt_au-contenu-local-dans-le-secteur-minier-au-burkina-faso.pdf": {
+   "document_name": "Loi n°2024 — 017 2024 alt au contenu local dans le secteur minier au burkina faso",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_constitution_2024_033-2024-alt_révision-de-la-constitution.pdf": {
+   "document_name": "Loi n°033-2024-alt — révision de la constitution (2024)",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_divers_2024_006-2024-alt_statut-de-la-magistrature.pdf": {
+   "document_name": "Loi n°006-2024-alt — statut de la magistrature (2024)",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_environnement_2024_019-2024-alt_création-attributions-et-organisation-du-bureau-national-de.pdf": {
+   "document_name": "Loi n°2024 — 019 2024 alt création attributions et organisation du bureau national de",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_defense_2024_039-2024-alt_statut-général-des-personnels-des-forces-armées-nationales.pdf": {
+   "document_name": "Loi n°039-2024-alt — statut général des personnels des forces armées nationales (2024)",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_transport_2019_013-2019-an_code-de-laviation-civile-au-burkina-faso.pdf": {
+   "document_name": "Code n°2019 — 013 2019 an code de laviation civile au burkina faso",
+   "publication_date": "2019-01-01"
+  },
+  "burkina-faso_loi_justice_2018_025-2018-an_code-pénal.pdf": {
+   "document_name": "Code n°025-2018-an — code pénal (2018)",
+   "publication_date": "2018-01-01"
+  },
+  "burkina-faso_loi_divers_2021_043-2021-an_code-électoral.pdf": {
+   "document_name": "Code n°043-2021-an — code électoral (2021)",
+   "publication_date": "2021-01-01"
+  },
+  "burkina-faso_loi_travail_2024_010-2024-alt_coordination-du-régime-de-sécurité-sociale-applicable-aux-ag.pdf": {
+   "document_name": "Loi n°2024 — 010 2024 alt coordination du régime de sécurité sociale applicable aux ag",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_defense_2024_014-2024-alt_sécurité-des-systèmes-dinformation-au-burkina-faso.pdf": {
+   "document_name": "Loi n°014-2024-alt — sécurité des systèmes dinformation au burkina faso (2024)",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_travail_2021_004-2021-an_régime-de-sécurité-sociale-applicable-aux-travailleurs-salar.pdf": {
+   "document_name": "Loi n°2021 — 004 2021 an régime de sécurité sociale applicable aux travailleurs salar",
+   "publication_date": "2021-01-01"
+  },
+  "burkina-faso_loi_justice_2018_032-2018-an_composition-organisation-attributions-fonctionnement-du-c.pdf": {
+   "document_name": "Loi n°032-2018-an — composition organisation attributions fonctionnement du c (2018)",
+   "publication_date": "2018-01-01"
+  },
+  "burkina-faso_loi_economie_2020_030-2020-an_autorisation-de-ratification-de-la-souscription-du-burkina-f.pdf": {
+   "document_name": "Loi n°030-2020-an — autorisation de ratification de la souscription du burkina f (2020)",
+   "publication_date": "2020-01-01"
+  },
+  "burkina-faso_loi_economie_2019_014-2019-an_mise-en-œuvre-du-traité-sur-le-commerce-des-armes-au-burkina.pdf": {
+   "document_name": "Loi n°014-2019-an — mise en œuvre du traité sur le commerce des armes au burkina (2019)",
+   "publication_date": "2019-01-01"
+  },
+  "burkina-faso_loi_finances_2019_009-2019-an_règlementation-générale-des-réseaux-et-services-de-communica.pdf": {
+   "document_name": "Loi n°2019 — 009 2019 an règlementation générale des réseaux et services de communica",
+   "publication_date": "2019-01-01"
+  },
+  "burkina-faso_loi_defense_2022_028-2022-alt_loi-n028-2022alt-du-17-décembre-2022-instituant-les-volont.pdf": {
+   "document_name": "Loi n°028-2022-alt — loi n028 2022alt du 17 décembre 2022 instituant les volont (2022)",
+   "publication_date": "2022-12-17"
+  },
+  "assemblee_Loi_n039-2024ALT_portant_statut_général_des_personnels_des_forces_armées_nationales.pdf": {
+   "document_name": "assemblee_Loi_n039-2024ALT_portant_statut_général_des_personnels_des_forces_armées_nationales.pdf",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_mines-energie_2024_016-2024-alt_code-minier-du-burkina-faso.pdf": {
+   "document_name": "Code n°2024 — 016 2024 alt code minier du burkina faso",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_economie_2018_038-2018-an_code-des-investissements-au-burkina-faso.pdf": {
+   "document_name": "Code n°038-2018-an — code des investissements au burkina faso (2018)",
+   "publication_date": "2018-01-01"
+  },
+  "burkina-faso_loi_finances_2018_026-2018-an_règlementation-générale-du-renseignement-au-burkina-faso.pdf": {
+   "document_name": "Loi n°2018 — 026 2018 an règlementation générale du renseignement au burkina faso",
+   "publication_date": "2018-01-01"
+  },
+  "burkina-faso_loi_finances_2019_023-2019-an_règlementation-de-létat-de-siège-et-de-létat-durgence-au.pdf": {
+   "document_name": "Loi n°2019 — 023 2019 an règlementation de létat de siège et de létat durgence au",
+   "publication_date": "2019-01-01"
+  },
+  "assemblee_Loi_constitutionnelle_n033-2024ALT_du_29_octobre_2024_portant_révision_de_la_Constitution.pdf": {
+   "document_name": "assemblee_Loi_constitutionnelle_n033-2024ALT_du_29_octobre_2024_portant_révision_de_la_Constitution.pdf",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_economie_2023_039-2023-alt_création-organisation-attributions-et-fonctionnement-de-la.pdf": {
+   "document_name": "Loi n°039-2023-alt — création organisation attributions et fonctionnement de la (2023)",
+   "publication_date": "2023-01-01"
+  },
+  "ohada_acte-uniforme_procedures-collectives_2015.pdf": {
+   "document_name": "ohada_acte-uniforme_procedures-collectives_2015.pdf",
+   "publication_date": "2015-01-01"
+  },
+  "burkina-faso_loi_numerique_2024_027-2024-alt_identification-unique-électronique-de-la-personne-physique.pdf": {
+   "document_name": "Loi n°2024 — 027 2024 alt identification unique électronique de la personne physique",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_mines-energie_2024_035-2024-alt_administration-du-travail-dintérêt-général-au-burkina-faso.pdf": {
+   "document_name": "Loi n°2024 — 035 2024 alt administration du travail dintérêt général au burkina faso",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_finances_2024_005-2024-alt_règlementation-générale-de-la-commande-publique-au-burkina-f.pdf": {
+   "document_name": "Loi n°2024 — 005 2024 alt règlementation générale de la commande publique au burkina f",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_divers_2024_004-2o23-alt_autorisation-de-ratification-du-contrat-de-crédit-acheteur-s.pdf": {
+   "document_name": "Loi n°004-2023/ALT — Autorisation de ratification du contrat de crédit acheteur (2024)",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_economie_2024_031-2024-alt_autorisation-de-ratification-de-laccord-établissant-la-banq.pdf": {
+   "document_name": "Loi n°2024 — 031 2024 alt autorisation de ratification de laccord établissant la banq",
+   "publication_date": "2024-01-01"
+  },
+  "assemblee_Loi_n032-2024ALT_du_17_octobre_2024_portant_autorisation_de_ratification_de_lAccord_sur_les_privilèges_et_immunité_de_la.pdf": {
+   "document_name": "assemblee_Loi_n032-2024ALT_du_17_octobre_2024_portant_autorisation_de_ratification_de_lAccord_sur_les_privilèges_et_immunité_de_la.pdf",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_finances_2023_010-2023-alt_institution-de-mesures-dincitations-fiscales-et-douanières.pdf": {
+   "document_name": "Loi n°2023 — 010 2023 alt institution de mesures dincitations fiscales et douanières",
+   "publication_date": "2023-01-01"
+  },
+  "burkina-faso_loi_protection_2018_036-2018-an_autorisation-de-ratification-du-statut-de-lorganisation-pou.pdf": {
+   "document_name": "Loi n°2018 — 036 2018 an autorisation de ratification du statut de lorganisation pou",
+   "publication_date": "2018-01-01"
+  },
+  "burkina-faso_loi_justice_2023_001-2023-alt_code-de-justice-militaire.pdf": {
+   "document_name": "Code n°2023 — 001 2023 alt code de justice militaire",
+   "publication_date": "2023-01-01"
+  },
+  "burkina-faso_loi_finances_2023_040-2023-alt_règlementation-du-système-de-récépissé-dentreposage-de-prod.pdf": {
+   "document_name": "Loi n°2023 — 040 2023 alt règlementation du système de récépissé dentreposage de prod",
+   "publication_date": "2023-01-01"
+  },
+  "cima_code-des-assurances_2019.pdf": {
+   "document_name": "cima_code-des-assurances_2019.pdf",
+   "publication_date": "2019-01-01"
+  },
+  "burkina-faso_loi_protection_2018_009-2018-an_expropriation-pour-cause-dutilité-publique-et-indemnisation.pdf": {
+   "document_name": "Loi n°2018 — 009 2018 an expropriation pour cause dutilité publique et indemnisation",
+   "publication_date": "2018-01-01"
+  },
+  "burkina-faso_loi_mines-energie_2024_032-2024-alt_autorisation-de-ratification-de-laccord-sur-les-privilèges.pdf": {
+   "document_name": "Loi n°2024 — 032 2024 alt autorisation de ratification de laccord sur les privilèges",
+   "publication_date": "2024-01-01"
+  },
+  "burkina-faso_loi_defense_2018_027-2018-an_statut-du-cadre-de-la-police-nationale.pdf": {
+   "document_name": "Loi n°2018 — 027 2018 an statut du cadre de la police nationale",
+   "publication_date": "2018-01-01"
+  },
+  "burkina-faso_loi_mines-energie_2023_012-2023-alt_code-minier-du-burkina-faso.pdf": {
+   "document_name": "Code n°2023 — 012 2023 alt code minier du burkina faso",
+   "publication_date": "2023-01-01"
+  }
+ }
 }

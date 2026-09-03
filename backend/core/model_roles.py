@@ -69,12 +69,17 @@ def resolve_role_llm(role: str, base_llm: AnyLLM, settings: Settings) -> AnyLLM:
         return base_llm  # offline mode: model names are inert, stay a no-op
 
     primary = base_llm.primary if isinstance(base_llm, FailoverLLMClient) else base_llm
+    # Optional split-serving: role overrides can target a different endpoint
+    # (e.g. a local Ollama for small fast models) via role_model_api_base.
+    # The provider's API key is never forwarded to that endpoint.
+    role_api_base = settings.role_model_api_base or primary.api_base
+    role_api_key = "" if settings.role_model_api_base else primary.api_key
     role_client = LLMClient(
         settings,
         provider=primary.provider,
         model=override,
-        api_key=primary.api_key,
-        api_base=primary.api_base,
+        api_key=role_api_key,
+        api_base=role_api_base,
     )
     # Share the usage accumulator so per-request metering (usage_totals delta
     # on the base client) covers every role's tokens.

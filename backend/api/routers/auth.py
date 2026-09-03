@@ -478,3 +478,76 @@ async def confirm_password_reset(payload: PasswordResetConfirm, request: Request
     await cache.delete(key)
     await revoke_all_sessions(user_id, cache)
     return {"detail": "password updated"}
+
+
+class PreferencesIn(BaseModel):
+    preferences: dict[str, Any] = Field(default_factory=dict)
+
+
+def _memory_store(request: Request):
+    from backend.api.deps import get_ctx
+
+    memory = getattr(get_ctx(request), "memory", None)
+    if memory is None:
+        raise HTTPException(status_code=503, detail="memory store unavailable")
+    return memory
+
+
+@router.get("/me/preferences")
+async def get_preferences(request: Request) -> dict[str, Any]:
+    """The current user's stored preferences (persona, display choices…)."""
+    from backend.api.deps import require_user
+
+    user: TokenPayload = await require_user(request)
+    if not user.user_id:
+        raise HTTPException(status_code=400, detail="registered account required")
+    return {"preferences": await _memory_store(request).get_preferences(user.user_id)}
+
+
+@router.put("/me/preferences")
+async def put_preferences(payload: PreferencesIn, request: Request) -> dict[str, Any]:
+    """Replace the current user's preferences (merged by the memory store)."""
+    from backend.api.deps import require_user
+
+    user: TokenPayload = await require_user(request)
+    if not user.user_id:
+        raise HTTPException(status_code=400, detail="registered account required")
+    await _memory_store(request).set_preferences(user.user_id, payload.preferences)
+    return {"preferences": await _memory_store(request).get_preferences(user.user_id)}
+
+
+@router.get("/me/memories")
+async def list_memories(request: Request) -> dict[str, Any]:
+    """What the assistant remembers about the current user (transparency)."""
+    from backend.api.deps import require_user
+
+    user: TokenPayload = await require_user(request)
+    if not user.user_id:
+        raise HTTPException(status_code=400, detail="registered account required")
+    records = await _memory_store(request).list_memories(user.user_id)
+    return {
+        "memories": [
+            {
+                "id": m.id,
+                "kind": m.kind,
+                "content": m.content,
+                "created_at": m.created_at.isoformat(),
+                "last_accessed": m.last_accessed.isoformat(),
+            }
+            for m in records[:50]
+        ]
+    }
+
+
+@router.delete("/me/memories", status_code=204)
+async def erase_memories(request: Request) -> Response:
+    """Erase everything the assistant remembers about the current user."""
+    from backend.api.deps import require_user
+
+    user: TokenPayload = await require_user(request)
+    if not user.user_id:
+        raise HTTPException(status_code=400, detail="registered account required")
+    memory = _memory_store(request)
+    records = await memory.list_memories(user.user_id)
+    await memory.delete_memories([m.id for m in records])
+    return Response(status_code=204)

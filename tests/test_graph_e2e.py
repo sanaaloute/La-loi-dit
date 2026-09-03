@@ -63,3 +63,87 @@ async def test_guardrail_blocked_query_returns_refused(graph, ctx):
     response = await run_query(graph, ctx, state)
     assert response.answer.refused is True
     assert response.answer.confidence == 0
+
+
+# ---------------------------------------------------------------------------
+# Fast lane: simple covered questions skip reasoning + reflection
+# ---------------------------------------------------------------------------
+
+
+async def _run_stubbed_graph(monkeypatch, ctx, question_type):
+    """All nodes become recorders; planner/coverage inject a FACTUAL plan and
+    full coverage so routing decisions are deterministic. Returns the set of
+    node names that ran."""
+    import backend.agents as agents_pkg
+    import backend.workflows.graph as graph_module
+    from backend.core.models import CoverageReport, RetrievalPlan
+    from backend.workflows.graph import build_graph, initial_state
+
+    ran: set[str] = set()
+
+    def recorder(name):
+        async def stub(state, ctx):
+            ran.add(name)
+            return {}
+
+        return stub
+
+    nodes = {
+        "input_guardrail": ("input_guardrail", "input_guardrail_node"),
+        "query_router": ("query_router", "query_router_node"),
+        "context_agent": ("context_agent", "context_agent_node"),
+        "memory_agent": ("memory_agent", "memory_agent_node"),
+        "retrieval_branch": ("retrieval_node", "retrieval_branch_node"),
+        "retrieval_merge": ("retrieval_node", "retrieval_merge_node"),
+        "conflict_resolver": ("conflict_resolver", "conflict_resolver_node"),
+        "evidence_ranking": ("evidence_ranking", "evidence_ranking_node"),
+        "parent_expansion": ("parent_expansion", "parent_expansion_node"),
+        "reasoning_agent": ("reasoning_agent", "reasoning_agent_node"),
+        "reflection_agent": ("reflection_agent", "reflection_agent_node"),
+        "citation_verification": ("citation_verification", "citation_verification_node"),
+        "claim_verification": ("claim_verification", "claim_verification_node"),
+        "response_generator": ("response_generator", "response_generator_node"),
+        "output_guardrail": ("output_guardrail", "output_guardrail_node"),
+    }
+    for node_name, (module_name, attr) in nodes.items():
+        monkeypatch.setattr(getattr(agents_pkg, module_name), attr, recorder(node_name))
+
+    async def plan_stub(state, ctx):
+        ran.add("planner")
+        return {"plan": RetrievalPlan(question_type=question_type, sub_questions=["q"])}
+
+    async def coverage_stub(state, ctx):
+        ran.add("coverage_auditor")
+        return {"coverage_report": CoverageReport(coverage=1.0)}
+
+    async def coverage_recorder(state, ctx):
+        ran.add("coverage_auditor")
+        return {}
+
+    monkeypatch.setattr(graph_module, "planner_node", plan_stub)
+    monkeypatch.setattr(
+        agents_pkg.coverage_auditor,
+        "coverage_auditor_node",
+        coverage_stub if question_type else coverage_recorder,
+    )
+
+    graph = build_graph(ctx)
+    await graph.ainvoke(initial_state("question de test"))
+    return ran
+
+
+async def test_fast_lane_skips_reasoning_and_reflection(monkeypatch, ctx):
+    from backend.core.models import QuestionType
+
+    ran = await _run_stubbed_graph(monkeypatch, ctx, QuestionType.FACTUAL)
+    assert "response_generator" in ran
+    assert "reasoning_agent" not in ran
+    assert "reflection_agent" not in ran
+
+
+async def test_full_path_kept_for_complex_questions(monkeypatch, ctx):
+    from backend.core.models import QuestionType
+
+    ran = await _run_stubbed_graph(monkeypatch, ctx, QuestionType.RIGHTS)
+    assert "reasoning_agent" in ran
+    assert "reflection_agent" in ran

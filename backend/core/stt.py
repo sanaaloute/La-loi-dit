@@ -139,14 +139,33 @@ def _load_whisper_model(settings: Settings) -> Any:
             ) from exc
         models_dir = settings.stt_models_path
         models_dir.mkdir(parents=True, exist_ok=True)
-        _WHISPER_MODEL = WhisperModel(
-            settings.faster_whisper_model_size,
-            device="cpu",
-            compute_type="int8",
-            download_root=str(models_dir),
-        )
-        _ensure_reaper_started()
-        return _WHISPER_MODEL
+        try:
+            # local_files_only: skip the HF hub metadata check entirely. That
+            # network call can hang for minutes on a flaky mirror — during
+            # which the client's transcription request stalls and times out.
+            # The model snapshot is already cached on disk after first use.
+            _WHISPER_MODEL = WhisperModel(
+                settings.faster_whisper_model_size,
+                device="cpu",
+                compute_type="int8",
+                download_root=str(models_dir),
+                local_files_only=True,
+            )
+        except Exception:
+            # Cache miss (fresh install): fall back to a network download.
+            logger.info("whisper model not in local cache; downloading")
+            _WHISPER_MODEL = WhisperModel(
+                settings.faster_whisper_model_size,
+                device="cpu",
+                compute_type="int8",
+                download_root=str(models_dir),
+            )
+    # Start the reaper AFTER releasing the lock: _ensure_reaper_started
+    # acquires _WHISPER_MODEL_LOCK itself, and threading.Lock is not
+    # reentrant — calling it inside the block above deadlocks the first
+    # transcription of every worker process.
+    _ensure_reaper_started()
+    return _WHISPER_MODEL
 
 
 def _transcribe_local(settings: Settings, audio_bytes: bytes, filename: str) -> str:

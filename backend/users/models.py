@@ -7,7 +7,7 @@ lazy bootstrap.
 
 from __future__ import annotations
 
-from sqlalchemy import Column, Date, Integer, MetaData, String, Table, Text
+from sqlalchemy import Column, Date, Float, Integer, MetaData, String, Table, Text
 
 metadata = MetaData()
 
@@ -45,6 +45,30 @@ USER_MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN phone VARCHAR(32) DEFAULT ''",
     # Key-value store for admin-adjustable settings (e.g. tier budgets).
     "CREATE TABLE IF NOT EXISTS app_settings (key VARCHAR(128) PRIMARY KEY, value TEXT DEFAULT '')",
+    "CREATE TABLE IF NOT EXISTS bookmarks ("
+    "id VARCHAR(64) PRIMARY KEY, "
+    "user_id VARCHAR(64), "
+    "query TEXT DEFAULT '', "
+    "answer TEXT DEFAULT '', "
+    "confidence FLOAT DEFAULT 0, "
+    "session_id VARCHAR(128) DEFAULT '', "
+    "created_at VARCHAR(64)"
+    ")",
+    "CREATE TABLE IF NOT EXISTS shared_answers ("
+    "token VARCHAR(64) PRIMARY KEY, "
+    "user_id VARCHAR(64), "
+    "query TEXT DEFAULT '', "
+    "answer TEXT DEFAULT '', "
+    "citations_json TEXT DEFAULT '', "
+    "confidence FLOAT DEFAULT 0, "
+    "created_at VARCHAR(64)"
+    ")",
+    "CREATE TABLE IF NOT EXISTS push_tokens ("
+    "token VARCHAR(128) PRIMARY KEY, "
+    "user_id VARCHAR(64), "
+    "device_id VARCHAR(128) DEFAULT '', "
+    "created_at VARCHAR(64)"
+    ")",
     "CREATE TABLE IF NOT EXISTS user_prompts ("
     "id INTEGER PRIMARY KEY AUTOINCREMENT, "
     "user_id VARCHAR(64), "
@@ -104,10 +128,49 @@ user_prompts = Table(
     Column("metadata", Text, default=""),  # JSON-encoded extra fields
 )
 
+# Saved answers (user bookmarks) — the answer snapshot survives history deletion.
+bookmarks = Table(
+    "bookmarks",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("user_id", String(64), index=True),
+    Column("query", Text, default=""),
+    Column("answer", Text, default=""),
+    Column("confidence", Float, default=0),
+    Column("session_id", String(128), default=""),
+    Column("created_at", String(64)),
+)
+
+# Public read-only snapshots behind share tokens (no auth on read).
+shared_answers = Table(
+    "shared_answers",
+    metadata,
+    Column("token", String(64), primary_key=True),
+    Column("user_id", String(64), index=True),
+    Column("query", Text, default=""),
+    Column("answer", Text, default=""),
+    Column("citations_json", Text, default=""),  # JSON-encoded citation list
+    Column("confidence", Float, default=0),
+    Column("created_at", String(64)),
+)
+
+# Expo push tokens (ExponentPushToken[...]) for freshness notifications.
+push_tokens = Table(
+    "push_tokens",
+    metadata,
+    Column("token", String(128), primary_key=True),
+    Column("user_id", String(64), index=True),
+    Column("device_id", String(128), default=""),
+    Column("created_at", String(64)),
+)
+
 TABLES = {
     "users": users,
     "workspaces": workspaces,
     "usage": usage,
     "app_settings": app_settings,
     "user_prompts": user_prompts,
+    "bookmarks": bookmarks,
+    "shared_answers": shared_answers,
+    "push_tokens": push_tokens,
 }

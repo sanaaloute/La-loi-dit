@@ -188,6 +188,20 @@ The apex `neobytech.net` stays a plain DNS record (company site) — only the
 - `https://yawoto.neobytech.net`: the login gate shows; ask a legal
   question (SSE stream); upload a document from the admin panel.
 - `curl https://yawoto.neobytech.net/backend-api/health` → `{"status":"ok"}`.
+- After each api restart, warm the exact answer cache with the canonical FAQ
+  so the first asker of each common question doesn't pay full pipeline time:
+  `WARMUP_USER=<login> WARMUP_PASS=<password> bash scripts/warm_cache.sh`
+  (hits the container directly, safe to cron).
+- New laws: a weekly crawl pulls newly promulgated laws from
+  assembleenationale.bf and ingests them (idempotent; known law numbers are
+  skipped). Cron example (Mondays 06:30):
+  `30 6 * * 1 cd /path/to/La-loi-dit && .venv/bin/python scripts/crawl_assemblee.py --pages 2 --ingest >> data/tmp/crawl.log 2>&1`
+  The freshness loop (`LEGAL_AI_FRESHNESS_CHECK_ENABLED=true`) detects changes
+  on official sources daily and pushes "Nouveautés juridiques" alerts to
+  registered mobile devices (`LEGAL_AI_PUSH_NOTIFICATIONS_ENABLED=true`).
+  **Android production push needs FCM**: upload a Firebase service-account key
+  to the EAS project (Expo dashboard → Credentials → Android → FCM) — without
+  it, push works in Expo Go only.
 - Mac Mini: System Settings → Energy → prevent sleep + start up after power
   failure; OrbStack, Ollama (`brew services`) and both LaunchAgents start at
   login.

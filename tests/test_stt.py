@@ -257,6 +257,41 @@ async def test_unknown_provider_raises_clear_error(monkeypatch):
         await stt.transcribe_audio(b"audio", "vocal.webm")
 
 
+def test_first_model_load_starts_reaper_without_deadlock(tmp_path, monkeypatch):
+    """Regression: the first load must not deadlock.
+
+    _load_whisper_model used to call _ensure_reaper_started while still
+    holding _WHISPER_MODEL_LOCK; the helper re-acquires the same
+    (non-reentrant) lock, so the very first transcription of every uvicorn
+    worker hung forever — requests vanished without ever being logged.
+    """
+    import threading
+    from types import SimpleNamespace
+
+    settings = _patch_settings(monkeypatch, stt_provider="faster-whisper", data_dir=tmp_path)
+    monkeypatch.setattr(stt, "_WHISPER_MODEL", None)
+    monkeypatch.setattr(stt, "_WHISPER_REAPER_STARTED", False)
+
+    class _FakeModel:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=_FakeModel))
+
+    done = threading.Event()
+
+    def _load():
+        stt._load_whisper_model(settings)
+        done.set()
+
+    thread = threading.Thread(target=_load, daemon=True)
+    thread.start()
+    thread.join(timeout=10)
+    assert done.is_set(), "first model load deadlocked (reaper started under the model lock)"
+    assert stt._WHISPER_REAPER_STARTED is True
+    assert isinstance(stt._WHISPER_MODEL, _FakeModel)
+
+
 def test_stt_available_litellm(monkeypatch):
     _patch_settings(monkeypatch, stt_provider="litellm")
     assert stt.stt_available() is True

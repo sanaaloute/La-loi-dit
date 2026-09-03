@@ -79,6 +79,25 @@ accounts have no delivery channel yet.
 → `200` `{"detail": "password updated"}`; `400` on invalid/expired token.
 All existing sessions are revoked — every device must log in again.
 
+### GET /api/v1/auth/me/preferences → `{ "preferences": {…} }`
+
+The current user's stored preferences (persona, display choices) from the
+memory store. Registered accounts only.
+
+### PUT /api/v1/auth/me/preferences
+
+```json
+{ "preferences": { "persona": "etudiant" } }
+```
+
+→ merged preferences. Registered accounts only.
+
+### GET /api/v1/auth/me/memories → `{ "memories": [{id, kind, content, created_at, last_accessed}] }`
+
+Transparency view: what the assistant remembers about the current user (max 50).
+
+### DELETE /api/v1/auth/me/memories → `204` — erase all of the current user's memories.
+
 ### Native clients: `X-Device-Id` header
 
 Native apps (iOS/Android) MUST send `X-Device-Id: <stable-uuid>` on every
@@ -267,6 +286,21 @@ unknown, `503` when the vector store is unavailable.
 
 ## Sources (`backend/api/routers/sources.py`)
 
+### GET /api/v1/sources
+
+Corpus browser listing: every indexed document (`SourceListItem[]`) with
+`document_id`, `document_name`, `version`, `chunk_count`, `folder`
+(bf/ohada/uemoa/cima), `status`, `authority`, `document_type`, `law_number`,
+`publication_date`, `legal_domains`. Built from the ingestion journal +
+version store + metadata manifest — no vector-store queries, cheap to poll.
+
+### GET /api/v1/sources/{document_id}/articles
+
+Article index of one document: `{article, section, page, preview}[]` (sorted
+numerically when possible; preview = first ~120 chars, parent chunks
+preferred). `404` when the document is unknown, `503` when the vector store
+is unavailable.
+
 ### GET /api/v1/sources/{document_id}
 
 Document-level source record (`SourceRecord`): version, content hash and
@@ -275,6 +309,66 @@ article count from the version store, plus document metadata (name, authority,
 language) taken from the document's chunks. `chunk_count` is always included.
 A document is "known" when the version store tracks it or the vector store
 still holds one of its chunks — otherwise `404`.
+
+## Freshness (`backend/api/routers/freshness.py`)
+
+### GET /api/v1/freshness/events?limit=50
+
+The "Nouveautés" feed: detected changes on monitored official sources (new
+laws, updated pages), newest first — `{source_name, url, kind, detected_at,
+detail, metadata}[]`. Written by the lifespan polling loop when
+`LEGAL_AI_FRESHNESS_CHECK_ENABLED=true` (store: `data/freshness_events.jsonl`,
+capped at 500 events).
+
+## Bookmarks (`backend/api/routers/bookmarks.py`)
+
+Saved answer snapshots; they survive chat-history deletion. All endpoints
+require a registered account (dev-store/anonymous → 400/401).
+
+### POST /api/v1/bookmarks
+
+```json
+{ "query": "Préavis ?", "answer": "Un mois [1].", "confidence": 0.9, "session_id": "…" }
+```
+
+→ `201` `{id, query, answer, confidence, session_id, created_at}`.
+
+### GET /api/v1/bookmarks → the current user's bookmarks (newest first).
+
+### DELETE /api/v1/bookmarks/{bookmark_id} → `204` (owner-scoped; `404` when foreign/unknown).
+
+## Share (`backend/api/routers/share.py`)
+
+### POST /api/v1/share
+
+```json
+{ "query": "…", "answer": "…", "citations": [{ "label": "…", "verified": true }], "confidence": 0.9 }
+```
+
+→ `201` `{token, url_path}` where `url_path` is `/partage/<token>` on the web
+app. Snapshots outlive history deletion but die with the author's account.
+
+### GET /api/v1/share/{token}
+
+**PUBLIC** (no auth): `{query, answer, citations[], confidence, created_at}`.
+`404` when the token is unknown.
+
+## Push (`backend/api/routers/push.py`)
+
+Device tokens for "Nouveautés juridiques" alerts, delivered via the Expo Push
+API when the freshness loop detects a change (`LEGAL_AI_PUSH_NOTIFICATIONS_ENABLED=true`,
+sender: `backend/core/push.py`; dead tokens pruned on DeviceNotRegistered).
+
+### POST /api/v1/push/token
+
+```json
+{ "token": "ExponentPushToken[…]", "device_id": "<X-Device-Id value>" }
+```
+
+→ `200` (idempotent upsert; rebinds the token to the current user).
+`422` when the token isn't an Expo push token. Registered accounts only.
+
+### DELETE /api/v1/push/token `{ "token": "…" }` → `204` (owner-scoped, call it on logout).
 
 ## Admin (`backend/api/routers/admin.py`)
 

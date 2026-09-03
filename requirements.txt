@@ -15,12 +15,11 @@ httpx==0.28.1
 ollama>=0.4.0
 
 # Vector store / lexical search
-# pymilvus 3.x drops the pkg_resources dependency (broken on Python 3.13) and
-# supports both the Milvus server and Milvus Lite (local file, via
-# LEGAL_AI_MILVUS_URI). On the minimac branch Milvus Lite IS the production
-# store; milvus-lite 3.x is pure Python (faiss-cpu backend, which ships
-# manylinux aarch64 wheels), so it installs on every platform, including
-# linux/arm64 containers — no platform marker.
+# Production vector store: the standalone Milvus server (compose service
+# `milvus`). pymilvus 3.x drops the pkg_resources dependency (broken on
+# Python 3.13); Milvus Lite (local file via LEGAL_AI_MILVUS_URI) is only a
+# dev/test fallback — milvus-lite 3.x is pure Python (faiss-cpu backend),
+# so it installs on every platform, including linux/arm64 containers.
 # grpcio pinned alongside: pymilvus excludes the whole 1.68–1.73 line, and
 # pinning spares pip the multi-version backtracking that stalls image builds.
 pymilvus==3.0.1

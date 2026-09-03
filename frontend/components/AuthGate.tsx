@@ -1,22 +1,30 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { Scale } from "lucide-react";
 import AuthCard from "@/components/AuthCard";
+import PersonaOnboarding from "@/components/PersonaOnboarding";
 import { useAuthToken } from "@/lib/useAuth";
 import { ensureFreshToken } from "@/lib/api";
 
 // How often an open session checks (and renews) its token.
 const REFRESH_CHECK_MS = 60 * 1000;
 
+// Routes reachable without an account (public shared answers).
+const PUBLIC_PREFIXES = ["/partage"];
+
 /**
  * Blocks the whole application behind a centered login/register card until
  * the user is authenticated. While the app is open, the token is renewed
- * periodically so an active session does not expire.
+ * periodically so an active session does not expire. Public prefixes
+ * ("/partage/…" shared answers) bypass the gate entirely.
  */
 export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [token] = useAuthToken();
   const [hydrated, setHydrated] = useState(false);
+  const pathname = usePathname();
+  const isPublic = PUBLIC_PREFIXES.some((prefix) => pathname?.startsWith(prefix));
 
   useEffect(() => {
     setHydrated(true);
@@ -31,6 +39,11 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     }, REFRESH_CHECK_MS);
     return () => window.clearInterval(timer);
   }, [token]);
+
+  // Public pages render without any auth check (the API endpoint is public).
+  if (isPublic) {
+    return <>{children}</>;
+  }
 
   // First paint matches the server render; resolve the stored token after
   // mount to avoid flashing the login card to authenticated users.
@@ -63,5 +76,11 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      {children}
+      {/* One-time profile question shown right after the first login. */}
+      <PersonaOnboarding token={token} />
+    </>
+  );
 }

@@ -79,10 +79,81 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if ctx.settings.ingest_on_startup:
         # Background, single-run-guarded: safe with multiple uvicorn workers.
         asyncio.create_task(_auto_ingest_on_startup(app, ctx.settings))
+    # Milvus fallback is sticky at boot: probe and swap back without a restart.
+    reconnect_task: Optional[asyncio.Task] = None
+    if ctx.settings.milvus_enabled:
+        reconnect_task = asyncio.create_task(_vector_store_reconnect_loop(ctx))
+    # Freshness polling: official sources are checked on a daily loop; each
+    # change is persisted to data/freshness_events.jsonl for the Nouveautés feed.
+    freshness_task: Optional[asyncio.Task] = None
+    if ctx.settings.freshness_check_enabled:
+        freshness_task = asyncio.create_task(_freshness_loop(ctx))
     logger.info("application started", extra={"env": ctx.settings.env})
     yield
+    for task in (reconnect_task, freshness_task):
+        if task is not None:
+            task.cancel()
     app.state.graph = None
     app.state.ctx = None
+
+
+async def _freshness_loop(ctx: Any) -> None:
+    """Daily (configurable) poll of the freshness registry.
+
+    Runs in every uvicorn worker; the monitor's seen-state file makes repeat
+    detections idempotent, and event appends are small enough that duplicate
+    worker writes just produce a duplicated line readers tolerate.
+    """
+    from backend.ingestion.freshness import FreshnessMonitor, append_event
+
+    async def _record(event: Any) -> None:
+        append_event(ctx.settings.data_dir, event)
+        logger.info("freshness change: %s (%s)", event.source_name, event.url)
+        from backend.core.push import send_push
+
+        await send_push(
+            ctx,
+            f"Nouveauté juridique — {event.source_name}",
+            event.detail or event.url,
+            {"url": event.url},
+        )
+
+    monitor = FreshnessMonitor(ctx, on_change=_record)
+    await asyncio.sleep(120)  # let the app finish warming up first
+    while True:
+        try:
+            await monitor.check_sources()
+        except Exception:
+            logger.warning("freshness check failed", exc_info=True)
+        await asyncio.sleep(max(3600.0, ctx.settings.freshness_interval_hours * 3600))
+
+
+async def _vector_store_reconnect_loop(ctx: Any) -> None:
+    """Swap the in-memory fallback for Milvus as soon as it is reachable.
+
+    The factory downgrades silently when Milvus is unreachable at boot
+    (slow service startup, NAT flap); without this probe the process would
+    serve degraded retrieval until the next deploy. All consumers read
+    ``ctx.vector_store`` dynamically, so swapping the attribute is enough.
+    Runs per uvicorn worker — each process fixes its own ctx.
+    """
+    from backend.vectorstore.factory import get_vector_store
+    from backend.vectorstore.memory_store import InMemoryVectorStore
+
+    while True:
+        await asyncio.sleep(60)
+        if not isinstance(ctx.vector_store, InMemoryVectorStore):
+            continue
+        try:
+            store = await get_vector_store(ctx.settings)
+        except Exception:
+            continue  # never crash the probe loop
+        if isinstance(store, InMemoryVectorStore):
+            continue
+        ctx.vector_store = store
+        ctx.infra_status["milvus"] = "ok"
+        ctx.infra_status["vector_store_probe"] = "ok"
+        logger.info("vector store: Milvus reconnected (fallback swapped out)")
 
 
 async def _auto_ingest_on_startup(app: FastAPI, settings: Any) -> None:
@@ -242,20 +313,24 @@ def create_app() -> FastAPI:
         return PlainTextResponse(generate_latest().decode("utf-8"), media_type=CONTENT_TYPE_LATEST)
 
     # --- routers under /api/v1 ---
-    from backend.api.routers import admin, articles, auth, billing, chat, citations, documents, draft, export, legal, models, search, sources, usage
+    from backend.api.routers import admin, articles, auth, billing, bookmarks, chat, citations, documents, draft, export, freshness, legal, models, push, search, share, sources, usage
 
     app.include_router(admin.router, prefix="/api/v1")
     app.include_router(articles.router, prefix="/api/v1")
     app.include_router(auth.router, prefix="/api/v1")
     app.include_router(billing.router, prefix="/api/v1")
+    app.include_router(bookmarks.router, prefix="/api/v1")
     app.include_router(chat.router, prefix="/api/v1")
     app.include_router(citations.router, prefix="/api/v1")
     app.include_router(documents.router, prefix="/api/v1")
     app.include_router(draft.router, prefix="/api/v1")
     app.include_router(export.router, prefix="/api/v1")
+    app.include_router(freshness.router, prefix="/api/v1")
     app.include_router(legal.router, prefix="/api/v1")
     app.include_router(models.router, prefix="/api/v1")
+    app.include_router(push.router, prefix="/api/v1")
     app.include_router(search.router, prefix="/api/v1")
+    app.include_router(share.router, prefix="/api/v1")
     app.include_router(sources.router, prefix="/api/v1")
     app.include_router(usage.router, prefix="/api/v1")
 

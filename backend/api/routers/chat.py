@@ -23,7 +23,7 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Literal, Optional
 
@@ -732,10 +732,17 @@ async def chat_stream(
     session_id: Optional[str] = Query(None),
     language: Optional[str] = Query(None),
     model: Optional[str] = Query(None),
+    scenario_date: Optional[date] = Query(None),
     user: TokenPayload = Depends(require_role(Role.VIEWER)),
 ) -> StreamingResponse:
     """SSE: per-node updates followed by a final event with the ChatResponse."""
-    payload = ChatRequest(query=query, session_id=session_id, language=language, model=model)
+    payload = ChatRequest(
+        query=query,
+        session_id=session_id,
+        language=language,
+        model=model,
+        scenario_date=scenario_date,
+    )
     state = _make_state(payload, _state_user_id(payload, user))
     ctx = get_ctx(request)
     settings = ctx.settings

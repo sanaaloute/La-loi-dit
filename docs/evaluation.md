@@ -83,11 +83,20 @@ which is exactly the pre-upgrade failure mode the spec calls out.
 python -m backend.evaluation.runner \
     --dataset backend/evaluation/golden_dataset.json \
     --out data/eval/eval_report
+
+# Live mode: real AppContext (Milvus, real embedder, real LLM from env),
+# golden cases run against the actual indexed corpus. Cases whose expected
+# documents exist only in the synthetic seed data honestly fail — that gap
+# IS the measurement. Output defaults to eval_report_live.{json,md}:
+python -m backend.evaluation.runner --live --out data/eval/eval_report_live
 ```
 
 `--dataset` defaults to the bundled golden dataset; `--out` is a path prefix —
 `<out>.json` (machine-readable aggregate + per-case results) and `<out>.md`
 (Markdown report: aggregate table + per-case PASS/FAIL table) are written.
+`--live` (default off) swaps the hermetic offline context for the production
+one — use it to audit the real corpus, the offline mode to regression-test
+the pipeline mechanics.
 
 ## Pass thresholds
 

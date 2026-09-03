@@ -10,22 +10,27 @@ failure — they degrade to deterministic behavior and append to
 ```mermaid
 flowchart LR
     q[User query] --> ig[input_guardrail]
-    ig -->|allowed| pl[planner]
+    ig -->|allowed| qr[query_router]
     ig -->|blocked| ref[refusal]
+    qr -->|direct| rg[response_generator]
+    qr -->|retrieval| pl[planner]
     pl --> ca[context_agent]
     ca --> ma[memory_agent]
     ma --> fan{{"fan-out: parallel retrieval_branch per sub-question"}}
     fan --> rm[retrieval_merge]
     rm --> cr[conflict_resolver]
-    cr --> er[evidence_ranking]
+    cr --> pe[parent_expansion]
+    pe --> er[evidence_ranking]
     er --> cva[coverage_auditor]
-    cva --> ra[reasoning_agent]
     cva -.->|needs_more_retrieval, retry ≤ 1| fan
+    cva -->|fast lane: FACTUAL/DEFINITION, coverage ≥ 0.5, no unresolved conflict| rg
+    cva --> ra[reasoning_agent]
     ra --> rf[reflection]
     ra -.->|needs_more_retrieval, retry ≤ 1| fan
     rf -.->|should_retry_retrieval, iteration ≤ 1| fan
-    rf --> rg[response_generator]
+    rf --> rg
     rg --> clv[claim_verification]
+    rg -->|direct route| og
     clv --> cv[citation_verification]
     cv --> og[output_guardrail]
     og --> a[Final answer]

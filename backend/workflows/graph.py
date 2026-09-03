@@ -56,7 +56,7 @@ from backend.agents import (
 )
 from backend.core.context import AppContext
 from backend.core.model_roles import resolve_role_llm
-from backend.core.models import ChatMessage, ChatResponse, FinalAnswer
+from backend.core.models import ChatMessage, ChatResponse, FinalAnswer, QuestionType
 from backend.core.state import GraphState
 from backend.planner.agent import planner_node
 
@@ -119,6 +119,10 @@ def build_graph(ctx: AppContext):
         node sets ``needs_more_retrieval`` (only when the retry budget allows
         it) and ``retrieval_merge`` counts the pass. The fan-out targets the
         auditor's missing issues rather than the whole plan.
+
+        Fast lane: simple FACTUAL/DEFINITION questions with decent coverage
+        and no unresolved conflict skip the two serial analysis LLM calls
+        (reasoning, reflection) and go straight to synthesis.
         """
         report = state.get("coverage_report")
         if (
@@ -131,7 +135,22 @@ def build_graph(ctx: AppContext):
                 Send("retrieval_branch", {**state, "branch_query": q, "branch_index": i})
                 for i, q in enumerate(issues)
             ]
+        if _fast_lane_eligible(state):
+            return "response_generator"
         return "reasoning_agent"
+
+    _FAST_LANE_TYPES = frozenset({QuestionType.FACTUAL, QuestionType.DEFINITION})
+
+    def _fast_lane_eligible(state: GraphState) -> bool:
+        if not settings.fast_lane_enabled:
+            return False
+        plan = state.get("plan")
+        if plan is None or plan.question_type not in _FAST_LANE_TYPES:
+            return False
+        if any(not c.resolved for c in state.get("conflicts", [])):
+            return False
+        report = state.get("coverage_report")
+        return report is not None and report.coverage >= settings.fast_lane_min_coverage
 
     def _route_after_reasoning(state: GraphState):
         if state.get("needs_more_retrieval") and state.get("retrieval_retries", 0) < max_retrieval_retries:

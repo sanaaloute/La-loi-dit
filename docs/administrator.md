@@ -35,8 +35,18 @@ Operational tasks for users with the `admin` (and where noted,
 python -m backend.ingestion.pipeline path/to/loi-2026.pdf \
     --name "Loi n° 2026-…" --url "https://www.jo.gouv.bf/..."
 
-# scheduled feeds (gazette, government sites): FreshnessMonitor + crawler
-# in backend/ingestion/ feed the same pipeline
+# corpus maintenance (host; dry-run by default, --apply writes):
+python scripts/corpus_fix.py dates    # backfill publication_date from first page/filename
+python scripts/corpus_fix.py dedupe   # remove byte-identical documents indexed twice
+python scripts/corpus_fix.py repeal   # mark superseded versions status=repealed (guarded:
+                                      # same-law dupes + explicit abrogation only)
+
+# scheduled freshness polling (RSS/ETag of official sources): runs inside the
+# API lifespan when LEGAL_AI_FRESHNESS_CHECK_ENABLED=true (default interval 24h,
+# LEGAL_AI_FRESHNESS_INTERVAL_HOURS); detected changes land in
+# data/freshness_events.jsonl and are served at GET /api/v1/freshness/events.
+# NOTE: the crawler (backend/ingestion/crawler.py) is still NOT wired — new
+# documents are ingested manually or via ingest_on_startup.
 ```
 
 Ingestion is idempotent: identical content → `skipped_duplicate`; changed

@@ -68,6 +68,11 @@ async def build_context(settings: Optional[Settings] = None) -> AppContext:
     ):
         await _warmup_local_ollama_embedder(embedder, settings)
 
+    # Same idea for the default chat model: a 1-token call at boot absorbs the
+    # cold-start penalty (model load locally, connection/auth on cloud).
+    if settings.ollama_warmup_on_startup:
+        await _warmup_chat_model(ctx.llm, settings)
+
     from backend.memory.store import MemoryStore
 
     ctx.memory = MemoryStore(settings, ctx.cache, ctx.embedder)
@@ -119,6 +124,22 @@ async def _warmup_local_ollama_embedder(
             settings.embedding_model,
             exc_info=True,
         )
+
+
+async def _warmup_chat_model(llm: Any, settings: Settings) -> None:
+    """Send a 1-token completion to the default chat model at startup.
+
+    Absorbs the cold-start penalty (local model load, cloud connection/auth)
+    so the first user request starts warm. Never blocks the boot on failure.
+    """
+    try:
+        await asyncio.wait_for(
+            llm.complete("warmup", "ok", max_tokens=1),
+            timeout=max(30.0, settings.llm_timeout_seconds),
+        )
+        logger.info("chat model warmed up: %s", getattr(llm, "model", "?"))
+    except Exception:
+        logger.warning("chat model warmup failed", exc_info=True)
 
 
 async def _assess_infra(ctx: AppContext) -> dict[str, str]:

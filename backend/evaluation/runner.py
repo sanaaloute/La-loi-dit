@@ -114,8 +114,15 @@ def _aggregate(
     return aggregate
 
 
-async def evaluate(dataset_path: str, out_path: str) -> dict[str, Any]:
-    """Run the full offline evaluation and write JSON + markdown reports."""
+async def evaluate(dataset_path: str, out_path: str, live: bool = False) -> dict[str, Any]:
+    """Run the evaluation and write JSON + markdown reports.
+
+    Offline by default (mock LLM, in-memory stores, synthetic seed evidence).
+    With ``live=True`` the real AppContext is built (Milvus, real embedder,
+    real LLM from env settings) and cases run against the actual indexed
+    corpus: golden cases whose expected documents only exist in the synthetic
+    seed data will honestly fail — that gap is exactly what this mode measures.
+    """
     from backend.workflows.graph import build_graph, initial_state, run_query
 
     dataset_file = Path(dataset_path)
@@ -124,19 +131,24 @@ async def evaluate(dataset_path: str, out_path: str) -> dict[str, Any]:
     dataset_note = dataset.get("coverage_note", "")
     cases = dataset.get("cases", [])
 
-    settings = Settings(llm_provider="mock", data_dir=Path("./data/eval"))
-    ctx = await build_offline_context(settings)
-    chunks = seed_evidence()
-    vectors = await ctx.embedder.embed([c.content for c in chunks])
-    await ctx.vector_store.upsert(chunks, vectors)
-    # Hybrid retrieval like production: seed the BM25 corpus too, otherwise
-    # offline cases hinge solely on hash-embedding noise (top-k membership for
-    # short queries is essentially random as the corpus grows).
-    from backend.retrieval.bm25 import BM25Retriever
+    if live:
+        from backend.core.context import build_context
 
-    bm25 = BM25Retriever()
-    bm25.add_documents(chunks)
-    ctx.extras["bm25"] = bm25
+        ctx = await build_context()
+    else:
+        settings = Settings(llm_provider="mock", data_dir=Path("./data/eval"))
+        ctx = await build_offline_context(settings)
+        chunks = seed_evidence()
+        vectors = await ctx.embedder.embed([c.content for c in chunks])
+        await ctx.vector_store.upsert(chunks, vectors)
+        # Hybrid retrieval like production: seed the BM25 corpus too, otherwise
+        # offline cases hinge solely on hash-embedding noise (top-k membership for
+        # short queries is essentially random as the corpus grows).
+        from backend.retrieval.bm25 import BM25Retriever
+
+        bm25 = BM25Retriever()
+        bm25.add_documents(chunks)
+        ctx.extras["bm25"] = bm25
     graph = build_graph(ctx)
 
     results: list[EvalCaseResult] = []
@@ -273,7 +285,7 @@ async def evaluate(dataset_path: str, out_path: str) -> dict[str, Any]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Offline evaluation runner (mock LLM, in-memory stores).")
+    parser = argparse.ArgumentParser(description="Evaluation runner (offline by default; --live for the real corpus).")
     parser.add_argument(
         "--dataset",
         default=str(Path(__file__).with_name("golden_dataset.json")),
@@ -281,11 +293,18 @@ def main() -> int:
     )
     parser.add_argument(
         "--out",
-        default="eval_report",
+        default=None,
         help="Output path prefix; <out>.json and <out>.md are written.",
     )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="Run against the real indexed corpus and the configured LLM "
+        "(default: fully offline with mock LLM + synthetic seed evidence).",
+    )
     args = parser.parse_args()
-    asyncio.run(evaluate(args.dataset, args.out))
+    out = args.out or ("eval_report_live" if args.live else "eval_report")
+    asyncio.run(evaluate(args.dataset, out, live=args.live))
     return 0
 
 

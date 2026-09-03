@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   ArrowUp,
   Bot,
+  Calendar,
   History,
   Loader2,
   Menu,
@@ -21,18 +22,21 @@ import {
 import AgentTimeline, { type NodeStatus } from "@/components/AgentTimeline";
 import AnswerView from "@/components/AnswerView";
 import AppHeader from "@/components/AppHeader";
+import BookmarkButton from "@/components/BookmarkButton";
 import CitationPanel from "@/components/CitationPanel";
 import CopyButton from "@/components/CopyButton";
 import EvidenceViewer from "@/components/EvidenceViewer";
 import ExportMenu from "@/components/ExportMenu";
 import HistoryPanel from "@/components/HistoryPanel";
 import ModelPicker from "@/components/ModelPicker";
+import ShareAnswerButton from "@/components/ShareAnswerButton";
 import { useAuthToken } from "@/lib/useAuth";
 import {
   ApiError,
   cancelChat,
   chat,
   getModel,
+  getPreferences,
   getRunStatus,
   getSession,
   getSessionId,
@@ -46,6 +50,8 @@ import {
   type ExportItem,
   type StreamEvent,
 } from "@/lib/api";
+import { formatScenarioDate } from "@/lib/dates";
+import { PERSONA_CHANGED_EVENT, readPersona, type PersonaKey } from "@/lib/persona";
 
 interface Message {
   id: string;
@@ -107,9 +113,34 @@ const STEP_LABELS: Record<string, string> = {
   output_guardrail: "Contrôle final…",
 };
 
+/** Starter questions on the empty chat screen; the persona (chosen at
+ * onboarding) picks the set, "autre"/unknown falls back to the default. */
+const DEFAULT_SUGGESTIONS = [
+  "Quels sont les droits d'un salarié licencié au Burkina Faso ?",
+  "Quelle est la procédure de divorce selon le Code des personnes et de la famille ?",
+  "Quelles sont les règles OHADA applicables à la création d'une SARL ?",
+];
+
+const PERSONA_SUGGESTIONS: Record<Exclude<PersonaKey, "autre">, string[]> = {
+  etudiant: [
+    "Explique-moi la différence entre une loi et un décret au Burkina Faso.",
+    "Quels sont les éléments constitutifs d'un contrat de travail valable ?",
+    "Qu'est-ce que l'OHADA et quel est son rôle ?",
+  ],
+  juriste: [
+    "Quel est le délai de recours contre un licenciement au Burkina Faso ?",
+    "Quelle est la procédure de saisine de la CCJA en matière OHADA ?",
+    "Quels sont les délais de prescription en matière civile ?",
+  ],
+  citoyen: [
+    "Quels sont mes droits si mon employeur me licencie ?",
+    "Comment contester un licenciement que je juge abusif ?",
+    "Quels sont les droits des époux en cas de divorce ?",
+  ],
+};
+
 /** Map the persisted session history to UI messages (shared by loadSession
- * and the dropped-connection recovery). */
-function mapHistoryMessages(detail: ChatSessionDetail): Message[] {
+ * and the dropped-connection recovery). */function mapHistoryMessages(detail: ChatSessionDetail): Message[] {
   return detail.messages.map((m) => ({
     id: nextId(),
     role: m.role,
@@ -159,6 +190,12 @@ export default function ChatWindow() {
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
   const [historyRefresh, setHistoryRefresh] = useState(0);
   const [historyLoading, setHistoryLoading] = useState(false);
+  // Scenario date ("loi en vigueur au …"): sent as scenario_date with every
+  // run of the conversation, cleared for a new conversation.
+  const [scenarioDate, setScenarioDate] = useState<string | null>(null);
+  const [dateOpen, setDateOpen] = useState(false);
+  // Onboarding persona: picks the starter questions of the empty screen.
+  const [persona, setPersona] = useState<PersonaKey | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   // The in-flight run (set while a question is being processed): lets the
@@ -222,6 +259,28 @@ export default function ChatWindow() {
     setSessionIdState(stored);
     setModelState(getModel());
   }, []);
+
+  // Persona for the starter questions: loaded once, then kept in sync with
+  // the onboarding modal / account page through PERSONA_CHANGED_EVENT.
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    getPreferences(token)
+      .then((res) => {
+        if (!cancelled) setPersona(readPersona(res.preferences));
+      })
+      .catch(() => {
+        // Preferences unavailable: the default suggestions stay.
+      });
+    function onPersonaChanged(e: Event) {
+      setPersona((e as CustomEvent<{ persona?: PersonaKey }>).detail?.persona ?? null);
+    }
+    window.addEventListener(PERSONA_CHANGED_EVENT, onPersonaChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(PERSONA_CHANGED_EVENT, onPersonaChanged);
+    };
+  }, [token]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -607,7 +666,13 @@ export default function ChatWindow() {
     setTab("agents");
     setMessages((prev) => [...prev, { id: nextId(), role: "user", text: query, ts: new Date().toISOString() }]);
 
-    const request = { query, session_id: sid, language: "fr", model: model ?? undefined };
+    const request = {
+      query,
+      session_id: sid,
+      language: "fr",
+      model: model ?? undefined,
+      scenario_date: scenarioDate ?? undefined,
+    };
     const sendStart = Date.now();
     inFlightRef.current = { sid, sendStart, query };
     let streamed = false;
@@ -617,6 +682,8 @@ export default function ChatWindow() {
     let serverFailed = false;
 
     try {
+      // scenario_date rides the SSE stream like every other parameter
+      // (the backend accepts it as a query param since the P1 work).
       await streamChat(
         request,
         (event: StreamEvent) => {
@@ -720,7 +787,7 @@ export default function ChatWindow() {
       inFlightRef.current = null;
       setBusy(false);
     }
-  }, [input, busy, sessionId, token, model, markNodeDone, markNodeRunning, acceptResponse, appendDelta, discardStreamingMessage, attemptRecovery, failWith, quotaReached, interrupted]);
+  }, [input, busy, sessionId, token, model, scenarioDate, markNodeDone, markNodeRunning, acceptResponse, appendDelta, discardStreamingMessage, attemptRecovery, failWith, quotaReached, interrupted]);
 
   function newConversation() {
     setMessages([]);
@@ -729,6 +796,9 @@ export default function ChatWindow() {
     setSelectedId(null);
     setStatuses(emptyStatuses());
     setPanelOpen(false);
+    // The scenario date is a per-conversation setting.
+    setScenarioDate(null);
+    setDateOpen(false);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -789,11 +859,7 @@ export default function ChatWindow() {
     }
   }
 
-  const suggestions = [
-    "Quels sont les droits d'un salarié licencié au Burkina Faso ?",
-    "Quelle est la procédure de divorce selon le Code des personnes et de la famille ?",
-    "Quelles sont les règles OHADA applicables à la création d'une SARL ?",
-  ];
+  const suggestions = (persona && persona !== "autre" ? PERSONA_SUGGESTIONS[persona] : undefined) ?? DEFAULT_SUGGESTIONS;
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
@@ -985,6 +1051,20 @@ export default function ChatWindow() {
                               scope="response"
                               iconOnly
                             />
+                            <BookmarkButton
+                              query={queryByAssistantId.get(msg.id) ?? ""}
+                              answer={msg.response.answer.answer}
+                              confidence={msg.response.answer.confidence}
+                              sessionId={msg.response.session_id}
+                              token={token}
+                            />
+                            <ShareAnswerButton
+                              query={queryByAssistantId.get(msg.id) ?? ""}
+                              answer={msg.response.answer.answer}
+                              citations={msg.response.answer.citations}
+                              confidence={msg.response.answer.confidence}
+                              token={token}
+                            />
                             {msg.response.trace_id && (
                               <>
                               <button
@@ -1049,6 +1129,38 @@ export default function ChatWindow() {
           {/* Input */}
           <div className="z-10 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-6">
             <div className="mx-auto max-w-3xl">
+              {scenarioDate && (
+                <div className="mb-2 flex">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 py-1 pl-3 pr-1.5 text-xs font-medium text-accent">
+                    <Calendar className="h-3 w-3" />
+                    Loi en vigueur au {formatScenarioDate(scenarioDate)}
+                    <button
+                      type="button"
+                      onClick={() => setScenarioDate(null)}
+                      aria-label="Retirer la date de référence"
+                      title="Retirer la date de référence"
+                      className="rounded-full p-0.5 transition-colors hover:bg-accent/20"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                </div>
+              )}
+              {dateOpen && (
+                <div className="mb-2 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  <Calendar className="h-4 w-4 shrink-0 text-gray-500" />
+                  <label htmlFor="scenario-date" className="text-xs text-gray-600">
+                    Date de référence
+                  </label>
+                  <input
+                    id="scenario-date"
+                    type="date"
+                    value={scenarioDate ?? ""}
+                    onChange={(e) => setScenarioDate(e.target.value || null)}
+                    className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900 focus:border-accent/60 focus:outline-none"
+                  />
+                </div>
+              )}
               {recording && (
                 <div className="mb-2 flex items-center gap-2 text-sm text-red-700">
                   <span className="relative flex h-3 w-3">
@@ -1073,7 +1185,7 @@ export default function ChatWindow() {
                 rows={2}
                 placeholder="Posez votre question."
                 className={`w-full resize-none rounded-xl border border-gray-200 bg-white py-3 pl-4 text-sm text-gray-900 placeholder:text-gray-400 focus:border-accent/60 focus:bg-white focus:outline-none disabled:opacity-60 ${
-                  recording || (micSupported && !busy) ? "pr-24" : "pr-14"
+                  recording ? "pr-24" : busy ? "pr-14" : micSupported ? "pr-[8.75rem]" : "pr-24"
                 }`}
                 disabled={busy}
               />
@@ -1110,6 +1222,22 @@ export default function ChatWindow() {
                 </button>
               ) : (
                 <>
+                  <button
+                    type="button"
+                    onClick={() => setDateOpen((v) => !v)}
+                    title="Choisir une date de référence (scénario « loi en vigueur au »)"
+                    aria-label="Choisir une date de référence (scénario)"
+                    aria-pressed={dateOpen}
+                    className={`absolute top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full transition-colors ${
+                      micSupported ? "right-[6.25rem]" : "right-14"
+                    } ${
+                      scenarioDate
+                        ? "bg-accent/15 text-accent hover:bg-accent/25"
+                        : "bg-gray-200 text-gray-600 hover:bg-gray-300"
+                    }`}
+                  >
+                    <Calendar className="h-4 w-4" />
+                  </button>
                   {micSupported && (
                     <button
                       type="button"

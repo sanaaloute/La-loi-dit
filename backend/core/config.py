@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     # Idempotent (content-hash versioning skips unchanged docs) and guarded
     # against multi-worker double-runs via a lock file in the data dir.
     ingest_on_startup: bool = False
+    # Poll the freshness registry (RSS/ETag) for new/changed official texts.
+    # Events land in data/freshness_events.jsonl (see backend.ingestion.freshness).
+    freshness_check_enabled: bool = False
+    freshness_interval_hours: float = 24.0
+    # Push freshness events to registered mobile devices (Expo Push API).
+    # Android production builds additionally need FCM credentials in EAS.
+    push_notifications_enabled: bool = False
     app_name: str = "Burkina Faso Legal AI"
     app_version: str = "0.1.0"
     secret_key: str = "change-me-in-production"
@@ -100,6 +107,12 @@ class Settings(BaseSettings):
     classification_model: Optional[str] = None
     analysis_model: Optional[str] = None
     synthesis_model: Optional[str] = None
+    # When set, role-override clients (planner/classification/..._model) are
+    # served by THIS base instead of the request provider's base, and the
+    # provider API key is not forwarded — e.g. a local Ollama
+    # (http://host.docker.internal:11434) serving a small fast model while
+    # analysis/synthesis stay on the cloud model.
+    role_model_api_base: str = ""
     embedding_model: str = "text-embedding-3-small"
     embedding_dimension: int = 384
     embedding_api_base: str = ""  # separate from llm_api_base for split providers
@@ -436,6 +449,12 @@ class Settings(BaseSettings):
     confidence_unresolved_conflict_dampening: float = 0.85  # per-unresolved-conflict multiplier on the aggregate confidence
     confidence_conflict_max_dampenings: int = 3  # cap on the dampening exponent: heavily-conflicted answers decay to 0.85³, not toward zero
     confidence_reflection_gap_cap: float = 0.75  # confidence cap when reflection flags unanswered parts
+    # Fast lane: simple FACTUAL/DEFINITION questions with decent coverage skip
+    # the reasoning + reflection LLM calls (two serial analysis passes) and go
+    # straight from coverage audit to synthesis. Unresolved conflicts always
+    # take the full path.
+    fast_lane_enabled: bool = True
+    fast_lane_min_coverage: float = 0.5
     source_default_authority_weight: float = 0.15  # authority weight assumed for unknown authority levels
     retrieval_top_mean_count: int = 3  # top-N relevance scores averaged into retrieval confidence
     temporal_conflict_penalty: float = 0.5  # temporal confidence while conflicts are unresolved

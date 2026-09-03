@@ -8,7 +8,7 @@ interface AnswerViewProps {
   answer: FinalAnswer;
 }
 
-function ConfidenceBadge({ confidence }: { confidence: number }) {
+export function ConfidenceBadge({ confidence }: { confidence: number }) {
   const pct = Math.round(confidence * 100);
   if (confidence >= 0.55) {
     return (

@@ -417,10 +417,11 @@ class UserStore:
     async def delete_user(self, user_id: str) -> bool:
         """Delete an account and its rows in this store's own tables.
 
-        Removes the user, their personal workspace, usage rows and the
-        prompt audit rows. Per-user memory/chat history is the memory
-        store's responsibility (the auth router purges it best-effort via
-        ``MemoryStore``). False when the user does not exist or DB down.
+        Removes the user, their personal workspace, usage rows, the
+        prompt audit rows, bookmarks and public share snapshots. Per-user
+        memory/chat history is the memory store's responsibility (the auth
+        router purges it best-effort via ``MemoryStore``). False when the
+        user does not exist or DB down.
         """
         if not await self._ensure_db():
             return False
@@ -436,8 +437,183 @@ class UserStore:
             await session.execute(
                 delete(TABLES["user_prompts"]).where(TABLES["user_prompts"].c.user_id == user_id)
             )
+            await session.execute(delete(TABLES["bookmarks"]).where(TABLES["bookmarks"].c.user_id == user_id))
+            await session.execute(
+                delete(TABLES["shared_answers"]).where(TABLES["shared_answers"].c.user_id == user_id)
+            )
+            await session.execute(
+                delete(TABLES["push_tokens"]).where(TABLES["push_tokens"].c.user_id == user_id)
+            )
             await session.commit()
         return True
+
+    # ------------------------------------------------------------------
+    # Bookmarks & shared answers
+    # ------------------------------------------------------------------
+
+    async def add_bookmark(
+        self, user_id: str, query: str, answer: str, confidence: float, session_id: str = ""
+    ) -> Optional[dict[str, Any]]:
+        """Save an answer snapshot; returns the record (None when DB down)."""
+        if not await self._ensure_db():
+            return None
+        record = {
+            "id": uuid.uuid4().hex,
+            "user_id": user_id,
+            "query": query,
+            "answer": answer,
+            "confidence": confidence,
+            "session_id": session_id,
+            "created_at": _utcnow_iso(),
+        }
+        async with self._session_factory() as session:
+            await session.execute(TABLES["bookmarks"].insert(), record)
+            await session.commit()
+        return record
+
+    async def list_bookmarks(self, user_id: str) -> list[dict[str, Any]]:
+        """Newest-first bookmarks of one user ([] when DB down)."""
+        if not await self._ensure_db():
+            return []
+        from sqlalchemy import select
+
+        t = TABLES["bookmarks"]
+        async with self._session_factory() as session:
+            rows = (
+                await session.execute(
+                    select(t).where(t.c.user_id == user_id).order_by(t.c.created_at.desc())
+                )
+            ).all()
+        return [
+            {
+                "id": r.id,
+                "query": r.query or "",
+                "answer": r.answer or "",
+                "confidence": float(r.confidence or 0),
+                "session_id": r.session_id or "",
+                "created_at": r.created_at or "",
+            }
+            for r in rows
+        ]
+
+    async def delete_bookmark(self, user_id: str, bookmark_id: str) -> bool:
+        """Owner-scoped delete; False when not found/foreign or DB down."""
+        if not await self._ensure_db():
+            return False
+        from sqlalchemy import delete
+
+        t = TABLES["bookmarks"]
+        async with self._session_factory() as session:
+            result = await session.execute(
+                delete(t).where(t.c.id == bookmark_id).where(t.c.user_id == user_id)
+            )
+            await session.commit()
+        return bool(result.rowcount)
+
+    async def create_share(
+        self, user_id: str, query: str, answer: str, citations_json: str, confidence: float
+    ) -> Optional[str]:
+        """Create a public read-only share token for one answer."""
+        if not await self._ensure_db():
+            return None
+        import secrets as _secrets
+
+        token = _secrets.token_urlsafe(16)
+        async with self._session_factory() as session:
+            await session.execute(
+                TABLES["shared_answers"].insert(),
+                {
+                    "token": token,
+                    "user_id": user_id,
+                    "query": query,
+                    "answer": answer,
+                    "citations_json": citations_json,
+                    "confidence": confidence,
+                    "created_at": _utcnow_iso(),
+                },
+            )
+            await session.commit()
+        return token
+
+    async def get_share(self, token: str) -> Optional[dict[str, Any]]:
+        """Fetch a shared answer by token (None when unknown or DB down)."""
+        if not await self._ensure_db():
+            return None
+        from sqlalchemy import select
+
+        t = TABLES["shared_answers"]
+        async with self._session_factory() as session:
+            row = (await session.execute(select(t).where(t.c.token == token))).first()
+        if row is None:
+            return None
+        return {
+            "query": row.query or "",
+            "answer": row.answer or "",
+            "citations_json": row.citations_json or "",
+            "confidence": float(row.confidence or 0),
+            "created_at": row.created_at or "",
+        }
+
+    # ------------------------------------------------------------------
+    # Push tokens
+    # ------------------------------------------------------------------
+
+    async def register_push_token(self, user_id: str, token: str, device_id: str = "") -> bool:
+        """Upsert an Expo push token (idempotent per token; rebinds owner)."""
+        if not await self._ensure_db():
+            return False
+        from sqlalchemy import delete, select
+
+        t = TABLES["push_tokens"]
+        async with self._session_factory() as session:
+            existing = (
+                await session.execute(select(t.c.user_id).where(t.c.token == token))
+            ).first()
+            if existing is not None and existing.user_id != user_id:
+                await session.execute(delete(t).where(t.c.token == token))
+            await session.execute(delete(t).where(t.c.token == token).where(t.c.user_id == user_id))
+            await session.execute(
+                t.insert(),
+                {"token": token, "user_id": user_id, "device_id": device_id, "created_at": _utcnow_iso()},
+            )
+            await session.commit()
+        return True
+
+    async def delete_push_token(self, user_id: str, token: str) -> bool:
+        """Owner-scoped token removal (logout on a device)."""
+        if not await self._ensure_db():
+            return False
+        from sqlalchemy import delete
+
+        t = TABLES["push_tokens"]
+        async with self._session_factory() as session:
+            result = await session.execute(
+                delete(t).where(t.c.token == token).where(t.c.user_id == user_id)
+            )
+            await session.commit()
+        return bool(result.rowcount)
+
+    async def delete_push_token_unscoped(self, token: str) -> None:
+        """Drop a dead token (Expo reports DeviceNotRegistered)."""
+        if not await self._ensure_db():
+            return
+        from sqlalchemy import delete
+
+        t = TABLES["push_tokens"]
+        async with self._session_factory() as session:
+            await session.execute(delete(t).where(t.c.token == token))
+            await session.commit()
+
+    async def list_push_tokens(self) -> list[str]:
+        """All registered Expo push tokens ([] when DB down)."""
+        if not await self._ensure_db():
+            return []
+        from sqlalchemy import select
+
+        t = TABLES["push_tokens"]
+        async with self._session_factory() as session:
+            rows = (await session.execute(select(t.c.token))).all()
+        return [r.token for r in rows]
 
     async def set_billing_state(
         self,

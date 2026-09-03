@@ -272,3 +272,54 @@ class FreshnessMonitor:
                 await result
         except Exception:
             logger.exception("on_change callback failed for %s", event.url)
+
+
+# ---------------------------------------------------------------------------
+# Event store (shared by the polling loop and the /freshness/events endpoint)
+# ---------------------------------------------------------------------------
+
+EVENTS_FILENAME = "freshness_events.jsonl"
+EVENTS_CAP = 500
+
+
+def append_event(data_dir: Union[str, Path], event: ChangeEvent) -> None:
+    """Append one change event to the JSONL store, trimming to EVENTS_CAP.
+
+    Multiple uvicorn workers detect the same change simultaneously (the seen
+    state file only dedupes across polls, not across racing workers): an
+    identical (url, detail) event already in the store is not appended again.
+    """
+    path = Path(data_dir) / EVENTS_FILENAME
+    try:
+        existing = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        existing = []
+    for line in existing:
+        try:
+            prior = ChangeEvent.model_validate_json(line)
+        except ValueError:
+            continue
+        if prior.url == event.url and prior.detail == event.detail:
+            return
+    existing.append(event.model_dump_json())
+    if len(existing) > EVENTS_CAP:
+        existing = existing[-EVENTS_CAP:]
+    path.write_text("\n".join(existing) + "\n", encoding="utf-8")
+
+
+def read_events(data_dir: Union[str, Path], limit: int = 50) -> list[ChangeEvent]:
+    """Newest-first change events from the JSONL store ([] when absent)."""
+    path = Path(data_dir) / EVENTS_FILENAME
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    events: list[ChangeEvent] = []
+    for line in reversed(lines):
+        try:
+            events.append(ChangeEvent.model_validate_json(line))
+        except ValueError:
+            continue
+        if len(events) >= limit:
+            break
+    return events

@@ -674,6 +674,7 @@ export async function streamChat(
   if (request.session_id) params.set("session_id", request.session_id);
   if (request.language) params.set("language", request.language);
   if (request.model) params.set("model", request.model);
+  if (request.scenario_date) params.set("scenario_date", request.scenario_date);
 
   const res = await apiFetch(`/chat/stream?${params.toString()}`, {
     headers: { Accept: "text/event-stream" },
@@ -926,6 +927,325 @@ export async function exportDraft(
     latency_ms: draft.latency_ms,
   };
   return format === "md" ? exportMarkdown(payload, token) : exportAnswer(format, payload, token);
+}
+
+// ---------------------------------------------------------------------------
+// Corpus browser (backend/api/routers/sources.py + articles.py + search.py)
+// ---------------------------------------------------------------------------
+
+export interface SourceListItem {
+  document_id: string;
+  document_name: string;
+  version: number;
+  chunk_count: number;
+  /** Corpus folder: bf | ohada | uemoa | cima | … ("" when unknown). */
+  folder: string;
+  status: string;
+  authority: string;
+  document_type: string;
+  law_number: string;
+  publication_date: string;
+  legal_domains: string[];
+}
+
+export interface ArticleIndexEntry {
+  article: string;
+  section: string;
+  page: number | null;
+  preview: string;
+}
+
+export interface ArticleChunk {
+  chunk_id: string;
+  document_id: string;
+  document_name: string;
+  content: string;
+  article?: string | null;
+  section?: string | null;
+  page?: number | null;
+  publication_date?: string | null;
+  effective_date?: string | null;
+  url?: string | null;
+  authority?: string | null;
+  metadata: Record<string, unknown>;
+}
+
+/** GET /articles/{doc}/{article} returns every matching chunk (404 if none). */
+export interface ArticleLookupResponse {
+  document_id: string;
+  article: string;
+  count: number;
+  chunks: ArticleChunk[];
+}
+
+export interface SearchResponse {
+  query: string;
+  count: number;
+  results: EvidenceChunk[];
+}
+
+export async function listSources(token?: string | null): Promise<SourceListItem[]> {
+  const res = await apiFetch("/sources", { token });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec du chargement des sources (${res.status})`, res.status);
+  }
+  return (await res.json()) as SourceListItem[];
+}
+
+export async function listSourceArticles(
+  documentId: string,
+  token?: string | null,
+): Promise<ArticleIndexEntry[]> {
+  const res = await apiFetch(`/sources/${encodeURIComponent(documentId)}/articles`, { token });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec du chargement des articles (${res.status})`, res.status);
+  }
+  return (await res.json()) as ArticleIndexEntry[];
+}
+
+export async function getArticle(
+  documentId: string,
+  article: string,
+  token?: string | null,
+): Promise<ArticleLookupResponse> {
+  const res = await apiFetch(
+    `/articles/${encodeURIComponent(documentId)}/${encodeURIComponent(article)}`,
+    { token },
+  );
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Article introuvable (${res.status})`, res.status);
+  }
+  return (await res.json()) as ArticleLookupResponse;
+}
+
+/** Hybrid corpus search (vector + keyword), evidence chunks ranked. */
+export async function searchCorpus(
+  q: string,
+  topK = 10,
+  token?: string | null,
+): Promise<SearchResponse> {
+  const res = await apiFetch(`/search?q=${encodeURIComponent(q)}&top_k=${topK}`, { token });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec de la recherche (${res.status})`, res.status);
+  }
+  return (await res.json()) as SearchResponse;
+}
+
+// ---------------------------------------------------------------------------
+// Freshness feed (backend/api/routers/freshness.py)
+// ---------------------------------------------------------------------------
+
+export interface FreshnessEvent {
+  source_name: string;
+  url: string;
+  kind: string;
+  detected_at: string; // ISO 8601
+  detail: string;
+  metadata: Record<string, unknown>;
+}
+
+export async function listFreshnessEvents(
+  limit = 10,
+  token?: string | null,
+): Promise<FreshnessEvent[]> {
+  const res = await apiFetch(`/freshness/events?limit=${limit}`, { token });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec du chargement des nouveautés (${res.status})`, res.status);
+  }
+  return (await res.json()) as FreshnessEvent[];
+}
+
+// ---------------------------------------------------------------------------
+// Bookmarks (backend/api/routers/bookmarks.py)
+// ---------------------------------------------------------------------------
+
+export interface Bookmark {
+  id: string;
+  query: string;
+  answer: string;
+  confidence: number;
+  session_id: string;
+  created_at: string;
+}
+
+export interface BookmarkInput {
+  query: string;
+  answer: string;
+  confidence: number;
+  session_id: string;
+}
+
+export async function addBookmark(payload: BookmarkInput, token?: string | null): Promise<Bookmark> {
+  const res = await apiFetch("/bookmarks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    token,
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec de l'enregistrement du marque-page (${res.status})`, res.status);
+  }
+  return (await res.json()) as Bookmark;
+}
+
+/** Newest-first bookmarks of the current user. */
+export async function listBookmarks(token?: string | null): Promise<Bookmark[]> {
+  const res = await apiFetch("/bookmarks", { token });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec du chargement des marque-pages (${res.status})`, res.status);
+  }
+  return (await res.json()) as Bookmark[];
+}
+
+/** 204 on success; 404 when the bookmark is foreign or unknown. */
+export async function deleteBookmark(id: string, token?: string | null): Promise<void> {
+  const res = await apiFetch(`/bookmarks/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    token,
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec de la suppression du marque-page (${res.status})`, res.status);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public answer sharing (backend/api/routers/share.py)
+// ---------------------------------------------------------------------------
+
+export interface ShareInput {
+  query: string;
+  answer: string;
+  citations: Citation[];
+  confidence: number;
+}
+
+export interface ShareResponse {
+  token: string;
+  /** "/partage/<token>" — prepend window.location.origin for the public URL. */
+  url_path: string;
+}
+
+export interface SharedAnswer {
+  query: string;
+  answer: string;
+  citations: Citation[];
+  confidence: number;
+  created_at: string;
+}
+
+export async function createShare(payload: ShareInput, token?: string | null): Promise<ShareResponse> {
+  const res = await apiFetch("/share", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    token,
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec de la création du lien de partage (${res.status})`, res.status);
+  }
+  return (await res.json()) as ShareResponse;
+}
+
+/** PUBLIC endpoint (no auth required): read a shared answer snapshot. */
+export async function getSharedAnswer(shareToken: string): Promise<SharedAnswer> {
+  const res = await apiFetch(`/share/${encodeURIComponent(shareToken)}`);
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Lien de partage invalide ou expiré (${res.status})`, res.status);
+  }
+  return (await res.json()) as SharedAnswer;
+}
+
+// ---------------------------------------------------------------------------
+// Preferences & memories (backend/api/routers/auth.py)
+// ---------------------------------------------------------------------------
+
+export interface PreferencesResponse {
+  preferences: Record<string, unknown>;
+}
+
+export async function getPreferences(token?: string | null): Promise<PreferencesResponse> {
+  const res = await apiFetch("/auth/me/preferences", { token });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec du chargement des préférences (${res.status})`, res.status);
+  }
+  return (await res.json()) as PreferencesResponse;
+}
+
+/** The backend merges `preferences` into the stored set and returns the result. */
+export async function putPreferences(
+  preferences: Record<string, unknown>,
+  token?: string | null,
+): Promise<PreferencesResponse> {
+  const res = await apiFetch("/auth/me/preferences", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    token,
+    body: JSON.stringify({ preferences }),
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec de l'enregistrement des préférences (${res.status})`, res.status);
+  }
+  return (await res.json()) as PreferencesResponse;
+}
+
+export interface MemoryEntry {
+  id: string;
+  kind: string;
+  content: string;
+  created_at: string;
+  last_accessed: string;
+}
+
+export interface MemoriesResponse {
+  memories: MemoryEntry[];
+}
+
+export async function listMemories(token?: string | null): Promise<MemoriesResponse> {
+  const res = await apiFetch("/auth/me/memories", { token });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec du chargement de la mémoire (${res.status})`, res.status);
+  }
+  return (await res.json()) as MemoriesResponse;
+}
+
+/** Erase everything the assistant remembers about the current user (204). */
+export async function eraseMemories(token?: string | null): Promise<void> {
+  const res = await apiFetch("/auth/me/memories", { method: "DELETE", token });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec de l'effacement de la mémoire (${res.status})`, res.status);
+  }
+}
+
+/** Revoke the server-side session (204); callers must also discard the token. */
+export async function logout(token?: string | null): Promise<void> {
+  const res = await apiFetch("/auth/logout", { method: "POST", token });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec de la déconnexion (${res.status})`, res.status);
+  }
+}
+
+/** Permanently delete the caller's account and associated data (204). */
+export async function deleteAccount(token?: string | null): Promise<void> {
+  const res = await apiFetch("/auth/me", { method: "DELETE", token });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec de la suppression du compte (${res.status})`, res.status);
+  }
 }
 
 // ---------------------------------------------------------------------------

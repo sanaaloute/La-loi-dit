@@ -110,6 +110,27 @@ def test_role_model_override_reads_settings():
     assert role_model_override("nope", settings) is None
 
 
+def test_role_model_api_base_overrides_endpoint_and_drops_key():
+    """Split-serving: role clients can target a local endpoint (small fast
+    model); the provider's API key must never leak to it."""
+    settings = _online_settings(
+        model_role_routing_enabled=True,
+        planner_model="qwen2.5:3b",
+        role_model_api_base="http://host.docker.internal:11434",
+        llm_api_key="cloud-secret",
+    )
+    client = resolve_role_llm("planner", LLMClient(settings), settings)
+    assert client.model == "qwen2.5:3b"
+    assert client.api_base == "http://host.docker.internal:11434"
+    assert client.api_key == ""
+    # Without the override base, the provider's endpoint AND key are inherited.
+    settings2 = _online_settings(
+        model_role_routing_enabled=True, planner_model="qwen2.5:3b", llm_api_key="cloud-secret"
+    )
+    client2 = resolve_role_llm("planner", LLMClient(settings2), settings2)
+    assert client2.api_key == "cloud-secret"
+
+
 # ---------------------------------------------------------------------------
 # Graph wiring: which client each node actually receives
 # ---------------------------------------------------------------------------
