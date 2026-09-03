@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { colors } from "../theme";
+import type { ThemeColors } from "../theme";
+import { useTheme } from "../theme-context";
 
 interface UpgradePanelProps {
   body: string;
@@ -12,6 +13,8 @@ interface UpgradePanelProps {
  * no purchase flow — upgrades happen on the web app or via an admin.
  */
 export default function UpgradePanel({ body }: UpgradePanelProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.container}>
       <View style={styles.iconWrap}>
@@ -23,7 +26,7 @@ export default function UpgradePanel({ body }: UpgradePanelProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     margin: 24,
     borderWidth: 1,

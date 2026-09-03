@@ -1,15 +1,18 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Link, useRouter } from "expo-router";
 import { confirmPasswordReset, requestPasswordReset } from "../../src/lib/api";
 import AuthShell from "../../src/components/AuthShell";
 import { ErrorText, PasswordField, PrimaryButton, TextField } from "../../src/components/ui";
-import { colors } from "../../src/theme";
+import type { ThemeColors } from "../../src/theme";
+import { useTheme } from "../../src/theme-context";
 
 type Step = "request" | "confirm";
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [step, setStep] = useState<Step>("request");
   const [identifier, setIdentifier] = useState("");
   const [token, setToken] = useState("");
@@ -113,6 +116,8 @@ export default function ForgotPasswordScreen() {
 }
 
 function PressableLink({ label, onPress }: { label: string; onPress: () => void }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <Text style={styles.linkCenter} onPress={onPress}>
       {label}
@@ -120,7 +125,7 @@ function PressableLink({ label, onPress }: { label: string; onPress: () => void 
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   help: { fontSize: 13, lineHeight: 19, color: colors.muted },
   footer: { alignItems: "center", marginTop: 4 },
   link: { color: colors.accent, fontSize: 13, fontWeight: "500" },

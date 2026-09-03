@@ -1,9 +1,10 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { ChatResponse, ExportItem } from "../lib/api";
 import { shareAnswerExport, type MenuFormat } from "../lib/export";
-import { colors } from "../theme";
+import type { ThemeColors } from "../theme";
+import { useTheme } from "../theme-context";
 
 const FORMAT_LABELS: { id: MenuFormat; label: string }[] = [
   { id: "pdf", label: "PDF" },
@@ -22,6 +23,8 @@ interface ExportMenuProps {
 
 /** Export trigger for a chat answer; formats offered via the native sheet. */
 export default function ExportMenu({ response, query, conversation = [] }: ExportMenuProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [loading, setLoading] = useState<MenuFormat | null>(null);
 
   async function handleExport(format: MenuFormat, items?: ExportItem[]) {
@@ -68,7 +71,7 @@ export default function ExportMenu({ response, query, conversation = [] }: Expor
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   button: {
     flexDirection: "row",
     alignItems: "center",

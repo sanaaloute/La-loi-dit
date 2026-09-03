@@ -1,14 +1,17 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Link } from "expo-router";
 import { login } from "../../src/lib/api";
 import { useAuth } from "../../src/lib/auth";
 import AuthShell from "../../src/components/AuthShell";
 import { ErrorText, PasswordField, PrimaryButton, TextField } from "../../src/components/ui";
-import { colors } from "../../src/theme";
+import type { ThemeColors } from "../../src/theme";
+import { useTheme } from "../../src/theme-context";
 
 export default function LoginScreen() {
   const { signIn } = useAuth();
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -59,7 +62,7 @@ export default function LoginScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   links: { alignItems: "center", gap: 10, marginTop: 4 },
   link: { color: colors.accent, fontSize: 13, fontWeight: "500" },
   footerText: { color: colors.muted, fontSize: 13 },

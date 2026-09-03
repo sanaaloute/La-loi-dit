@@ -1,8 +1,9 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { colors } from "../theme";
+import type { ThemeColors } from "../theme";
+import { useTheme } from "../theme-context";
 
 /** Shared shell for the auth screens: brand header + scrollable card. */
 export default function AuthShell({
@@ -14,6 +15,8 @@ export default function AuthShell({
   subtitle?: string;
   children: React.ReactNode;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView
@@ -39,7 +42,7 @@ export default function AuthShell({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   flex: { flex: 1 },
   scroll: { flexGrow: 1, justifyContent: "center", padding: 24 },

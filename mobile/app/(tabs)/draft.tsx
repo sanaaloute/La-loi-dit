@@ -28,7 +28,8 @@ import {
 } from "../../src/lib/api";
 import { shareDraftExport, type MenuFormat } from "../../src/lib/export";
 import { getModel } from "../../src/lib/storage";
-import { colors } from "../../src/theme";
+import type { ThemeColors } from "../../src/theme";
+import { useTheme } from "../../src/theme-context";
 
 type Step = "templates" | "form" | "result";
 
@@ -59,6 +60,8 @@ function FieldInput({
   value: string;
   onChange: (value: string) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   if (field.type === "select") {
     return (
       <View style={styles.selectWrap}>
@@ -93,6 +96,8 @@ function FieldInput({
 }
 
 export default function DraftScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [templates, setTemplates] = useState<DraftTemplate[] | null>(null);
   const [forbidden, setForbidden] = useState(false);
@@ -421,7 +426,7 @@ export default function DraftScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   flex: { flex: 1 },
   header: {

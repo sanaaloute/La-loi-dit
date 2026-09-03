@@ -1,13 +1,14 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { Linking, StyleSheet } from "react-native";
 import MarkdownDisplay from "react-native-markdown-display";
-import { colors } from "../theme";
+import type { ThemeColors } from "../theme";
+import { useTheme } from "../theme-context";
 
 interface MarkdownProps {
   children: string;
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   body: {
     color: colors.ink,
     fontSize: 14,
@@ -126,6 +127,8 @@ const styles = StyleSheet.create({
 
 /** Markdown renderer with the app's sober styling; links open externally. */
 export default function Markdown({ children }: MarkdownProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <MarkdownDisplay
       style={styles}

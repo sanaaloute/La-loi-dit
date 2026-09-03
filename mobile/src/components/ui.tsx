@@ -1,5 +1,5 @@
 // Small shared form controls (auth + drafting screens).
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -10,7 +10,8 @@ import {
   type KeyboardTypeOptions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { colors } from "../theme";
+import type { ThemeColors } from "../theme";
+import { useTheme } from "../theme-context";
 
 interface TextFieldProps {
   label: string;
@@ -35,6 +36,8 @@ export function TextField({
   multiline = false,
   optional = false,
 }: TextFieldProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.field}>
       <Text style={styles.label}>
@@ -63,6 +66,8 @@ interface PasswordFieldProps {
 }
 
 export function PasswordField({ label, value, onChangeText }: PasswordFieldProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [visible, setVisible] = useState(false);
   return (
     <View style={styles.field}>
@@ -98,6 +103,8 @@ interface PrimaryButtonProps {
 }
 
 export function PrimaryButton({ title, onPress, busy = false, disabled = false }: PrimaryButtonProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <Pressable
       onPress={onPress}
@@ -118,11 +125,13 @@ export function PrimaryButton({ title, onPress, busy = false, disabled = false }
 }
 
 export function ErrorText({ message }: { message: string | null }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   if (!message) return null;
   return <Text style={styles.error}>{message}</Text>;
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   field: { gap: 4 },
   label: { fontSize: 12, fontWeight: "500", color: colors.inkSoft },
   optional: { color: colors.faint, fontWeight: "400" },

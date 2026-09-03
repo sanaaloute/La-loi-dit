@@ -47,3 +47,16 @@ export function longDate(iso: string): string {
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
 }
+
+/**
+ * Date-only string ("2026-09-02") → "2 septembre 2026", parsed as a LOCAL
+ * date so the day never shifts with the device timezone (unlike longDate,
+ * which parses ISO strings as UTC midnight).
+ */
+export function localLongDate(ymd: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(ymd.trim());
+  if (!m) return ymd;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (Number.isNaN(d.getTime())) return ymd;
+  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+}

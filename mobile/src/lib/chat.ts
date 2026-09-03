@@ -12,6 +12,7 @@ import {
   PIPELINE_NODES,
   STEP_LABELS,
   submitFeedback,
+  type ChatRequest,
   type ChatResponse,
   type ChatSessionDetail,
   type StreamEvent,
@@ -490,7 +491,7 @@ export class ChatEngine {
   // Send
   // -------------------------------------------------------------------------
 
-  async send(query: string): Promise<void> {
+  async send(query: string, scenarioDate?: string | null): Promise<void> {
     const text = query.trim();
     // A prompt can never be submitted without an authenticated session, nor
     // beyond the word limit.
@@ -520,7 +521,14 @@ export class ChatEngine {
     });
     this.startProgressPoll();
 
-    const request = { query: text, session_id: sid, language: "fr", model: getModel() ?? undefined };
+    const request: ChatRequest = {
+      query: text,
+      session_id: sid,
+      language: "fr",
+      model: getModel() ?? undefined,
+      // "Loi en vigueur au …" scenario: answer as of this date (YYYY-MM-DD).
+      scenario_date: scenarioDate ?? undefined,
+    };
     const sendStart = Date.now();
     this.inFlight = { sid, sendStart, query: text };
     let streamed = false;

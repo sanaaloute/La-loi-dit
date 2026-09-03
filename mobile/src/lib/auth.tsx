@@ -11,6 +11,7 @@ import React, {
 } from "react";
 import { deleteAccount as apiDeleteAccount, logout as apiLogout, me, type TokenResponse, type UserProfile } from "./api";
 import { chatEngine } from "./chat";
+import { unregisterPushToken } from "./push";
 import { clearAll, loadStoredAuth, onAuthChange, setToken } from "./storage";
 
 type AuthStatus = "loading" | "signedIn" | "signedOut";
@@ -84,6 +85,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    // Unregister first: the DELETE still needs the Bearer token.
+    await unregisterPushToken();
     await apiLogout();
     clearAll();
     chatEngine.reset();
@@ -91,6 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const deleteAccount = useCallback(async () => {
+    await unregisterPushToken();
     await apiDeleteAccount();
     clearAll();
     chatEngine.reset();

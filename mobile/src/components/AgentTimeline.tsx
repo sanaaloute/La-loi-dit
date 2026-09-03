@@ -1,9 +1,10 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { PIPELINE_NODES } from "../lib/api";
 import type { NodeStatus } from "../lib/chat";
-import { colors } from "../theme";
+import type { ThemeColors } from "../theme";
+import { useTheme } from "../theme-context";
 
 interface AgentTimelineProps {
   statuses: Record<string, NodeStatus>;
@@ -11,6 +12,8 @@ interface AgentTimelineProps {
 }
 
 function StatusIcon({ status }: { status: NodeStatus }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   if (status === "done") {
     return (
       <View style={[styles.icon, styles.iconDone]}>
@@ -33,6 +36,8 @@ function StatusIcon({ status }: { status: NodeStatus }) {
 }
 
 export default function AgentTimeline({ statuses, active }: AgentTimelineProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const anyActivity = active || PIPELINE_NODES.some((n) => statuses[n.id] !== "pending");
 
   if (!anyActivity) {
@@ -75,7 +80,7 @@ export default function AgentTimeline({ statuses, active }: AgentTimelineProps) 
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   list: { gap: 8, padding: 16 },
   empty: {
     margin: 16,

@@ -1,11 +1,14 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { FinalAnswer } from "../lib/api";
-import { colors } from "../theme";
+import type { ThemeColors } from "../theme";
+import { useTheme } from "../theme-context";
 import Markdown from "./Markdown";
 
 function ConfidenceBadge({ confidence }: { confidence: number }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const pct = Math.round(confidence * 100);
   const palette =
     confidence >= 0.55
@@ -26,6 +29,8 @@ interface AnswerViewProps {
 }
 
 export default function AnswerView({ answer }: AnswerViewProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   // Direct-route answers (casual conversation, no legal retrieval): render
   // the reply plainly — a confidence score is meaningless there.
   const isDirect = answer.metadata?.route === "direct";
@@ -107,7 +112,7 @@ export default function AnswerView({ answer }: AnswerViewProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   container: { gap: 10 },
   row: { flexDirection: "row", alignItems: "center", gap: 6 },
   badges: { flexWrap: "wrap", gap: 8 },

@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "scheme": "yawoto",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "net.neobytech.yawoto",
@@ -16,6 +16,7 @@
     },
     "android": {
       "package": "net.neobytech.yawoto",
+      "softwareKeyboardLayoutMode": "pan",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -36,6 +37,7 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
+      "expo-notifications",
       [
         "expo-audio",
         {
@@ -43,7 +45,10 @@
         }
       ],
       "expo-sharing",
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-font",
+      "expo-asset",
+      "expo-system-ui"
     ],
     "extra": {
       "apiUrl": "https://api-yawoto.neobytech.net",

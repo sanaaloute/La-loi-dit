@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -26,7 +28,15 @@ import CitationPanel from "../../src/components/CitationPanel";
 import EvidenceViewer from "../../src/components/EvidenceViewer";
 import ExportMenu from "../../src/components/ExportMenu";
 import Markdown from "../../src/components/Markdown";
-import { transcribeAudio, type ChatResponse, type ExportItem } from "../../src/lib/api";
+import {
+  addBookmark,
+  createShare,
+  deleteBookmark,
+  getPreferences,
+  transcribeAudio,
+  type ChatResponse,
+  type ExportItem,
+} from "../../src/lib/api";
 import { useAuth } from "../../src/lib/auth";
 import {
   chatEngine,
@@ -35,8 +45,10 @@ import {
   MAX_WORDS,
   type ChatMessage,
 } from "../../src/lib/chat";
-import { formatMessageTime } from "../../src/lib/format";
-import { colors } from "../../src/theme";
+import { formatMessageTime, localLongDate } from "../../src/lib/format";
+import { suggestionsForPersona } from "../../src/lib/persona";
+import type { ThemeColors } from "../../src/theme";
+import { useTheme } from "../../src/theme-context";
 
 /** Voice notes are capped: short clips transcribe faster and cost less. */
 const MAX_REC_SECONDS = 30;
@@ -46,6 +58,18 @@ const SUGGESTIONS = [
   "Quelle est la procédure de divorce selon le Code des personnes et de la famille ?",
   "Quelles sont les règles OHADA applicables à la création d'une SARL ?",
 ];
+
+/** Public web app origin — shared answer pages live under /partage/<token>. */
+const PUBLIC_WEB_ORIGIN = "https://yawoto.neobytech.net";
+
+/** Strict YYYY-MM-DD validation (real calendar dates only). */
+function isValidScenarioDate(value: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!m) return false;
+  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const d = new Date(year, month - 1, day);
+  return d.getFullYear() === year && d.getMonth() === month - 1 && d.getDate() === day;
+}
 
 const AUDIO_MIME: Record<string, string> = {
   m4a: "audio/m4a",
@@ -61,6 +85,8 @@ type PanelTab = "agents" | "citations" | "preuves";
 
 export default function ChatScreen() {
   const { token } = useAuth();
+  const { colors, isDark, toggleTheme } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const snapshot = useSyncExternalStore(chatEngine.subscribe, chatEngine.getSnapshot);
   const { messages, busy, historyLoading, statuses, selectedId } = snapshot;
 
@@ -70,10 +96,47 @@ export default function ChatScreen() {
   const [tab, setTab] = useState<PanelTab>("agents");
   const listRef = useRef<FlatList<ChatMessage>>(null);
 
+  // Scenario date ("Loi en vigueur au …"): sent as scenario_date, YYYY-MM-DD.
+  const [scenarioDate, setScenarioDate] = useState<string | null>(null);
+  const [dateModalOpen, setDateModalOpen] = useState(false);
+  const [dateInput, setDateInput] = useState("");
+  const [dateError, setDateError] = useState<string | null>(null);
+
+  // Saved answers: message id -> bookmark id (local mirror of /bookmarks).
+  const [savedBookmarks, setSavedBookmarks] = useState<Record<string, string>>({});
+  const [bookmarkBusyId, setBookmarkBusyId] = useState<string | null>(null);
+  const [sharingId, setSharingId] = useState<string | null>(null);
+
+  // Suggestion prompts follow the onboarding persona when one is chosen.
+  const [suggestions, setSuggestions] = useState<string[]>(SUGGESTIONS);
+
   // Restore the persisted conversation once the token is available.
   useEffect(() => {
     if (token) void chatEngine.restoreSession();
   }, [token]);
+
+  // Read the persona preference on mount (drives the suggestion prompts).
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    getPreferences()
+      .then((prefs) => {
+        if (cancelled) return;
+        const persona = typeof prefs.persona === "string" ? prefs.persona : null;
+        setSuggestions(suggestionsForPersona(persona) ?? SUGGESTIONS);
+      })
+      .catch(() => {
+        // Offline or unreadable: keep the default suggestions.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  // A fresh conversation drops the scenario date along with the messages.
+  useEffect(() => {
+    if (!snapshot.sessionId && snapshot.messages.length === 0) setScenarioDate(null);
+  }, [snapshot.sessionId, snapshot.messages.length]);
 
   // Elapsed-time indicator while a run is in flight (helps spot a stuck node).
   const [elapsed, setElapsed] = useState(0);
@@ -253,6 +316,86 @@ export default function ChatScreen() {
 
   const sendDisabled = input.trim().length === 0 || wordCount > MAX_WORDS || busy;
 
+  // -------------------------------------------------------------------------
+  // Scenario date modal
+  // -------------------------------------------------------------------------
+  function openDateModal() {
+    setDateInput(scenarioDate ?? "");
+    setDateError(null);
+    setDateModalOpen(true);
+  }
+
+  function applyScenarioDate() {
+    const value = dateInput.trim();
+    if (!value) {
+      // Empty input = clear the scenario date.
+      setScenarioDate(null);
+      setDateModalOpen(false);
+      return;
+    }
+    if (!isValidScenarioDate(value)) {
+      setDateError("Date invalide. Utilisez le format AAAA-MM-JJ (ex. 2024-01-15).");
+      return;
+    }
+    setScenarioDate(value);
+    setDateModalOpen(false);
+  }
+
+  // -------------------------------------------------------------------------
+  // Answer actions: bookmark toggle + public share link
+  // -------------------------------------------------------------------------
+  async function toggleBookmark(msg: ChatMessage, response: ChatResponse) {
+    if (bookmarkBusyId) return;
+    const existingId = savedBookmarks[msg.id];
+    setBookmarkBusyId(msg.id);
+    try {
+      if (existingId) {
+        await deleteBookmark(existingId);
+        setSavedBookmarks((prev) => {
+          const next = { ...prev };
+          delete next[msg.id];
+          return next;
+        });
+      } else {
+        const bookmark = await addBookmark({
+          query: queryByAssistantId.get(msg.id) ?? "",
+          answer: response.answer.answer,
+          confidence: response.answer.confidence,
+          session_id: response.session_id,
+        });
+        setSavedBookmarks((prev) => ({ ...prev, [msg.id]: bookmark.id }));
+      }
+    } catch (err) {
+      Alert.alert(
+        "Marque-page",
+        err instanceof Error ? err.message : "Une erreur est survenue.",
+      );
+    } finally {
+      setBookmarkBusyId(null);
+    }
+  }
+
+  async function handleShare(msg: ChatMessage, response: ChatResponse) {
+    if (sharingId) return;
+    setSharingId(msg.id);
+    try {
+      const link = await createShare({
+        query: queryByAssistantId.get(msg.id) ?? "",
+        answer: response.answer.answer,
+        citations: response.answer.citations,
+        confidence: response.answer.confidence,
+      });
+      await Share.share({ message: `${PUBLIC_WEB_ORIGIN}${link.url_path}` });
+    } catch (err) {
+      Alert.alert(
+        "Partage",
+        err instanceof Error ? err.message : "Une erreur est survenue.",
+      );
+    } finally {
+      setSharingId(null);
+    }
+  }
+
   function renderMessage(msg: ChatMessage) {
     if (msg.role === "user") {
       return (
@@ -326,6 +469,36 @@ export default function ChatScreen() {
                 query={queryByAssistantId.get(msg.id) ?? ""}
                 conversation={conversationItems}
               />
+              <Pressable
+                disabled={bookmarkBusyId === msg.id}
+                onPress={() => void toggleBookmark(msg, response)}
+                style={styles.actionButton}
+                accessibilityLabel={
+                  savedBookmarks[msg.id] ? "Retirer le marque-page" : "Enregistrer la réponse"
+                }
+              >
+                {bookmarkBusyId === msg.id ? (
+                  <ActivityIndicator size={14} color={colors.muted} />
+                ) : (
+                  <Ionicons
+                    name={savedBookmarks[msg.id] ? "bookmark" : "bookmark-outline"}
+                    size={14}
+                    color={savedBookmarks[msg.id] ? colors.accent : colors.muted}
+                  />
+                )}
+              </Pressable>
+              <Pressable
+                disabled={sharingId === msg.id}
+                onPress={() => void handleShare(msg, response)}
+                style={styles.actionButton}
+                accessibilityLabel="Partager la réponse"
+              >
+                {sharingId === msg.id ? (
+                  <ActivityIndicator size={14} color={colors.muted} />
+                ) : (
+                  <Ionicons name="share-social-outline" size={14} color={colors.muted} />
+                )}
+              </Pressable>
               {response.trace_id ? (
                 <>
                   <Pressable
@@ -384,6 +557,13 @@ export default function ChatScreen() {
           >
             <Ionicons name="create-outline" size={18} color={colors.inkSoft} />
           </Pressable>
+          <Pressable
+            onPress={toggleTheme}
+            style={styles.headerButton}
+            accessibilityLabel={isDark ? "Passer au thème clair" : "Passer au thème sombre"}
+          >
+            <Ionicons name={isDark ? "sunny" : "moon"} size={18} color={colors.inkSoft} />
+          </Pressable>
         </View>
       </View>
 
@@ -407,7 +587,7 @@ export default function ChatScreen() {
               Burkina Faso et de l'OHADA, avec citations vérifiables et traçabilité complète.
             </Text>
             <View style={styles.suggestions}>
-              {SUGGESTIONS.map((s) => (
+              {suggestions.map((s) => (
                 <Pressable key={s} onPress={() => setInput(s)} style={styles.suggestion}>
                   <Text style={styles.suggestionText}>{s}</Text>
                 </Pressable>
@@ -456,6 +636,23 @@ export default function ChatScreen() {
             </View>
           )}
           {recError ? <Text style={styles.recError}>{recError}</Text> : null}
+          {scenarioDate && (
+            <View style={styles.scenarioChipRow}>
+              <View style={styles.scenarioChip}>
+                <Ionicons name="calendar" size={12} color={colors.accent} />
+                <Text style={styles.scenarioChipText}>
+                  Loi en vigueur au {localLongDate(scenarioDate)}
+                </Text>
+                <Pressable
+                  onPress={() => setScenarioDate(null)}
+                  accessibilityLabel="Retirer la date de scénario"
+                  hitSlop={8}
+                >
+                  <Ionicons name="close" size={14} color={colors.accent} />
+                </Pressable>
+              </View>
+            </View>
+          )}
           <View style={styles.composerRow}>
             <TextInput
               value={input}
@@ -502,10 +699,21 @@ export default function ChatScreen() {
                   <Ionicons name="mic" size={17} color={colors.inkSoft} />
                 </Pressable>
                 <Pressable
+                  onPress={openDateModal}
+                  style={[styles.roundButton, styles.roundButtonMuted]}
+                  accessibilityLabel="Choisir une date de scénario (loi en vigueur au…)"
+                >
+                  <Ionicons
+                    name="calendar-outline"
+                    size={17}
+                    color={scenarioDate ? colors.accent : colors.inkSoft}
+                  />
+                </Pressable>
+                <Pressable
                   onPress={() => {
                     const q = input;
                     setInput("");
-                    void chatEngine.send(q);
+                    void chatEngine.send(q, scenarioDate);
                   }}
                   disabled={sendDisabled}
                   style={[
@@ -586,11 +794,68 @@ export default function ChatScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Scenario date sheet: YYYY-MM-DD input (dependency-free). */}
+      <Modal
+        visible={dateModalOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setDateModalOpen(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalContainer}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <Pressable style={styles.modalBackdrop} onPress={() => setDateModalOpen(false)} />
+          <View style={styles.dateSheet}>
+            <Text style={styles.sheetTitle}>Loi en vigueur au…</Text>
+            <Text style={styles.dateHint}>
+              La réponse tiendra compte des textes en vigueur à cette date.
+            </Text>
+            <TextInput
+              value={dateInput}
+              onChangeText={(v) => {
+                setDateInput(v);
+                setDateError(null);
+              }}
+              placeholder="AAAA-MM-JJ"
+              placeholderTextColor={colors.faint}
+              keyboardType="numbers-and-punctuation"
+              autoCapitalize="none"
+              autoCorrect={false}
+              maxLength={10}
+              style={styles.dateInput}
+              onSubmitEditing={applyScenarioDate}
+            />
+            {dateError ? <Text style={styles.dateError}>{dateError}</Text> : null}
+            <View style={styles.dateActions}>
+              {scenarioDate ? (
+                <Pressable
+                  onPress={() => {
+                    setScenarioDate(null);
+                    setDateModalOpen(false);
+                  }}
+                  style={styles.dateButton}
+                  accessibilityLabel="Retirer la date"
+                >
+                  <Text style={styles.dateRemoveText}>Retirer</Text>
+                </Pressable>
+              ) : null}
+              <Pressable onPress={() => setDateModalOpen(false)} style={styles.dateButton}>
+                <Text style={styles.dateCancelText}>Annuler</Text>
+              </Pressable>
+              <Pressable onPress={applyScenarioDate} style={styles.dateApplyButton}>
+                <Text style={styles.dateApplyText}>Valider</Text>
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   flex: { flex: 1 },
   header: {
@@ -746,6 +1011,50 @@ const styles = StyleSheet.create({
   roundButtonDisabled: { backgroundColor: colors.border },
   wordCount: { fontSize: 11, color: colors.faint, textAlign: "right", marginTop: 4 },
   wordCountOver: { color: colors.danger, fontWeight: "600" },
+  scenarioChipRow: { flexDirection: "row", marginBottom: 6 },
+  scenarioChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    backgroundColor: colors.accentLight,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  scenarioChipText: { fontSize: 12, fontWeight: "500", color: colors.accent },
+  dateSheet: {
+    backgroundColor: colors.surfaceElevated,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 16,
+    paddingBottom: 32,
+    gap: 10,
+  },
+  dateHint: { fontSize: 12, color: colors.muted },
+  dateInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: colors.ink,
+  },
+  dateError: { fontSize: 12, color: colors.danger },
+  dateActions: { flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 4 },
+  dateButton: { paddingHorizontal: 12, paddingVertical: 10 },
+  dateCancelText: { fontSize: 14, color: colors.muted },
+  dateRemoveText: { fontSize: 14, color: colors.danger },
+  dateApplyButton: {
+    backgroundColor: colors.accent,
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  dateApplyText: { fontSize: 14, fontWeight: "600", color: "#fff" },
   modalContainer: { flex: 1, justifyContent: "flex-end" },
   modalBackdrop: {
     position: "absolute",

@@ -1,14 +1,17 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { Citation } from "../lib/api";
-import { colors } from "../theme";
+import type { ThemeColors } from "../theme";
+import { useTheme } from "../theme-context";
 
 interface CitationPanelProps {
   citations: Citation[];
 }
 
 export default function CitationPanel({ citations }: CitationPanelProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -65,7 +68,7 @@ export default function CitationPanel({ citations }: CitationPanelProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   container: { padding: 16, gap: 12 },
   header: { flexDirection: "row", alignItems: "center", gap: 8 },
   headerDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent },

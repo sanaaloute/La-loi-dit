@@ -1,8 +1,9 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { EvidenceChunk } from "../lib/api";
-import { colors } from "../theme";
+import type { ThemeColors } from "../theme";
+import { useTheme } from "../theme-context";
 
 const AUTHORITY_LABELS: Record<string, string> = {
   constitution: "Constitution",
@@ -24,6 +25,8 @@ const AUTHORITY_LABELS: Record<string, string> = {
 };
 
 function AuthorityBadge({ authority }: { authority: string }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.authorityBadge}>
       <Text style={styles.authorityBadgeText}>
@@ -34,6 +37,8 @@ function AuthorityBadge({ authority }: { authority: string }) {
 }
 
 function Score({ label, value, dash }: { label: string; value: number; dash?: boolean }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.metaItem}>
       <Text style={styles.metaLabel}>{label}</Text>
@@ -43,6 +48,8 @@ function Score({ label, value, dash }: { label: string; value: number; dash?: bo
 }
 
 function MetaRow({ label, value }: { label: string; value?: string | number | null }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   if (value === undefined || value === null || value === "") return null;
   return (
     <View style={styles.metaItem}>
@@ -53,6 +60,8 @@ function MetaRow({ label, value }: { label: string; value?: string | number | nu
 }
 
 function EvidenceCard({ chunk, index }: { chunk: EvidenceChunk; index: number }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [open, setOpen] = useState(false);
   const title = chunk.document_name || "Document inconnu";
   // Backend stamps metadata.expansion = "parent" on chunks expanded to their
@@ -134,6 +143,8 @@ interface EvidenceViewerProps {
 }
 
 export default function EvidenceViewer({ evidence }: EvidenceViewerProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const visible = evidence.filter((chunk) => !isNoise(chunk));
   return (
     <View style={styles.container}>
@@ -152,7 +163,7 @@ export default function EvidenceViewer({ evidence }: EvidenceViewerProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   container: { padding: 16, gap: 10 },
   header: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 2 },
   headerDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent },

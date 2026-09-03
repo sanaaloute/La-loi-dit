@@ -1,16 +1,19 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Link } from "expo-router";
 import { register } from "../../src/lib/api";
 import { useAuth } from "../../src/lib/auth";
 import AuthShell from "../../src/components/AuthShell";
 import { ErrorText, PasswordField, PrimaryButton, TextField } from "../../src/components/ui";
-import { colors } from "../../src/theme";
+import type { ThemeColors } from "../../src/theme";
+import { useTheme } from "../../src/theme-context";
 
 type IdentifierKind = "email" | "phone";
 
 export default function RegisterScreen() {
   const { signIn } = useAuth();
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [kind, setKind] = useState<IdentifierKind>("email");
   const [identifier, setIdentifier] = useState("");
   const [name, setName] = useState("");
@@ -101,7 +104,7 @@ export default function RegisterScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   toggle: {
     flexDirection: "row",
     borderWidth: 1,

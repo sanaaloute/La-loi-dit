@@ -40,6 +40,7 @@ export async function streamChat(
   if (request.session_id) params.set("session_id", request.session_id);
   if (request.language) params.set("language", request.language);
   if (request.model) params.set("model", request.model);
+  if (request.scenario_date) params.set("scenario_date", request.scenario_date);
 
   // Renew a soon-to-expire token before opening the stream, like apiFetch.
   if (token ?? getToken()) {
