@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -28,6 +29,7 @@ import {
 } from "../../src/lib/api";
 import { useAuth } from "../../src/lib/auth";
 import { longDate, shortDay } from "../../src/lib/format";
+import { GOVERNMENT_DISCLAIMER, OFFICIAL_SOURCES } from "../../src/lib/legal-sources";
 import { personaLabel, personaOption } from "../../src/lib/persona";
 import { getModel, setModel } from "../../src/lib/storage";
 import type { ThemeColors } from "../../src/theme";
@@ -399,6 +401,23 @@ export default function AccountScreen() {
           </Pressable>
         </View>
 
+        {/* Sources officielles et statut non gouvernemental */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Sources officielles</Text>
+          <Text style={styles.disclaimerText}>{GOVERNMENT_DISCLAIMER}</Text>
+          {OFFICIAL_SOURCES.map((source) => (
+            <Pressable
+              key={source.url}
+              style={styles.sourceRow}
+              onPress={() => void Linking.openURL(source.url).catch(() => {})}
+            >
+              <Ionicons name="link-outline" size={14} color={colors.accent} />
+              <Text style={styles.sourceLabel}>{source.label}</Text>
+              <Ionicons name="open-outline" size={12} color={colors.faint} />
+            </Pressable>
+          ))}
+        </View>
+
         {/* Actions */}
         <Pressable
           style={styles.logoutButton}
@@ -416,7 +435,7 @@ export default function AccountScreen() {
           <Ionicons name="trash-outline" size={16} color={colors.danger} />
           <Text style={styles.deleteText}>Supprimer mon compte</Text>
         </Pressable>
-        <Text style={styles.versionText}>Yawoto pour Burkina Faso — version 1.0.0</Text>
+        <Text style={styles.versionText}>Yawoto pour Burkina Faso — version 1.0.1</Text>
       </ScrollView>
 
       {/* Sélecteur de modèle */}
@@ -565,6 +584,16 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   },
   modelButtonText: { flex: 1, fontSize: 13, fontWeight: "500", color: colors.ink },
   cardHint: { fontSize: 11, color: colors.faint },
+  disclaimerText: { fontSize: 12, lineHeight: 17, color: colors.inkSoft },
+  sourceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  sourceLabel: { flex: 1, fontSize: 13, color: colors.ink },
   memoryRow: {
     flexDirection: "row",
     alignItems: "flex-start",

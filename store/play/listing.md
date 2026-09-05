@@ -15,6 +15,9 @@ Le droit du Burkina Faso et de l'OHADA, cité à la source.
 ## Description complète (4000 caractères max)
 
 ```
+AVERTISSEMENT — APPLICATION NON GOUVERNEMENTALE
+Yawoto est une application privée et indépendante. Elle ne représente aucune entité gouvernementale et n'est ni affiliée ni approuvée par le Gouvernement du Burkina Faso, l'OHADA ou toute autre institution publique.
+
 Yawoto est un assistant juridique en français qui répond à vos questions à partir des textes officiels du Burkina Faso et de l'OHADA, avec des citations vérifiables à la source.
 
 POSEZ VOS QUESTIONS, EN TEXTE OU À LA VOIX
@@ -40,6 +43,13 @@ RÉDIGER VOS DOCUMENTS
 HISTORIQUE ET PARTAGE
 • Retrouvez vos conversations et vos réponses enregistrées
 • Partagez une réponse par lien public
+
+SOURCES OFFICIELLES DES INFORMATIONS
+Les informations juridiques fournies par Yawoto proviennent exclusivement des sources officielles suivantes :
+• OHADA — Organisation pour l'Harmonisation en Afrique du Droit des Affaires : https://www.ohada.org
+• Assemblée nationale du Burkina Faso : https://www.assembleenationale.bf
+• Ministère de la Justice du Burkina Faso : https://www.justice.gov.bf
+• Ministère de la Sécurité du Burkina Faso — Textes officiels : https://www.securite.gov.bf/ressources/textes-officiels
 
 Yawoto est une aide à la recherche juridique : elle ne remplace pas le conseil d'un professionnel du droit.
 
