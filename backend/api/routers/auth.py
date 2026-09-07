@@ -61,7 +61,7 @@ class TokenResponse(BaseModel):
 class RegisterRequest(BaseModel):
     email: str = Field(default="", max_length=320)
     phone: str = Field(default="", max_length=32)
-    password: str = Field(min_length=8, max_length=200)
+    password: str = Field(min_length=6, max_length=200)
     name: str = Field(default="", max_length=200)
 
 
@@ -71,7 +71,7 @@ class PasswordResetRequest(BaseModel):
 
 class PasswordResetConfirm(BaseModel):
     token: str = Field(min_length=10, max_length=200)
-    new_password: str = Field(min_length=8, max_length=200)
+    new_password: str = Field(min_length=6, max_length=200)
 
 
 #: Cache namespace + TTL for password-reset tokens.

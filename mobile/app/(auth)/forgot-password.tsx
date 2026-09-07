@@ -48,8 +48,8 @@ export default function ForgotPasswordScreen() {
       setError("Saisissez le code reçu.");
       return;
     }
-    if (password.length < 8) {
-      setError("Le mot de passe doit contenir au moins 8 caractères.");
+    if (password.length < 6) {
+      setError("Le mot de passe doit contenir au moins 6 caractères.");
       return;
     }
     if (password !== confirmPassword) {
@@ -99,7 +99,7 @@ export default function ForgotPasswordScreen() {
             autoCapitalize="none"
             autoCorrect={false}
           />
-          <PasswordField label="Nouveau mot de passe (8 caractères minimum)" value={password} onChangeText={setPassword} />
+          <PasswordField label="Nouveau mot de passe (6 caractères minimum)" value={password} onChangeText={setPassword} />
           <PasswordField label="Confirmer le mot de passe" value={confirmPassword} onChangeText={setConfirmPassword} />
           <ErrorText message={error} />
           <PrimaryButton title="Réinitialiser le mot de passe" onPress={() => void handleConfirm()} busy={busy} />

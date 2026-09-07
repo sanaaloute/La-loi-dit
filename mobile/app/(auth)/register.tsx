@@ -30,8 +30,8 @@ export default function RegisterScreen() {
       setError(kind === "email" ? "Saisissez votre adresse e-mail." : "Saisissez votre numéro de téléphone.");
       return;
     }
-    if (password.length < 8) {
-      setError("Le mot de passe doit contenir au moins 8 caractères.");
+    if (password.length < 6) {
+      setError("Le mot de passe doit contenir au moins 6 caractères.");
       return;
     }
     if (password !== confirmPassword) {
@@ -90,7 +90,7 @@ export default function RegisterScreen() {
         keyboardType={kind === "email" ? "email-address" : "phone-pad"}
       />
       <TextField label="Nom" value={name} onChangeText={setName} placeholder="Awa Sawadogo" optional />
-      <PasswordField label="Mot de passe (8 caractères minimum)" value={password} onChangeText={setPassword} />
+      <PasswordField label="Mot de passe (6 caractères minimum)" value={password} onChangeText={setPassword} />
       <PasswordField label="Confirmer le mot de passe" value={confirmPassword} onChangeText={setConfirmPassword} />
       <ErrorText message={error} />
       <PrimaryButton title="Créer mon compte" onPress={() => void handleRegister()} busy={busy} />

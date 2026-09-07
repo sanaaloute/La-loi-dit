@@ -45,6 +45,10 @@ export default function AuthCard({ onSuccess, idPrefix = "auth" }: AuthCardProps
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (password.length < 6) {
+      setError("Le mot de passe doit contenir au moins 6 caractères.");
+      return;
+    }
     if (password !== confirmPassword) {
       setError("Les mots de passe ne correspondent pas.");
       return;
