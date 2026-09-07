@@ -184,13 +184,34 @@ Response (abridged):
 }
 ```
 
-## Frontend & mobile
+## Frontend
 
-The Next.js web UI and the Expo mobile app were split into their own
-repository (with full history). This repo is backend-only; the client
-apps talk to the API over HTTP (`NEXT_PUBLIC_API_URL` / baked-in
-`apiUrl`). The `frontend` Docker service in `docker-compose.yml` is kept
-for now — point its build context at the client repo.
+A Next.js 15 (App Router, TypeScript, Tailwind CSS) web UI lives in
+[`frontend/`](frontend/). It provides the conversation interface with live
+SSE streaming of the agent pipeline, an agent execution timeline, a citation
+panel, an evidence viewer with full source metadata, and an optional JWT login
+(anonymous calls work in development).
+
+```bash
+cd frontend
+npm install
+npm run dev          # http://localhost:3000
+```
+
+The API base URL is configurable via `NEXT_PUBLIC_API_URL`. The default behavior
+proxies `/backend-api/*` server-side to `http://localhost:8000`, which avoids
+CORS issues because the API does not enable CORS. Set
+`NEXT_PUBLIC_API_URL=http://localhost:8000` in `frontend/.env.local` to call
+the API directly when CORS is handled upstream (e.g., via Nginx).
+
+An optional Docker service is also available:
+
+```bash
+docker compose --profile frontend up -d --build frontend
+```
+
+> Note: the `frontend` service publishes host port **3000**, which Langfuse
+> also uses — adjust one of the port mappings if you run both.
 
 ## Langfuse tracing
 
@@ -225,6 +246,7 @@ nested spans, meaningful input/output, and feedback scores).
 │   ├── observability/     # Prometheus metrics, OTel, Langfuse
 │   └── evaluation/        # metrics, golden dataset, runner
 ├── docs/                  # documentation (see below)
+├── frontend/              # Next.js web UI (chat, agent timeline, citations, evidence)
 ├── docker/                # Dockerfile, Nginx
 ├── .github/workflows/     # CI
 ├── docker-compose.yml     # full stack
@@ -279,4 +301,11 @@ Run the test suite:
 
 ```bash
 pytest -q
+```
+
+Run the frontend type-check and build:
+
+```bash
+cd frontend
+npm run build
 ```
