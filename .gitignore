@@ -36,7 +36,6 @@ data/legal_docs/**
 !data/decomposition.json
 
 htmlcov/
-node_modules/
 dist/
 build/
 *.log
@@ -52,12 +51,11 @@ nul
 
 # Root dotfiles are local tooling/environment — not tracked, except the
 # functional ones negated below (anchored to the repo root so nested
-# dotfiles like frontend/.gitignore are unaffected).
+# dotfiles like backend/.gitignore are unaffected).
 /.*
 !.gitattributes
 !.gitignore
 !.dockerignore
-!.easignore
 !.env.example
 !.env.dev.example
 !.github/
