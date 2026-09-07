@@ -1,0 +1,44 @@
+# EAS uploads from the monorepo root; ignore everything the build doesn't need.
+
+# data stores and indexes
+data/
+store/
+
+# python backend (not needed for the mobile build)
+backend/
+tests/
+scripts/
+docker/
+docs/
+.venv/
+*.egg-info/
+__pycache__/
+.pytest_cache/
+
+# web frontend
+frontend/node_modules/
+frontend/.next/
+frontend/dist/
+
+# mobile local state
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/android/
+mobile/ios/
+
+# tooling / VCS / env
+.git/
+.github/
+.kimi/
+.kimi-code/
+.vscode/
+.claude/
+.idea/
+.env*
+!.env.example
+
+# OS cruft
+.DS_Store
+Thumbs.db
+*.log
