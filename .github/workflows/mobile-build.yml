@@ -1,0 +1,56 @@
+name: Mobile Build (AAB)
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "EAS build profile"
+        type: choice
+        options: [production, preview]
+        default: production
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    name: Build Android AAB on EAS
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Setup Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build on EAS
+        run: >
+          eas build --platform android
+          --profile ${{ inputs.profile || 'production' }}
+          --non-interactive --wait --json > build.json
+
+      - name: Download AAB artifact
+        run: |
+          URL=$(jq -r '.[0].artifacts.build' build.json)
+          curl -fSL --output app.aab "$URL"
+
+      - name: Upload AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: yawoto-${{ inputs.profile || 'production' }}-aab
+          path: mobile/app.aab
+          if-no-files-found: error
