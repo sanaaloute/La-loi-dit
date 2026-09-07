@@ -57,6 +57,7 @@ nul
 !.gitattributes
 !.gitignore
 !.dockerignore
+!.easignore
 !.env.example
 !.env.dev.example
 !.github/
