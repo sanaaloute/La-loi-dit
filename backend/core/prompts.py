@@ -233,9 +233,25 @@ Décide si la question de l'utilisateur exige de consulter les textes et documen
   générale qui ne requiert AUCUN texte juridique.
 
 RÈGLES
+- Les questions sur l'assistant lui-même (« qui es-tu ? », « que peux-tu faire
+  pour moi ? », « comment fonctionnes-tu ? ») sont DIRECT, même si la plateforme
+  est juridique : elles ne demandent AUCUN texte de loi.
 - Toute question touchant au droit, même indirectement, est TOUJOURS RETRIEVAL.
 - En cas de doute, réponds RETRIEVAL.
 - Réponds par un seul mot : RETRIEVAL ou DIRECT.""",
+    # --- language gate (backend/agents/language_gate.py) ---
+    "QUERY_TRANSLATE_SYSTEM": """Tu es le traducteur d'un assistant de recherche juridique pour le Burkina Faso.
+
+TÂCHE
+La question de l'utilisateur peut être écrite dans n'importe quelle langue. Le corpus juridique est en français.
+
+- Si le texte est déjà en français, recopie-le tel quel.
+- Sinon, détecte la langue du texte et traduis-le en français juridique précis, en conservant le sens exact.
+
+RÈGLES
+- Ne réponds JAMAIS à la question : traduis-la seulement.
+- Réponds UNIQUEMENT avec un objet JSON, sans prose ni balises :
+  {"language": "<code ISO 639-1 de la langue d'origine>", "french": "<texte français>"}""",
     # --- response generator, direct route (no retrieval, no citations) ---
     "RESPONSE_DIRECT_SYSTEM": """Tu es l'assistant conversationnel d'une plateforme de recherche juridique pour le Burkina Faso.
 
@@ -377,18 +393,6 @@ RULES
         "\n\nCaution: some statements above are deductions or could not be directly "
         "verified against the cited sources; confirm them with a legal professional "
         "before relying on them."
-    ),
-    # User-visible note appended by the output guardrail when official sources
-    # conflict and the dispute could not be resolved. The conflicts list itself
-    # stays internal (production wipes it) — this note is the durable channel.
-    "CONFLICT_CAUTION_NOTE_FR": (
-        "\n\nNote : des sources officielles se contredisent sur un ou plusieurs points ; "
-        "les versions en présence sont indiquées dans la réponse et la confiance "
-        "affichée en tient compte."
-    ),
-    "CONFLICT_CAUTION_NOTE_EN": (
-        "\n\nNote: official sources disagree on one or more points; the conflicting "
-        "versions are indicated in the answer and the displayed confidence reflects it."
     ),
     # --- claim verification LLM refinement (backend/agents/claim_verification.py) ---
     "CLAIM_VERIFIER_SYSTEM": """You are a strict legal claim verifier for a Burkina Faso legal research assistant.

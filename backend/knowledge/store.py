@@ -377,6 +377,41 @@ class LegalGraphStore:
             logger.warning("legal graph: articles_of failed", exc_info=True)
             return []
 
+    async def find_articles(self, article: str, *, limit: int = 3) -> list[LegalArticleRecord]:
+        """Every document carrying `article` (exact match), capped.
+
+        Used for bare "article N" mentions with no document hint: each code
+        has an article N, so the cap keeps the ambiguity visible without
+        flooding the evidence list.
+        """
+        try:
+            if not await self._ensure_db():
+                return []
+            from sqlalchemy import select
+
+            t = self._tables["legal_articles"]
+            stmt = select(t).where(t.c.article == article).order_by(t.c.id).limit(limit)
+            async with self._session_factory() as session:
+                rows = (await session.execute(stmt)).all()
+            return [
+                LegalArticleRecord(
+                    document_id=r.document_id,
+                    article=r.article,
+                    section=r.section,
+                    hierarchy=json.loads(r.hierarchy) if r.hierarchy else {},
+                    page=r.page,
+                    text_preview=r.text_preview or "",
+                    status=r.status or "",
+                    valid_from=r.valid_from,
+                    valid_until=r.valid_until,
+                )
+                for r in rows
+            ]
+        except Exception:
+            self.stats["db_failures"] += 1
+            logger.warning("legal graph: find_articles failed", exc_info=True)
+            return []
+
     # ------------------------------------------------------------------
     # Relationships
     # ------------------------------------------------------------------

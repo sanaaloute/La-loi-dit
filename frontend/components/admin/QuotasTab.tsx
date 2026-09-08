@@ -71,8 +71,8 @@ export default function QuotasTab() {
           const raw = draft[tier][key].replace(/[\s ]/g, "");
           if (raw === String(budgets.effective[tier][key])) continue;
           const parsed = Number(raw);
-          if (!Number.isInteger(parsed) || parsed <= 0) {
-            throw new Error("Les quotas doivent être des nombres entiers positifs.");
+          if (!Number.isInteger(parsed) || parsed < 0) {
+            throw new Error("Les quotas doivent être des nombres entiers positifs ou nuls (0 = illimité).");
           }
           patch[tier] = { ...patch[tier], [key]: parsed };
         }
@@ -124,8 +124,14 @@ export default function QuotasTab() {
               <div>
                 <p className="text-sm font-semibold text-gray-900">{label}</p>
                 <p className="mt-0.5 text-[11px] text-gray-500">
-                  Par défaut : {formatNumber(budgets.defaults[tier].daily_token_budget)} tokens,{" "}
-                  {formatNumber(budgets.defaults[tier].daily_request_budget)} requêtes
+                  Par défaut :{" "}
+                  {budgets.defaults[tier].daily_token_budget === 0
+                    ? "tokens illimités"
+                    : `${formatNumber(budgets.defaults[tier].daily_token_budget)} tokens`}
+                  {", "}
+                  {budgets.defaults[tier].daily_request_budget === 0
+                    ? "requêtes illimitées"
+                    : `${formatNumber(budgets.defaults[tier].daily_request_budget)} requêtes`}
                 </p>
               </div>
               {BUDGET_FIELDS.map(({ key, label: fieldLabel }) => (
@@ -135,7 +141,7 @@ export default function QuotasTab() {
                   </span>
                   <input
                     type="number"
-                    min={1}
+                    min={0}
                     step={1}
                     value={draft[tier][key]}
                     onChange={(e) =>

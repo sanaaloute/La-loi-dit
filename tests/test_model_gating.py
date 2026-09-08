@@ -142,11 +142,14 @@ def test_catalog_env_override_invalid_falls_back(monkeypatch):
 
 
 def test_default_daily_budgets_per_tier():
-    """The built-in catalog carries the real per-tier production quotas."""
-    assert catalog.get_tier("gratuit")["daily_token_budget"] == 1_000_000
+    """The built-in catalog carries the real per-tier production quotas.
+
+    Free + ads model: the gratuit tier has no daily budgets (0 = unlimited).
+    """
+    assert catalog.get_tier("gratuit")["daily_token_budget"] == 0
     assert catalog.get_tier("pro")["daily_token_budget"] == 10_000_000
     assert catalog.get_tier("cabinet")["daily_token_budget"] == 100_000_000
-    assert catalog.get_tier("gratuit")["daily_request_budget"] == 50
+    assert catalog.get_tier("gratuit")["daily_request_budget"] == 0
     assert catalog.get_tier("pro")["daily_request_budget"] == 500
     assert catalog.get_tier("cabinet")["daily_request_budget"] == 10_000
 
@@ -157,14 +160,14 @@ def test_budget_overrides_merge_into_get_tier():
         catalog.set_budget_overrides({"gratuit": {"daily_token_budget": 2_000_000}})
         assert catalog.get_tier("gratuit")["daily_token_budget"] == 2_000_000
         # Untouched fields and tiers keep their catalog values.
-        assert catalog.get_tier("gratuit")["daily_request_budget"] == 50
+        assert catalog.get_tier("gratuit")["daily_request_budget"] == 0
         assert catalog.get_tier("pro")["daily_token_budget"] == 10_000_000
-        assert catalog.TIER_CATALOG["gratuit"]["daily_token_budget"] == 1_000_000
+        assert catalog.TIER_CATALOG["gratuit"]["daily_token_budget"] == 0
         assert catalog.effective_tier_budgets()["gratuit"]["daily_token_budget"] == 2_000_000
-        assert catalog.default_tier_budgets()["gratuit"]["daily_token_budget"] == 1_000_000
+        assert catalog.default_tier_budgets()["gratuit"]["daily_token_budget"] == 0
     finally:
         catalog.set_budget_overrides({})
-    assert catalog.get_tier("gratuit")["daily_token_budget"] == 1_000_000
+    assert catalog.get_tier("gratuit")["daily_token_budget"] == 0
 
 
 def test_parse_budget_overrides_filters_garbage():
@@ -181,7 +184,7 @@ def test_parse_budget_overrides_filters_garbage():
             }
         )
     )
-    # Unknown tiers/fields and non-positive values are dropped.
+    # Unknown tiers/fields and negative values are dropped.
     assert parsed == {"gratuit": {"daily_token_budget": 5}}
 
 
@@ -208,7 +211,7 @@ async def test_budget_overrides_refresh_after_ttl(monkeypatch):
         # Fresh cache: no DB read at all.
         await catalog.refresh_budget_overrides(store)
         assert store.reads == 0
-        assert catalog.get_tier("gratuit")["daily_token_budget"] == 1_000_000
+        assert catalog.get_tier("gratuit")["daily_token_budget"] == 0
         # Stale cache (TTL expired): one indexed read, overrides applied —
         # this is how a PATCH served by another uvicorn worker propagates.
         monkeypatch.setattr(catalog, "_budget_overrides_loaded_at", 0.0)

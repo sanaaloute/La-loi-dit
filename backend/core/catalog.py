@@ -92,13 +92,14 @@ _TIER_CONFIG: dict[str, dict[str, Any]] = {
     "gratuit": {
         "providers": _FREE_PROVIDERS,
         "models": _FREE_MODELS,
-        # TEMP: drafting is open to gratuit until payment methods land; then
-        # flip back to False so only paid tiers generate documents.
-        "features": {"export": ["md"], "drafting": True, "priority": False},
-        "daily_token_budget": 1_000_000,
-        "daily_request_budget": 50,
-        "rate_limit_per_minute": 30,
-        "rate_limit_per_second": 1,
+        # Free + ads model: no monetization quotas (0 = unlimited, see
+        # model_router.enforce_daily_budget). Rate limits stay as anti-abuse
+        # protection — every request burns local GPU time.
+        "features": {"export": ["md", "pdf", "word", "csv"], "drafting": True, "priority": False},
+        "daily_token_budget": 0,
+        "daily_request_budget": 0,
+        "rate_limit_per_minute": 120,
+        "rate_limit_per_second": 3,
     },
     "pro": {
         "providers": _ALL_PROVIDERS,
@@ -231,7 +232,8 @@ def parse_budget_overrides(raw: Optional[str]) -> dict[str, dict[str, int]]:
         valid = {
             field: int(value)
             for field, value in fields.items()
-            if field in BUDGET_FIELDS and isinstance(value, int) and not isinstance(value, bool) and value > 0
+            # 0 is meaningful: it lifts the daily budget entirely (unlimited).
+            if field in BUDGET_FIELDS and isinstance(value, int) and not isinstance(value, bool) and value >= 0
         }
         if valid:
             overrides[tier] = valid

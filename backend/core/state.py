@@ -44,6 +44,7 @@ def merge_branch_chunks(
 class GraphState(TypedDict, total=False):
     # --- input ---
     query: str
+    original_query: str  # user's untranslated wording, set by the language gate
     user_id: str
     session_id: str
     language: str  # response language requested by the user

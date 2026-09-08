@@ -588,8 +588,8 @@ def test_admin_tier_budgets_returns_defaults(client, clean_budget_overrides):
     assert response.status_code == 200, response.text
     data = response.json()
     assert data["defaults"]["gratuit"] == {
-        "daily_token_budget": 1_000_000,
-        "daily_request_budget": 50,
+        "daily_token_budget": 0,
+        "daily_request_budget": 0,
     }
     assert data["defaults"]["pro"]["daily_token_budget"] == 10_000_000
     assert data["defaults"]["cabinet"]["daily_token_budget"] == 100_000_000
@@ -610,9 +610,9 @@ def test_admin_tier_budgets_patch_updates_effective_budget(client, clean_budget_
     data = response.json()
     assert data["effective"]["gratuit"]["daily_token_budget"] == 2_000_000
     # Untouched fields and tiers keep their defaults.
-    assert data["effective"]["gratuit"]["daily_request_budget"] == 50
+    assert data["effective"]["gratuit"]["daily_request_budget"] == 0
     assert data["effective"]["pro"]["daily_token_budget"] == 10_000_000
-    assert data["defaults"]["gratuit"]["daily_token_budget"] == 1_000_000
+    assert data["defaults"]["gratuit"]["daily_token_budget"] == 0
 
     # The hot path (catalog.get_tier) sees the override without a restart.
     assert catalog.get_tier("gratuit")["daily_token_budget"] == 2_000_000
@@ -641,6 +641,15 @@ def test_admin_tier_budgets_patch_updates_effective_budget(client, clean_budget_
     effective = response.json()["effective"]["gratuit"]
     assert effective == {"daily_token_budget": 2_000_000, "daily_request_budget": 25}
 
+    # 0 is accepted and lifts the budget (unlimited).
+    response = client.patch(
+        "/api/v1/admin/settings/tier-budgets",
+        json={"gratuit": {"daily_request_budget": 0}},
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["effective"]["gratuit"]["daily_request_budget"] == 0
+
 
 def test_admin_tier_budgets_rejects_invalid_payloads(client, clean_budget_overrides):
     headers = _headers(Role.ADMIN)
@@ -649,10 +658,7 @@ def test_admin_tier_budgets_rejects_invalid_payloads(client, clean_budget_overri
     assert client.patch(
         path, json={"gold": {"daily_token_budget": 5}}, headers=headers
     ).status_code == 400
-    # Non-positive values.
-    assert client.patch(
-        path, json={"gratuit": {"daily_token_budget": 0}}, headers=headers
-    ).status_code == 400
+    # Negative values.
     assert client.patch(
         path, json={"pro": {"daily_request_budget": -10}}, headers=headers
     ).status_code == 400

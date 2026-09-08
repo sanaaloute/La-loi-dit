@@ -18,7 +18,7 @@ from typing import Optional
 from backend.core.config import get_settings
 from backend.core.context import AppContext
 from backend.core.embeddings import HashEmbeddings
-from backend.core.models import EvidenceChunk, SearchTask
+from backend.core.models import EvidenceChunk, SearchKind, SearchTask
 from backend.core.ports import RerankerProvider
 from backend.retrieval.dedup import deduplicate
 from backend.retrieval.fusion import reciprocal_rank_fusion
@@ -171,6 +171,26 @@ class RetrievalCoordinator:
             elif result:
                 result_lists.append(result)
 
+        # Always-on exact-mention lookup: "article 341 du code du travail"
+        # must resolve even when the planner did not schedule a GRAPH task.
+        # Best-effort — a graph outage never breaks hybrid retrieval.
+        try:
+            from backend.knowledge.extraction import extract_query_mentions
+            from backend.retrieval.graph_worker import GraphWorker
+
+            if extract_query_mentions(tasks[0].query):
+                graph_hits = await GraphWorker(self.ctx).run(
+                    SearchTask(
+                        kind=SearchKind.GRAPH,
+                        query=tasks[0].query,
+                        top_k=settings.default_top_k,
+                    )
+                )
+                if graph_hits:
+                    result_lists.append(graph_hits)
+        except Exception:
+            logger.warning("direct mention lookup failed; continuing without it", exc_info=True)
+
         merged = deduplicate([chunk for lst in result_lists for chunk in lst])
         fused = reciprocal_rank_fusion(result_lists) if result_lists else []
         # Merge deduplicated survivors back in RRF order (fusion already
@@ -262,7 +282,15 @@ class RetrievalCoordinator:
                 return True
             return has_discriminative
 
-        reranked = [chunk for chunk in scored if _relevant(chunk)][:max_top_k]
+        # Exact graph hits (article lookup) are authoritative by construction:
+        # they bypass the lexical/similarity floor, which is calibrated for
+        # fuzzy hybrid matches and would otherwise drop a correct article
+        # whose content shares no surface tokens with the query.
+        reranked = [
+            chunk
+            for chunk in scored
+            if chunk.metadata.get("retrieved_via") == "graph" or _relevant(chunk)
+        ][:max_top_k]
 
         # Graph expansion (spec §19): append articles related to the top
         # candidates via references/amends/repeals edges as low-score extras.

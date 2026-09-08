@@ -61,8 +61,13 @@ def _router_ctx(settings, llm: StubLLM) -> SimpleNamespace:
         "bonne journée",
         "qui es-tu ?",
         "que peux-tu faire ?",
+        "Que peux tu faire pour moi ?",
+        "que pouvez-vous faire pour nous ?",
+        "qu'est-ce que vous pouvez faire ?",
         "comment tu fonctionnes",
         "what can you do?",
+        "what can you do for me?",
+        "what do you do?",
     ],
 )
 def test_direct_shortcut_matches_conversational_queries(query: str):
@@ -77,6 +82,9 @@ def test_direct_shortcut_matches_conversational_queries(query: str):
         # retrieval path (every clause must match).
         "bonjour, quels sont les délais de prescription ?",
         "aide-moi à rédiger une clause de non-concurrence",
+        # "que sais-tu" without "faire" is a knowledge question, not a meta
+        # question about the assistant's capabilities.
+        "que sais-tu du droit du travail ?",
         "what is the statute of limitations in Burkina Faso?",
     ],
 )

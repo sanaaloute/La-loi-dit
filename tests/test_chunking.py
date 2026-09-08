@@ -50,7 +50,7 @@ async def test_parent_child_chunking_sets_parent_chunk_id():
 
 _LONG_ARTICLE_TEXT = (
     "Article 1\n"
-    + "\n".join(f"Alinéa {i} : " + "disposition légale " * 10 for i in range(1, 9))
+    + "\n".join(f"Alinéa {i} : " + "disposition légale " * 10 for i in range(1, 17))
     + "\n\nArticle 2\nTexte court."
 )
 
@@ -77,3 +77,63 @@ async def test_legal_short_article_stays_a_single_child():
     children = [c for c in chunks if c.parent_chunk_id and c.article == "2"]
     assert len(children) == 1
     assert children[0].content == "Article 2\nTexte court."
+
+
+_HEADING_TEXT = (
+    "Livre IV\n"
+    "Des crimes internationaux.\n\n"
+    "Titre I\n"
+    "Du génocide.\n\n"
+    "Article 1\n"
+    "Le génocide est puni de la réclusion criminelle à perpétuité.\n\n"
+    "Article 2\n"
+    "La complicité est punie de la même peine."
+)
+
+
+async def test_heading_segments_get_heading_role_not_child():
+    from backend.ingestion.chunking import legal_parent_child_chunk
+
+    doc = _document(_HEADING_TEXT, name="Code pénal")
+    chunks = await _maybe_await(legal_parent_child_chunk(doc, document_id="cp-headings"))
+    headings = [c for c in chunks if c.article is None]
+    assert headings, "expected bare heading segments (Livre IV, Titre I)"
+    # excluded from retrieval (dense role="child" filter + BM25 corpus), but
+    # kept in the store with their structure metadata for browsing
+    assert all(c.metadata.get("role") == "heading" for c in headings)
+    assert any(c.hierarchy == {"livre": "IV"} for c in headings)
+    assert any(c.hierarchy == {"livre": "IV", "titre": "I"} for c in headings)
+    # article segments keep the parent/child roles retrieval relies on
+    article_chunks = [c for c in chunks if c.article is not None]
+    assert {c.metadata.get("role") for c in article_chunks} == {"parent", "child"}
+
+
+async def test_article_children_carry_contextual_retrieval_text():
+    from backend.ingestion.chunking import legal_parent_child_chunk
+
+    doc = _document(_HEADING_TEXT, name="Code pénal")
+    chunks = await _maybe_await(
+        legal_parent_child_chunk(doc, document_id="cp-prefix", law_number="025-2018/AN")
+    )
+    children = [c for c in chunks if c.metadata.get("role") == "child"]
+    assert children
+    for child in children:
+        assert child.retrieval_text is not None
+        prefix = child.retrieval_text.splitlines()[0]
+        assert prefix.startswith("« Code pénal (025-2018/AN) — Livre IV > Titre I — Article ")
+        assert prefix.endswith(". »")
+        assert child.retrieval_text.endswith(child.content)
+        # content stays raw: display/citation text keeps no prefix
+        assert not child.content.startswith("«")
+    # heading chunks carry no retrieval_text: raw content serves both roles
+    assert all(c.retrieval_text is None for c in chunks if c.metadata.get("role") == "heading")
+
+
+async def test_retrieval_text_prefix_omits_empty_parts():
+    from backend.ingestion.chunking import legal_parent_child_chunk
+
+    doc = _document("Article 1\nTexte intégral.", name="Loi simple")
+    chunks = await _maybe_await(legal_parent_child_chunk(doc, document_id="loi-1"))
+    child = next(c for c in chunks if c.metadata.get("role") == "child")
+    # no law number, no hierarchy: only the parts that exist are rendered
+    assert child.retrieval_text == f"« Loi simple — Article 1. »\n{child.content}"

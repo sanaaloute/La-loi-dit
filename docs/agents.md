@@ -10,8 +10,9 @@ failure — they degrade to deterministic behavior and append to
 ```mermaid
 flowchart LR
     q[User query] --> ig[input_guardrail]
-    ig -->|allowed| qr[query_router]
+    ig -->|allowed| lg[language_gate]
     ig -->|blocked| ref[refusal]
+    lg --> qr[query_router]
     qr -->|direct| rg[response_generator]
     qr -->|retrieval| pl[planner]
     pl --> ca[context_agent]
@@ -45,6 +46,18 @@ jailbreaks, sensitive-info leaks, role hijacking and tool abuse. Produces a
 `GuardrailResult` (`allowed`, `flags`, `reasons`, optional
 `sanitized_query`). A blocked query routes to `refusal`; a sanitized query
 replaces the original in state.
+
+## language_gate (`backend/agents/language_gate.py`)
+
+The corpus is French-only, so a query in another language cannot retrieve
+anything. The gate detects the query language (cheap French heuristic first —
+no LLM call for French) and translates non-French queries into French via the
+`classification`-role LLM (`QUERY_TRANSLATE_SYSTEM`). The French text replaces
+`state["query"]` for the whole downstream pipeline, the user's wording is kept
+in `original_query` (shown to the response generator and persisted in history),
+and `language` carries the detected code so the answer comes back in the
+user's language. Fail-safe: any LLM error or unparseable output leaves the
+original query untouched.
 
 ## planner (`backend/planner/agent.py`)
 

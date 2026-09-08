@@ -325,11 +325,11 @@ export default function ComptePage() {
               <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
                 <p className="text-sm text-gray-700">
                   <span className="text-lg font-semibold text-gray-900">{formatNumber(consumed)}</span>
-                  {" / "}
-                  {formatNumber(budget)} tokens
+                  {budget > 0 ? ` / ${formatNumber(budget)} tokens` : " tokens (illimité)"}
                 </p>
                 <p className="text-xs text-gray-500">
-                  {formatNumber(usage.remaining_tokens)} restants — {formatNumber(usage.today.requests)}{" "}
+                  {budget > 0 ? `${formatNumber(usage.remaining_tokens)} restants — ` : ""}
+                  {formatNumber(usage.today.requests)}{" "}
                   requête{usage.today.requests > 1 ? "s" : ""} aujourd&apos;hui
                 </p>
               </div>

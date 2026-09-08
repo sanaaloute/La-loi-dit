@@ -208,13 +208,18 @@ carries:
 - **Legal structure**: `article` (normalized — "1er"/"premier" collapse to
   "1"), `section` (deepest heading, compat), `hierarchy` (ordered level map
   `{"livre": "I", "titre": "II", ...}`), `parent_chunk_id` / `child_chunks`.
-- **Dual text (spec §7)**: `retrieval_text` / `context_text`, stamped by the
-  parent-expansion node on expanded parents — `retrieval_text` is the exact
-  child passage that matched the query, `context_text` the enclosing parent
-  (article/section) it was expanded to. Both stay `None` on chunks without a
-  parent, where `content` serves both roles; when several children share one
-  parent, the first matching child provides `retrieval_text` and every child
-  stays visible under `parent.child_chunks`.
+- **Dual text (spec §7)**: `retrieval_text` / `context_text` serve two
+  complementary purposes. At ingest time, every article child is stamped
+  with a `retrieval_text` = deterministic context prefix (« Code pénal
+  (025-2018/AN) — Livre IV > Titre I — Article 1. ») + raw content; that
+  field is what gets embedded and BM25-indexed (contextual retrieval,
+  heading chunks excluded from both indexes), while `content` stays raw
+  for display/citation. At query time, the parent-expansion node stamps
+  expanded parents: `retrieval_text` is the exact child passage that
+  matched, `context_text` the enclosing parent. Both stay `None` where
+  they add nothing, and `content` then serves both roles; when several
+  children share one parent, every child stays visible under
+  `parent.child_chunks`.
 - **Lifecycle**: `publication_date`, `effective_date`, `status`,
   `valid_from`, `valid_until`.
 - **Instrument metadata (spec §6)**: `document_type` (code/law/decree/

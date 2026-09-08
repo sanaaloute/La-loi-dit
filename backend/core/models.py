@@ -148,10 +148,14 @@ class EvidenceChunk(BaseModel):
     language: str = "fr"
     parent_chunk_id: Optional[str] = None  # parent-child chunking
     child_chunks: list["EvidenceChunk"] = Field(default_factory=list)  # populated on parents after expansion
-    # Dual text (spec §7): ``retrieval_text`` is the exact child passage that
-    # matched the query, ``context_text`` the enclosing parent (article /
-    # section) it was expanded to.  Populated by parent_expansion; both stay
-    # None on chunks without a parent, where ``content`` serves both roles.
+    # Dual text (spec §7). At ingest time, children of an article carry a
+    # ``retrieval_text`` = one-line context prefix (document, law number,
+    # heading path, article) + raw ``content``: it is the text embedded and
+    # BM25-indexed, while ``content`` stays the raw display/citation text.
+    # At query time, parent_expansion stamps on expanded parents
+    # ``retrieval_text`` (the exact child passage that matched) and
+    # ``context_text`` (the enclosing parent article/section).  Both stay None
+    # where ``content`` serves both roles, and readers fall back to it.
     retrieval_text: Optional[str] = None
     context_text: Optional[str] = None
     version: int = 1

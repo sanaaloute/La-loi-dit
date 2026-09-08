@@ -260,15 +260,16 @@ def test_usage_me_shape_and_remaining_math(client):
     _, token = _register(client)
     usage = client.get("/api/v1/usage/me", headers=_headers(token)).json()
     assert usage["tier"] == "gratuit"
-    assert usage["daily_budget"] == 1_000_000  # gratuit tier default
+    assert usage["daily_budget"] == 0  # gratuit tier: unlimited (free + ads)
     assert usage["today"] == {"tokens_in": 0, "tokens_out": 0, "requests": 0}
-    assert usage["remaining_tokens"] == 1_000_000
+    assert usage["remaining_tokens"] == 0
     assert usage["history"] == []
 
     _chat(client, "Quel est le préavis de licenciement au Burkina Faso ?", token)
     usage = client.get("/api/v1/usage/me", headers=_headers(token)).json()
     consumed = usage["today"]["tokens_in"] + usage["today"]["tokens_out"]
-    assert usage["remaining_tokens"] == 1_000_000 - consumed
+    assert consumed > 0
+    assert usage["remaining_tokens"] == 0  # unlimited: nothing left to enforce
     assert usage["history"][0]["requests"] == 1
 
 

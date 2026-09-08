@@ -236,6 +236,11 @@ class LLMClient:
             # Ask Ollama to keep the model loaded between requests so we do not
             # pay the reload cost (and risk timeout) on every chat call.
             kwargs["keep_alive"] = self.settings.ollama_keep_alive
+            # Thinking models (qwen3/qwen3.5): hidden reasoning burns the
+            # completion budget and times out structured tasks — disabled by
+            # default (settings.ollama_think_enabled). Ollama Cloud never
+            # reaches this path (native client, see above).
+            kwargs["think"] = self.settings.ollama_think_enabled
             if self.api_key:
                 extra_headers["Authorization"] = f"Bearer {self.api_key}"
         # OpenRouter rankings/attribution headers (app name as fallback).
@@ -449,8 +454,13 @@ class LLMClient:
         if self.api_base:
             kwargs["api_base"] = self.api_base
         extra_headers: dict[str, str] = {}
-        if self.provider == "ollama" and self.api_key:
-            extra_headers["Authorization"] = f"Bearer {self.api_key}"
+        if self.provider == "ollama":
+            kwargs["keep_alive"] = self.settings.ollama_keep_alive
+            # Same thinking-model guard as complete() (Ollama Cloud uses the
+            # native client path and never reaches this block).
+            kwargs["think"] = self.settings.ollama_think_enabled
+            if self.api_key:
+                extra_headers["Authorization"] = f"Bearer {self.api_key}"
         if self.provider == "openrouter":
             extra_headers.setdefault("HTTP-Referer", self.settings.app_name)
             extra_headers.setdefault("X-Title", self.settings.app_name)
@@ -565,6 +575,11 @@ class LLMClient:
         """
         s = system.lower()
         top_k = self.settings.default_top_k
+        if "traducteur" in s:
+            # Language gate (QUERY_TRANSLATE_SYSTEM): no real translator
+            # offline, so translation is a no-op echo — the pipeline keeps
+            # running deterministically on the original query.
+            return json.dumps({"language": "fr", "french": user[len("Texte: "):] if user.startswith("Texte: ") else user})
         if "conversation directe" in s:
             # Direct-route conversational answer (query router short-circuit,
             # RESPONSE_DIRECT_SYSTEM): a canned polite reply keeps offline

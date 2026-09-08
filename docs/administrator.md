@@ -19,14 +19,16 @@ Operational tasks for users with the `admin` (and where noted,
 
 ## Tier quotas
 
-- Each tier has a default daily token budget: `gratuit` 1 000 000,
-  `pro` 10 000 000, `cabinet` 100 000 000 (`backend/core/catalog.py`).
+- Free + ads model: the `gratuit` tier has **no daily budgets** (0 = unlimited).
+  `pro` keeps 10 000 000 tokens / 500 requêtes, `cabinet` 100 000 000 / 10 000
+  (`backend/core/catalog.py`).
 - Adjust them from the **Quotas** admin tab, or via the API:
   `GET /api/v1/admin/settings/tier-budgets` returns the effective budgets
   plus the built-in defaults; `PATCH /api/v1/admin/settings/tier-budgets`
   merges overrides, e.g. `{"pro": {"daily_token_budget": 20000000}}`.
-  Omitted tiers/fields keep their current value; non-positive values are
-  rejected. Overrides are persisted as an app setting and survive restarts.
+  Omitted tiers/fields keep their current value; negative values are
+  rejected, and `0` lifts the budget entirely (unlimited). Overrides are
+  persisted as an app setting and survive restarts.
 
 ## Ingestion operations
 

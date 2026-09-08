@@ -16,10 +16,13 @@ The planner's corrective JSON retry is a fixed single retry inside
 ```mermaid
 flowchart TB
     START((START)) --> ig[input_guardrail]
-    ig -->|guardrail.allowed| pl[planner]
+    ig -->|guardrail.allowed| lg[language_gate]
     ig -->|not allowed| ref[refusal]
     ref --> END1((END))
 
+    lg --> qr[query_router]
+    qr -->|route == "direct"| rg
+    qr -->|retrieval| pl[planner]
     pl --> ca[context_agent]
     ca --> ma[memory_agent]
     ma --> rc[retrieval_coordinator]
@@ -74,6 +77,7 @@ sequenceDiagram
     API->>API: auth (JWT), rate limit, validate ChatRequest
     API->>W: ainvoke(initial_state(query, session_id))
     W->>W: input_guardrail (injection / jailbreak check)
+    W->>W: language_gate (translate non-French queries to French) → query_router
     W->>P: plan(query)
     P->>L: complete_json (or heuristic fallback)
     L-->>P: RetrievalPlan

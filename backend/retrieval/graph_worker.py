@@ -71,12 +71,23 @@ class GraphWorker(BaseWorker):
             seen: set[str] = set()
             limit = max(task.top_k, self._fetch_k())
             for mention in mentions:
+                score = 1.0
                 if mention.law_number:
                     documents = await store.find_documents(law_number=mention.law_number)
                 elif mention.document_hint:
                     documents = await store.find_documents(name_hint=mention.document_hint)
+                elif mention.article:
+                    # Bare "article N": every code has one — resolve across
+                    # documents (capped by find_articles) so the exact match
+                    # still reaches the evidence; the slight score discount
+                    # records the ambiguity.
+                    records = await store.find_articles(
+                        normalize_article_number(mention.article)
+                    )
+                    documents = records
+                    score = 0.9
                 else:
-                    continue  # a bare article number without a document is too noisy
+                    continue
                 for document in documents:
                     wanted = (
                         normalize_article_number(mention.article) if mention.article else None
@@ -91,7 +102,7 @@ class GraphWorker(BaseWorker):
                             if chunk_article != wanted:
                                 continue
                         seen.add(chunk.chunk_id)
-                        out.append(_mark_graph(chunk, score=1.0))
+                        out.append(_mark_graph(chunk, score=score))
                         if len(out) >= limit:
                             return out
             return out

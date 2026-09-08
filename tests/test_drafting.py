@@ -221,11 +221,10 @@ def test_me_includes_tier_features(client):
     _, token = _register(client)
     me = client.get("/api/v1/auth/me", headers=_headers(token)).json()
     assert me["tier"] == "gratuit"
-    # Gratuit tier has a reduced feature set; drafting is TEMP-open to it
-    # until payment methods land (see catalog gratuit features).
+    # Free + ads model: gratuit gets the full feature set (see catalog).
     assert me["features"]["drafting"] is True
     assert "md" in me["features"]["export"]
-    assert "pdf" not in me["features"]["export"]
+    assert "pdf" in me["features"]["export"]
 
     _set_tier(client, token, "pro")
     me = client.get("/api/v1/auth/me", headers=_headers(token)).json()

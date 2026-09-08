@@ -101,7 +101,11 @@ async def rerank(
     if embedder is None:
         embedder = HashEmbeddings()
     try:
-        vectors = await embedder.embed([query, *[chunk.content for chunk in chunks]])
+        # retrieval_text carries the contextual prefix when set, matching what
+        # the vector store embedded at ingest time; raw content otherwise.
+        vectors = await embedder.embed(
+            [query, *[chunk.retrieval_text or chunk.content for chunk in chunks]]
+        )
         query_vector = vectors[0]
         chunk_vectors = vectors[1:]
     except Exception as exc:

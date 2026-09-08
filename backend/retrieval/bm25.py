@@ -68,7 +68,9 @@ class BM25Retriever:
             self._scorer = None
             self._backend = "empty"
             return
-        corpus = [tokenize(chunk.content) for chunk in self._chunks]
+        # retrieval_text carries the contextual prefix when set (article
+        # children); raw content is the fallback for every other chunk.
+        corpus = [tokenize(chunk.retrieval_text or chunk.content) for chunk in self._chunks]
         try:
             from rank_bm25 import BM25Okapi
 
@@ -79,8 +81,16 @@ class BM25Retriever:
             self._backend = "tfidf"
 
     def add_documents(self, chunks: list[EvidenceChunk]) -> None:
-        """Add chunks to the corpus and rebuild the index."""
-        self._chunks.extend(chunks)
+        """Add chunks to the corpus and rebuild the index.
+
+        Heading chunks (``role="heading"``) are skipped: bare headings like
+        "LIVRE IV : ..." stay in the vector store for structure browsing but
+        must never be direct keyword hits.  Their terms still reach the index
+        through the children's contextual ``retrieval_text`` prefix.
+        """
+        self._chunks.extend(
+            chunk for chunk in chunks if (chunk.metadata or {}).get("role") != "heading"
+        )
         self._rebuild()
 
     def delete_documents(self, chunk_ids: list[str]) -> int:

@@ -2,7 +2,7 @@
 
 Pipeline (see docs/architecture.md for the Mermaid diagram):
 
-    user -> input_guardrail -> query_router
+    user -> input_guardrail -> language_gate -> query_router
          -> (direct) response_generator -> output_guardrail
          -> (retrieval) planner -> context_agent -> memory_agent
          -> [fan-out: one retrieval_branch per sub-question, in parallel]
@@ -44,6 +44,7 @@ from backend.agents import (
     coverage_auditor,
     evidence_ranking,
     input_guardrail,
+    language_gate,
     memory_agent,
     output_guardrail,
     parent_expansion,
@@ -89,7 +90,7 @@ def build_graph(ctx: AppContext):
 
     def _route_after_guardrail(state: GraphState) -> str:
         guardrail = state.get("guardrail")
-        return "refusal" if guardrail and not guardrail.allowed else "query_router"
+        return "refusal" if guardrail and not guardrail.allowed else "language_gate"
 
     def _route_after_router(state: GraphState) -> str:
         """Direct answers short-circuit the whole retrieval pipeline."""
@@ -176,6 +177,7 @@ def build_graph(ctx: AppContext):
     g = StateGraph(GraphState)
     g.add_node("input_guardrail", bind(input_guardrail.input_guardrail_node))
     g.add_node("refusal", bind(refusal.refusal_node))
+    g.add_node("language_gate", bind(language_gate.language_gate_node, role="classification"))
     g.add_node("query_router", bind(query_router.query_router_node, role="classification"))
     g.add_node("planner", bind(planner_node, role="planner"))
     g.add_node("context_agent", bind(context_agent.context_agent_node, role="classification"))
@@ -196,6 +198,7 @@ def build_graph(ctx: AppContext):
     g.add_edge(START, "input_guardrail")
     g.add_conditional_edges("input_guardrail", _route_after_guardrail)
     g.add_edge("refusal", END)
+    g.add_edge("language_gate", "query_router")
     g.add_conditional_edges("query_router", _route_after_router)
     g.add_edge("planner", "context_agent")
     g.add_edge("context_agent", "memory_agent")
@@ -259,7 +262,9 @@ async def run_query(graph, ctx: AppContext, state: GraphState, *, config: Option
                 final_state["session_id"],
                 final_state.get("user_id", "anonymous"),
                 [
-                    ChatMessage(role="user", content=final_state["query"], created_at=received_at),
+                    # History keeps the user's own wording, not the French
+                    # translation the language gate may have produced.
+                    ChatMessage(role="user", content=final_state.get("original_query") or final_state["query"], created_at=received_at),
                     # Full FinalAnswer JSON: the history API parses it back;
                     # prompt consumers unwrap it via plain_message_content().
                     ChatMessage(role="assistant", content=answer.model_dump_json()),

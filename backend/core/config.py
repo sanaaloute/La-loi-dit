@@ -81,6 +81,12 @@ class Settings(BaseSettings):
     # OLLAMA_KEEP_ALIVE env var on the Ollama server) to avoid model-reload
     # latency/timeout on every embedding/chat request.
     ollama_keep_alive: str = "24h"
+    # Local Ollama only: pass think=False to /api/chat. Thinking models
+    # (qwen3, qwen3.5) otherwise burn the whole completion budget on hidden
+    # reasoning and time out on the pipeline's short structured tasks
+    # (routing, translation, planning). Ollama Cloud is unaffected: it goes
+    # through the native client path, which does not set think.
+    ollama_think_enabled: bool = False
     # Pre-load local Ollama embedding models at API startup so the first user
     # request does not have to wait for the model to be loaded from disk.
     ollama_warmup_on_startup: bool = True
@@ -294,8 +300,10 @@ class Settings(BaseSettings):
     # Legal docs use boundary-based parents (whole articles) with alinéa-based
     # children; ``chunk_parent_size`` only applies to the unstructured
     # ``parent_child`` fallback, and ``chunk_child_size`` caps child length.
+    # 1400 chars lets most articles fit in a single child, so the retrieval
+    # unit is the whole article; parents stay the net for longer articles.
     chunk_parent_size: int = 2000
-    chunk_child_size: int = 500
+    chunk_child_size: int = 1400
     chunk_overlap: int = 100
     chunk_max_size: int = 2000
     text_cleaning_min_pages_for_header: int = 3

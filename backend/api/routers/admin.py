@@ -482,8 +482,9 @@ async def patch_tier_budgets(
 ) -> TierBudgetsResponse:
     """Merge admin budget overrides, persist them and refresh the catalog.
 
-    Unknown tiers and non-positive values are rejected; omitted fields keep
-    their current (overridden or default) value.
+    Unknown tiers and negative values are rejected; 0 lifts the budget
+    (unlimited). Omitted fields keep their current (overridden or default)
+    value.
     """
     if not payload:
         raise HTTPException(status_code=400, detail="nothing to update: provide at least one tier")
@@ -491,10 +492,10 @@ async def patch_tier_budgets(
         if tier not in catalog.TIER_ORDER:
             raise HTTPException(status_code=400, detail=f"unknown tier: {tier}")
         for field, value in fields.model_dump(exclude_none=True).items():
-            if value <= 0:
+            if value < 0:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"{field} for tier '{tier}' must be a positive integer",
+                    detail=f"{field} for tier '{tier}' must be a non-negative integer (0 = unlimited)",
                 )
 
     store = _user_store(request)

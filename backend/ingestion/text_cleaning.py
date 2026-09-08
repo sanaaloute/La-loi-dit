@@ -249,8 +249,55 @@ def _is_boilerplate_line(line: str) -> bool:
     return any(pattern.match(line) for pattern in _BOILERPLATE_PATTERNS)
 
 
+# Words split across a page break: a page ends with a fragment ("docum-" or
+# "docum") and the next one opens with a lowercase continuation ("ents").
+_PAGE_TAIL_HYPHEN_RE = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ]-$")
+_PAGE_TAIL_WORD_RE = re.compile(rf"([{_FR_LOWER}]{{3,}})$")
+_PAGE_HEAD_FRAG_RE = re.compile(rf"^([{_FR_LOWER}]+)")
+
+
+def join_page_break_words(pages: list[str]) -> list[str]:
+    """Rejoin words split across a page boundary ("docum-" + "ents").
+
+    Two conservative cases, mirroring the intra-page guards: a trailing
+    hyphen continued by a lowercase fragment, and a trailing lowercase
+    fragment whose continuation ends with a derivational suffix while neither
+    side is a complete word ("travaill" + "eur").
+    """
+    out = list(pages)
+    for i in range(len(out) - 1):
+        tail = out[i].rstrip()
+        head = out[i + 1].lstrip()
+        match = _PAGE_HEAD_FRAG_RE.match(head)
+        if not tail or match is None:
+            continue
+        frag = match.group(1)
+        hyphenated = bool(_PAGE_TAIL_HYPHEN_RE.search(tail))
+        if not hyphenated:
+            word = _PAGE_TAIL_WORD_RE.search(tail)
+            if (
+                word is None
+                or _is_valid_short_word(word.group(1))
+                or _is_valid_short_word(frag)
+                or _ends_with_suffix(word.group(1))
+                or not _looks_like_fragment(frag)
+            ):
+                continue
+        end = len(tail) - 1 if hyphenated else len(tail)
+        out[i] = tail[:end] + frag
+        out[i + 1] = head[len(frag):].lstrip()
+    return out
+
+
 def strip_repeated_headers_footers(pages: list[str]) -> list[str]:
-    """Remove first/last lines repeated across most pages (running heads)."""
+    """Remove lines repeated at page edges across most pages (running heads).
+
+    The first and last TWO lines of each page are candidates, so two-line
+    header/footer blocks are caught as well; a line must appear on at least
+    ``text_cleaning_header_min_frequency`` of the pages (and at least
+    ``text_cleaning_min_pages_for_header`` pages are required) to count as
+    boilerplate.
+    """
     cfg = _settings()
     min_pages = cfg.text_cleaning_min_pages_for_header
     min_freq = cfg.text_cleaning_header_min_frequency
@@ -260,7 +307,7 @@ def strip_repeated_headers_footers(pages: list[str]) -> list[str]:
     edge_lines: Counter[str] = Counter()
     for page in pages:
         lines = [ln.strip() for ln in page.split("\n") if ln.strip()]
-        for candidate in {lines[0], lines[-1]} if lines else set():
+        for candidate in set(lines[:2]) | set(lines[-2:]):
             if len(candidate) >= 3:  # ignore single digits etc.
                 edge_lines[candidate] += 1
 
@@ -289,9 +336,11 @@ def clean_text(text: str) -> str:
 
 
 def clean_pages(pages: list[str]) -> list[str]:
-    """Clean each page, stripping repeated headers/footers first."""
+    """Clean each page: strip repeated headers/footers, rejoin words split
+    across page breaks, then normalize."""
     pages = [normalize_unicode(p) for p in pages]
     pages = strip_repeated_headers_footers(pages)
+    pages = join_page_break_words(pages)
     return [clean_text(p) for p in pages]
 
 

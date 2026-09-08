@@ -41,7 +41,14 @@ class ExpandLegalTermsArgs(BaseModel):
     query: str
 
 
-_FR_MARKERS = (" le ", " la ", " les ", " de ", " du ", " des ", " est ", " quelle", " quel ", " au ", " aux ")
+_FR_MARKERS = (
+    " le ", " la ", " les ", " de ", " du ", " des ", " est ", " quelle", " quel ", " au ", " aux ",
+    # Unaccented function words with no common English collision — they catch
+    # short French questions ("Que peux tu faire pour moi ?") that carry no
+    # diacritics, where small classifier models misdetect the language.
+    " que ", " tu ", " moi", " nous", " vous", " pour ", " une ", " dans ",
+    " sont ", " avec ", " pourquoi", " combien", " qu'est", " c'est", " j'", " d'", " l'",
+)
 
 _DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
     "constitution": ("constitution", "constitutionnel"),

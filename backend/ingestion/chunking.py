@@ -2,7 +2,10 @@
 
 - :func:`legal_parent_child_chunk` — parents follow legal boundaries (a whole
   article or section, kept intact); children are split on alinéa boundaries
-  and linked via ``parent_chunk_id`` for dense retrieval.
+  and linked via ``parent_chunk_id`` for dense retrieval.  Bare heading
+  segments (``article is None``) get ``role="heading"`` so both dense and
+  keyword retrieval skip them, and article children carry a contextual
+  ``retrieval_text`` prefix used for embedding/indexing.
 - :func:`parent_child_chunk` — size-based parents/children for unstructured
   text (fallback when no legal structure is detected).
 - :func:`semantic_chunk` — splits on legal structure boundaries
@@ -88,6 +91,35 @@ def _deepest_heading(hierarchy: dict[str, str]) -> Optional[str]:
         if level in hierarchy:
             return f"{level.capitalize()} {hierarchy[level]}"
     return None
+
+
+def _hierarchy_path(hierarchy: dict[str, str]) -> str:
+    """Ordered "Livre I > Titre II > Chapitre 1" rendering of a hierarchy map."""
+    if "annexe" in hierarchy:
+        return f"Annexe {hierarchy['annexe']}".rstrip()
+    parts = [
+        f"{level.capitalize()} {hierarchy[level]}"
+        for level in _HIERARCHY_LEVELS
+        if hierarchy.get(level)
+    ]
+    return " > ".join(parts)
+
+
+def _context_prefix(
+    document_name: str,
+    law_number: Optional[str],
+    hierarchy: dict[str, str],
+    article: str,
+) -> str:
+    """One-line retrieval prefix locating a child chunk inside its document."""
+    source = document_name
+    if law_number:
+        source += f" ({law_number})"
+    prefix = f"« {source}"
+    path = _hierarchy_path(hierarchy)
+    if path:
+        prefix += f" — {path}"
+    return f"{prefix} — Article {article}. »"
 
 
 def looks_like_legal(text: str) -> bool:
@@ -350,6 +382,7 @@ def legal_parent_child_chunk(
     government_body: Optional[str] = None,
     url: Optional[str] = None,
     legal_domains: Optional[Sequence[str]] = None,
+    law_number: Optional[str] = None,
     version: int = 1,
     child_size: Optional[int] = None,
     child_overlap: Optional[int] = None,
@@ -362,6 +395,14 @@ def legal_parent_child_chunk(
     a single child and ``child_size`` only caps oversized articles.  This
     gives the RAG layer meaningful context (whole article or section) while
     keeping the retrieval units small and precise.
+
+    Bare heading segments (``article is None``, e.g. "LIVRE IV : ...") get
+    ``role="heading"`` on every chunk instead of parent/child roles: the
+    chunks stay in the store for structure browsing but are excluded from
+    dense (role="child" filter) and keyword retrieval.  Children of real
+    articles carry ``retrieval_text`` = one-line context prefix + raw
+    ``content``; it is the text embedded and BM25-indexed, while ``content``
+    stays the raw display/citation text.
     """
     cfg = _settings()
     child_size = child_size if child_size is not None else cfg.chunk_child_size
@@ -398,25 +439,31 @@ def legal_parent_child_chunk(
         # as one parent so the LLM always sees the complete article/section context.
         piece_text = body
         piece_offset = 0
+        heading = article is None
         parent = EvidenceChunk(
             content=piece_text,
             article=article,
             section=section,
             hierarchy=dict(hierarchy),
             page=_page_for_offset(offsets, start + piece_offset),
-            **{**prov, "metadata": {**prov["metadata"], "role": "parent"}},
+            **{**prov, "metadata": {**prov["metadata"], "role": "heading" if heading else "parent"}},
         )
         chunks.append(parent)
+        prefix = (
+            None if heading
+            else _context_prefix(prov["document_name"], law_number, hierarchy, article)
+        )
         for child_offset, child_text in _split_alineas(piece_text, child_size, child_overlap):
             chunks.append(
                 EvidenceChunk(
                     content=child_text,
+                    retrieval_text=None if heading else f"{prefix}\n{child_text}",
                     article=article,
                     section=section,
                     hierarchy=dict(hierarchy),
                     parent_chunk_id=parent.chunk_id,
                     page=_page_for_offset(offsets, start + piece_offset + child_offset),
-                    **{**prov, "metadata": {**prov["metadata"], "role": "child"}},
+                    **{**prov, "metadata": {**prov["metadata"], "role": "heading" if heading else "child"}},
                 )
             )
     return chunks

@@ -839,6 +839,8 @@ class IngestionPipeline:
             if settings is not None:
                 kwargs.setdefault("child_size", settings.chunk_child_size)
                 kwargs.setdefault("child_overlap", settings.chunk_overlap)
+            # Feeds the children's contextual retrieval_text prefix.
+            kwargs.setdefault("law_number", metadata.get("law_number"))
             return legal_parent_child_chunk(doc, document_id, **kwargs)
         if strategy == "semantic":
             return semantic_chunk(doc, document_id, **kwargs)
@@ -913,7 +915,9 @@ class IngestionPipeline:
         embedder = getattr(self.ctx, "embedder", None)
         if embedder is None or not hasattr(embedder, "embed"):
             raise IngestionError("ctx.embedder is missing or does not provide embed()")
-        vectors = await embedder.embed([c.content for c in chunks])
+        # retrieval_text carries the contextual prefix when set; raw content
+        # remains the fallback (headings, parents, legacy/semantic chunks).
+        vectors = await embedder.embed([c.retrieval_text or c.content for c in chunks])
         if len(vectors) != len(chunks):
             raise IngestionError(
                 f"Embedder returned {len(vectors)} vectors for {len(chunks)} chunks"

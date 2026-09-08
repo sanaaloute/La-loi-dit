@@ -295,19 +295,20 @@ async def test_no_caution_note_without_flagged_claims(ctx):
 
 
 # ---------------------------------------------------------------------------
-# Unresolved-conflict note (user-facing, survives production wiping)
+# Unresolved conflicts stay internal (no user-facing note; confidence carries it)
 # ---------------------------------------------------------------------------
 
 
-async def test_conflict_note_appended_and_conflicts_wiped_in_production(ctx):
+async def test_no_conflict_note_and_conflicts_wiped_in_production(ctx):
     from backend.agents.output_guardrail import OutputGuardrailAgent
 
     ctx.settings.env = "production"
     state = _guardrail_state(_answer_with_diagnostics(), QuestionType.FACTUAL)
     answer = (await OutputGuardrailAgent().run(state, ctx))["final_answer"]
-    # Internal conflicts stay hidden, but the user now sees WHY confidence dropped.
+    # Internal conflicts stay hidden, and no note is appended: the dampened
+    # confidence score is the only user-facing signal.
     assert answer.conflicts == []
-    assert "se contredisent" in answer.answer
+    assert "se contredisent" not in answer.answer
 
 
 async def test_no_conflict_note_when_conflicts_resolved(ctx):

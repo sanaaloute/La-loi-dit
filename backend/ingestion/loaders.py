@@ -89,7 +89,9 @@ def load_pdf(path: Union[str, Path]) -> ExtractedDocument:
             pages: list[str] = []
             for page in pdf:
                 try:
-                    pages.append((page.get_text() or "").strip())
+                    # sort=True keeps multi-column pages (Journal Officiel) in
+                    # reading order instead of interleaving lines across columns.
+                    pages.append((page.get_text(sort=True) or "").strip())
                 except Exception:
                     pages.append("")  # a broken page must not kill the document
 

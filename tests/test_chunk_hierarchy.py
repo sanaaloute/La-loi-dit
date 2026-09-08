@@ -121,3 +121,16 @@ async def test_legal_parent_child_chunk_stamps_hierarchy_on_parents_and_children
     # children inherit the same hierarchy as their parent
     children = [c for c in article1 if c.parent_chunk_id]
     assert children
+
+
+async def test_heading_segments_keep_hierarchy_but_get_heading_role():
+    from backend.ingestion.chunking import legal_parent_child_chunk
+
+    chunks = await _maybe_await(legal_parent_child_chunk(_document(_STRUCTURED_TEXT), "doc-1"))
+    headings = [c for c in chunks if c.article is None]
+    assert headings
+    # excluded from retrieval roles, but hierarchy propagation is unchanged
+    assert all(c.metadata.get("role") == "heading" for c in headings)
+    chapitre1 = [c for c in headings if c.section == "Chapitre 1"]
+    assert chapitre1
+    assert chapitre1[0].hierarchy == {"livre": "I", "titre": "II", "chapitre": "1"}

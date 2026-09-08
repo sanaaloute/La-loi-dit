@@ -1,10 +1,13 @@
 # System Architecture
 
 The system is a multi-agent legal research pipeline built on **LangGraph**.
-A single user question flows through 18 nodes — safety checks, query
-routing, planning, memory, retrieval, ranking, reasoning, verification and
-generation — before an answer is returned. Right after the input guardrail,
-a `query_router` node decides whether the question needs retrieval at all:
+A single user question flows through 19 nodes — safety checks, language
+handling, query routing, planning, memory, retrieval, ranking, reasoning,
+verification and generation — before an answer is returned. Right after the
+input guardrail, a `language_gate` node translates non-French questions into
+French (the corpus is French-only) and records the user's language so the
+answer comes back in it; then a `query_router` node decides whether the
+question needs retrieval at all:
 direct (small-talk / meta) questions short-circuit straight to the response
 generator, skipping the whole retrieval pipeline. The guiding constraint:
 **an answer may only contain claims that trace to retrieved evidence**.
@@ -18,8 +21,9 @@ flowchart TB
     end
 
     subgraph graph["LangGraph pipeline (backend/workflows/graph.py)"]
-        ig[input_guardrail] -->|allowed| qr[query_router]
+        ig[input_guardrail] -->|allowed| lg[language_gate]
         ig -->|blocked| ref[refusal]
+        lg --> qr[query_router]
         qr -->|direct| rg[response_generator]
         qr -->|retrieval| pl[planner]
         pl --> ca[context_agent]

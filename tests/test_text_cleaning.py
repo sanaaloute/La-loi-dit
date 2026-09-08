@@ -1,10 +1,13 @@
 """Tests for PDF hyphenation repair in text cleaning."""
 
 from backend.ingestion.text_cleaning import (
+    clean_pages,
     clean_text,
+    join_page_break_words,
     repair_extraction_artifacts,
     repair_hyphenation,
     repair_split_words,
+    strip_repeated_headers_footers,
 )
 
 
@@ -95,3 +98,74 @@ def test_never_merges_complete_words():
 def test_repairs_prefix_fragment():
     assert repair_split_words("rupture ir régulière du contrat") == "rupture irrégulière du contrat"
     assert repair_split_words("expre ssément le motif") == "expressément le motif"
+
+
+# --- page-boundary dehyphenation ---------------------------------------------
+
+
+def test_joins_hyphenated_word_across_pages():
+    pages = ["Le libre consente-", "ment des époux est protégé."]
+    assert join_page_break_words(pages) == ["Le libre consentement", "des époux est protégé."]
+
+
+def test_joins_fragment_across_pages_under_morphological_guard():
+    pages = ["le travaill", "eur licencié peut saisir le juge"]
+    assert join_page_break_words(pages) == ["le travailleur", "licencié peut saisir le juge"]
+
+
+def test_page_break_join_stays_conservative():
+    # Complete words, valid short words and uppercase continuations never join.
+    assert join_page_break_words(["cette image", "et cette page"]) == ["cette image", "et cette page"]
+    assert join_page_break_words(["le code", "des obligations"]) == ["le code", "des obligations"]
+    assert join_page_break_words(["fin de chapitre", "Article 5"]) == ["fin de chapitre", "Article 5"]
+    assert join_page_break_words(["licenciement jugé", "abusif est sanctionné"]) == [
+        "licenciement jugé",
+        "abusif est sanctionné",
+    ]
+
+
+def test_clean_pages_applies_page_break_join():
+    cleaned = clean_pages(["Le préavis de docum-", "entation est fourni."])
+    assert cleaned[0].endswith("documentation")
+    assert "docum-" not in "\n".join(cleaned)
+
+
+# --- repeated headers/footers (first/last two lines) --------------------------
+
+
+def test_strips_two_line_repeated_header_block():
+    pages = [
+        "JOURNAL OFFICIEL\nAnnée 2024\nArticle 1\nTexte un.",
+        "JOURNAL OFFICIEL\nAnnée 2024\nArticle 2\nTexte deux.",
+        "JOURNAL OFFICIEL\nAnnée 2024\nArticle 3\nTexte trois.",
+    ]
+    cleaned = strip_repeated_headers_footers(pages)
+    assert all("JOURNAL OFFICIEL" not in p and "Année 2024" not in p for p in cleaned)
+    assert "Texte un." in cleaned[0]
+
+
+def test_strips_two_line_repeated_footer_block():
+    pages = [
+        "Article 1\nTexte un.\nBP 123 Ouagadougou\nTél +226 00 00 00",
+        "Article 2\nTexte deux.\nBP 123 Ouagadougou\nTél +226 00 00 00",
+        "Article 3\nTexte trois.\nBP 123 Ouagadougou\nTél +226 00 00 00",
+    ]
+    cleaned = strip_repeated_headers_footers(pages)
+    assert all("BP 123" not in p and "Tél" not in p for p in cleaned)
+    assert cleaned[0].endswith("Texte un.")
+
+
+def test_variable_edge_line_protects_repeated_second_line():
+    # The repeated line sits at position 2 behind a variable first line: the
+    # conservative edge-pop must not eat real content to reach it.
+    pages = [
+        "Titre A\nRépublique du Burkina Faso\nCorps page 1.",
+        "Titre B\nRépublique du Burkina Faso\nCorps page 2.",
+        "Titre C\nRépublique du Burkina Faso\nCorps page 3.",
+    ]
+    assert strip_repeated_headers_footers(pages) == pages
+
+
+def test_few_pages_skip_header_detection():
+    pages = ["JOURNAL OFFICIEL\nTexte un.", "JOURNAL OFFICIEL\nTexte deux."]
+    assert strip_repeated_headers_footers(pages) == pages
