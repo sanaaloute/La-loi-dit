@@ -50,12 +50,12 @@ _FREE_PROVIDERS = ["ollama", "openrouter"]
 
 # Full model catalog (pro / cabinet tiers).
 _ALL_MODELS: list[dict[str, str]] = [
-    # Ollama Cloud models verified against the account's plan
-    # (https://ollama.com/cloud). nemotron-3-nano:30b and minimax-m3
-    # also work; glm/kimi/deepseek/mistral/qwen3.5 need a paid upgrade.
-    {"id": "ollama/gpt-oss:20b", "provider": "ollama", "label": "GPT-OSS 20B (Ollama Cloud)"},
-    {"id": "ollama/gpt-oss:120b", "provider": "ollama", "label": "GPT-OSS 120B (Ollama Cloud)"},
-    {"id": "ollama/gemma4:31b", "provider": "ollama", "label": "Gemma 4 31B (Ollama Cloud)"},
+    # Local Ollama models (all-local deployment: the provider's api_base points
+    # to the host's Ollama, so only locally installed models are servable).
+    # First entry = platform default for every tier (see default_model()).
+    {"id": "ollama/qwen3.5:4b", "provider": "ollama", "label": "Qwen 3.5 4B (local)"},
+    {"id": "ollama/qwen3.5:9b", "provider": "ollama", "label": "Qwen 3.5 9B (local, meilleure qualité)"},
+    {"id": "ollama/qwen3.5:2b", "provider": "ollama", "label": "Qwen 3.5 2B (local, le plus rapide)"},
     # TokenFree chat model ids verified against the account's /v1/models
     # list (https://www.tokenfree.com); the claude-* ids currently return
     # 500 from the TokenFree gateway.

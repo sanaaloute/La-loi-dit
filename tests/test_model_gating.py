@@ -83,7 +83,7 @@ def test_catalog_tiers_restricted_in_dev_mode():
 
 
 def test_is_model_allowed_per_tier():
-    assert catalog.is_model_allowed("gratuit", "ollama/gpt-oss:20b")
+    assert catalog.is_model_allowed("gratuit", "ollama/qwen3.5:4b")
     assert catalog.is_model_allowed("gratuit", "openrouter/openai/gpt-oss-20b:free")
     assert catalog.is_model_allowed("pro", "openrouter/openai/gpt-oss-20b:free")
     assert catalog.is_model_allowed("pro", "openrouter/google/gemma-4-26b-a4b-it:free")
@@ -92,18 +92,18 @@ def test_is_model_allowed_per_tier():
 
 
 def test_default_model_and_unknown_tier():
-    # Default = the first Ollama Cloud catalog entry, for every tier (users
+    # Default = the first Ollama (local) catalog entry, for every tier (users
     # can pick another model from the UI; cheap routing handles trivial
     # queries). Gratuit catalog is OpenRouter + Ollama only.
-    assert catalog.default_model("gratuit") == "ollama/gpt-oss:20b"
-    assert catalog.default_model("pro") == "ollama/gpt-oss:20b"
+    assert catalog.default_model("gratuit") == "ollama/qwen3.5:4b"
+    assert catalog.default_model("pro") == "ollama/qwen3.5:4b"
     assert catalog.get_tier("inconnu") == catalog.get_tier("gratuit")
 
 
 def test_all_models_with_access_annotations():
     annotated = {m["id"]: m for m in catalog.all_models_with_access("pro")}
-    assert annotated["ollama/gpt-oss:20b"]["allowed"] is True
-    assert annotated["ollama/gpt-oss:20b"]["tier_required"] == "gratuit"
+    assert annotated["ollama/qwen3.5:4b"]["allowed"] is True
+    assert annotated["ollama/qwen3.5:4b"]["tier_required"] == "gratuit"
     assert annotated["openrouter/openai/gpt-oss-20b:free"]["allowed"] is True
     assert annotated["openrouter/openai/gpt-oss-20b:free"]["tier_required"] == "gratuit"
     assert annotated["openrouter/google/gemma-4-26b-a4b-it:free"]["allowed"] is True
@@ -127,7 +127,7 @@ def test_catalog_env_override(monkeypatch):
     try:
         assert catalog.default_model("gratuit") == "mock/gratuit-model"
         assert catalog.is_model_allowed("gratuit", "mock/gratuit-model")
-        assert not catalog.is_model_allowed("gratuit", "ollama/gpt-oss:20b")
+        assert not catalog.is_model_allowed("gratuit", "ollama/qwen3.5:4b")
     finally:
         get_settings.cache_clear()
 
@@ -136,7 +136,7 @@ def test_catalog_env_override_invalid_falls_back(monkeypatch):
     monkeypatch.setenv("LEGAL_AI_TIER_CATALOG_JSON", "{not valid json")
     get_settings.cache_clear()
     try:
-        assert catalog.default_model("gratuit") == "ollama/gpt-oss:20b"
+        assert catalog.default_model("gratuit") == "ollama/qwen3.5:4b"
     finally:
         get_settings.cache_clear()
 
@@ -273,7 +273,7 @@ def test_llm_client_default_behavior_unchanged():
 
 def test_llm_client_strips_provider_namespace():
     settings = Settings(llm_provider="mock")
-    assert LLMClient(settings, provider="ollama", model="ollama/gpt-oss:20b").model == "ollama/gpt-oss:20b"
+    assert LLMClient(settings, provider="ollama", model="ollama/qwen3.5:4b").model == "ollama/qwen3.5:4b"
     assert (
         LLMClient(settings, provider="openrouter", model="openrouter/openai/gpt-oss-20b:free").model
         == "openrouter/openai/gpt-oss-20b:free"
@@ -421,9 +421,9 @@ def test_resolve_llm_defaults_to_tier_model():
     ctx = SimpleNamespace(settings=Settings(llm_provider="openai"), llm=None)
     # No query -> tier default (the Ollama Cloud catalog entry, every tier);
     # cheap routing needs a query.
-    assert resolve_llm(ctx, _user("gratuit")).model == "ollama/gpt-oss:20b"
-    assert resolve_llm(ctx, None).model == "ollama/gpt-oss:20b"  # anonymous
-    assert resolve_llm(ctx, _user("pro")).model == "ollama/gpt-oss:20b"
+    assert resolve_llm(ctx, _user("gratuit")).model == "ollama/qwen3.5:4b"
+    assert resolve_llm(ctx, None).model == "ollama/qwen3.5:4b"  # anonymous
+    assert resolve_llm(ctx, _user("pro")).model == "ollama/qwen3.5:4b"
 
 
 def test_resolve_llm_mock_mode_keeps_ctx_llm_but_gates():
@@ -567,9 +567,9 @@ def test_models_endpoint_anonymous_sees_gratuit(client):
     response = client.get("/api/v1/models")
     assert response.status_code == 200
     data = response.json()
-    assert data["default_model"] == "ollama/gpt-oss:20b"
+    assert data["default_model"] == "ollama/qwen3.5:4b"
     by_id = {m["id"]: m for m in data["models"]}
-    assert by_id["ollama/gpt-oss:20b"]["allowed"] is True
+    assert by_id["ollama/qwen3.5:4b"]["allowed"] is True
     assert by_id["openrouter/openai/gpt-oss-20b:free"]["allowed"] is True
     assert by_id["openrouter/google/gemma-4-26b-a4b-it:free"]["allowed"] is True
     assert by_id["openrouter/google/gemma-4-26b-a4b-it:free"]["tier_required"] == "gratuit"

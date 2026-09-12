@@ -232,12 +232,12 @@ def test_different_model_separate_cache_entries(tmp_path, monkeypatch):
     with _make_client(tmp_path, monkeypatch, _CACHE_ENV) as client:
         _seed_evidence(client)
         query = "Quel est le préavis de licenciement ?"
-        _chat(client, query, model="ollama/gpt-oss:20b")
+        _chat(client, query, model="ollama/qwen3.5:4b")
         # A different model must not hit the first entry.
-        other = _chat(client, query, model="ollama/gemma4:31b")
+        other = _chat(client, query, model="ollama/qwen3.5:9b")
         assert other["answer"]["metadata"].get("cache_hit") is not True
         # Repeating the same model does hit.
-        repeat = _chat(client, query, model="ollama/gemma4:31b")
+        repeat = _chat(client, query, model="ollama/qwen3.5:9b")
         assert repeat["answer"]["metadata"].get("cache_hit") is True
 
 
@@ -289,7 +289,7 @@ def _user(tier: str) -> TokenPayload:
 def test_simple_query_routes_to_cheapest_model():
     ctx = _ctx(Settings(llm_provider="openai"))
     client = resolve_llm(ctx, _user("gratuit"), query="Préavis licenciement ?")
-    assert client.model == "ollama/gpt-oss:20b"  # first (cheapest) gratuit entry
+    assert client.model == "ollama/qwen3.5:4b"  # first (cheapest) gratuit entry
 
 
 def test_complex_query_routes_to_tier_default():
@@ -297,13 +297,13 @@ def test_complex_query_routes_to_tier_default():
     complex_query = "Explique et analyse les clauses du contrat de travail en détail."
     client = resolve_llm(ctx, _user("gratuit"), query=complex_query)
     # Gratuit default is the Ollama Cloud catalog entry.
-    assert client.model == "ollama/gpt-oss:20b"
+    assert client.model == "ollama/qwen3.5:4b"
 
 
 def test_explicit_model_always_wins():
     ctx = _ctx(Settings(llm_provider="openai"))
-    client = resolve_llm(ctx, _user("gratuit"), "ollama/gemma4:31b", query="Préavis ?")
-    assert client.model == "ollama/gemma4:31b"
+    client = resolve_llm(ctx, _user("gratuit"), "ollama/qwen3.5:9b", query="Préavis ?")
+    assert client.model == "ollama/qwen3.5:9b"
     with pytest.raises(AuthorizationError):
         resolve_llm(ctx, _user("gratuit"), "openrouter/openai/gpt-99", query="Préavis ?")
 
