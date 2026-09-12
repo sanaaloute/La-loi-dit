@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import unicodedata
 from datetime import datetime, timezone
 from typing import Any, Optional, Sequence
@@ -48,6 +49,20 @@ def _normalize(text: str) -> str:
     decomposed = unicodedata.normalize("NFKD", text or "")
     ascii_only = "".join(c for c in decomposed if not unicodedata.combining(c))
     return " ".join(ascii_only.lower().split())
+
+
+def _lookup_tokens(text: str) -> set[str]:
+    """Token set for hint↔name matching, separator- and extension-insensitive.
+
+    Ingested document names are often raw filenames
+    ("cima_code-des-assurances_2019.pdf") while users write
+    "code des assurances": normalize separators to spaces and drop the
+    extension so the two forms become comparable.
+    """
+    cleaned = _normalize(text)
+    cleaned = re.sub(r"\.(pdf|txt|md|html?)\b", " ", cleaned)
+    cleaned = re.sub(r"[_\-/]+", " ", cleaned)
+    return {t for t in cleaned.split() if t}
 
 
 class LegalGraphStore:
@@ -282,7 +297,19 @@ class LegalGraphStore:
                 ]
             if name_hint:
                 hint = _normalize(name_hint)
-                return [r for r in records if r.name and (hint in _normalize(r.name) or _normalize(r.name) in hint)]
+                hint_tokens = _lookup_tokens(name_hint)
+                return [
+                    r
+                    for r in records
+                    if r.name
+                    and (
+                        hint in _normalize(r.name)
+                        or _normalize(r.name) in hint
+                        # Token-set match handles filename-style document
+                        # names ("cima_code-des-assurances_2019.pdf").
+                        or (hint_tokens and hint_tokens <= _lookup_tokens(r.name))
+                    )
+                ]
             return records
         except Exception:
             self.stats["db_failures"] += 1

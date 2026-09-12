@@ -171,23 +171,24 @@ class RetrievalCoordinator:
             elif result:
                 result_lists.append(result)
 
-        # Always-on exact-mention lookup: "article 341 du code du travail"
-        # must resolve even when the planner did not schedule a GRAPH task.
-        # Best-effort — a graph outage never breaks hybrid retrieval.
+        # Always-on exact-mention lookup: "article 341 du code du
+        # travail" must resolve even when the planner did not schedule a
+        # GRAPH task. The hits bypass RRF/rerank (rank-based fusion would
+        # bury them) and are merged right before the relevance floor, at the
+        # top of the list — they are authoritative exact matches.
+        direct_hits: list[EvidenceChunk] = []
         try:
             from backend.knowledge.extraction import extract_query_mentions
             from backend.retrieval.graph_worker import GraphWorker
 
             if extract_query_mentions(tasks[0].query):
-                graph_hits = await GraphWorker(self.ctx).run(
+                direct_hits = await GraphWorker(self.ctx).run(
                     SearchTask(
                         kind=SearchKind.GRAPH,
                         query=tasks[0].query,
                         top_k=settings.default_top_k,
                     )
                 )
-                if graph_hits:
-                    result_lists.append(graph_hits)
         except Exception:
             logger.warning("direct mention lookup failed; continuing without it", exc_info=True)
 
@@ -239,6 +240,11 @@ class RetrievalCoordinator:
                     ",".join(query_domains),
                     len(scored),
                 )
+        # Merge the exact-mention hits at the top, past RRF/rerank (rank
+        # fusion scores them ~1/61 regardless of their exact-match score).
+        if direct_hits:
+            present = {chunk.chunk_id for chunk in scored}
+            scored = [h for h in direct_hits if h.chunk_id not in present] + scored
         # Relevance floor: a chunk must share real content tokens with the
         # query — otherwise irrelevant queries would still return
         # high-confidence but off-topic chunks. A single shared token is

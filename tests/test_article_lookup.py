@@ -48,6 +48,19 @@ async def _seed_two_codes_with_article_244(store: LegalGraphStore) -> None:
         )
 
 
+async def test_find_documents_matches_filename_style_names(store):
+    """Ingested documents often keep raw filenames: the hint matching must
+    survive separators and extensions ("cima_code-des-assurances_2019.pdf"
+    must match the hint "code des assurances")."""
+    await store.upsert_document(
+        LegalDocumentRecord(document_id="cima", name="cima_code-des-assurances_2019.pdf")
+    )
+    found = await store.find_documents(name_hint="code des assurances")
+    assert [d.document_id for d in found] == ["cima"]
+    # A hint with no token overlap must not match.
+    assert await store.find_documents(name_hint="code pénal") == []
+
+
 async def test_find_articles_resolves_across_documents(store):
     await _seed_two_codes_with_article_244(store)
     found = await store.find_articles("244")
