@@ -411,10 +411,19 @@ def test_resolve_llm_allows_tier_model():
     assert client.api_key == "or-test"
 
 
-def test_resolve_llm_denies_unknown_model():
+def test_resolve_llm_denies_tier_gated_model():
     ctx = SimpleNamespace(settings=Settings(llm_provider="openai"), llm=None)
+    # tokenfree models exist in the catalog but above the gratuit tier.
     with pytest.raises(AuthorizationError, match="requires a higher subscription tier"):
-        resolve_llm(ctx, _user("gratuit"), "openrouter/openai/gpt-99")
+        resolve_llm(ctx, _user("gratuit"), "tokenfree/gemini-2.5-flash")
+
+
+def test_resolve_llm_removed_model_falls_back_to_default():
+    """A stale client selection (model removed from the catalog) must not
+    brick the request: fall back to the tier default."""
+    ctx = SimpleNamespace(settings=Settings(llm_provider="openai"), llm=None)
+    client = resolve_llm(ctx, _user("gratuit"), "openrouter/openai/gpt-99")
+    assert client.model == "ollama/qwen3.5:4b"
 
 
 def test_resolve_llm_defaults_to_tier_model():
@@ -430,7 +439,7 @@ def test_resolve_llm_mock_mode_keeps_ctx_llm_but_gates():
     ctx = SimpleNamespace(settings=Settings(llm_provider="mock"), llm="MOCK-LLM")
     assert resolve_llm(ctx, _user("gratuit"), "openrouter/google/gemma-4-26b-a4b-it:free") == "MOCK-LLM"
     with pytest.raises(AuthorizationError):
-        resolve_llm(ctx, _user("gratuit"), "openrouter/openai/gpt-99")
+        resolve_llm(ctx, _user("gratuit"), "tokenfree/gemini-2.5-flash")
 
 
 # ---------------------------------------------------------------------------
@@ -520,15 +529,27 @@ def test_gratuit_user_allowed_premium_model_on_chat(client):
     assert response.status_code == 200
 
 
-def test_chat_denies_unknown_model(client):
+def test_chat_denies_tier_gated_model(client):
+    _, token = _register(client)
+    response = client.post(
+        "/api/v1/chat",
+        json={"query": "Quel est le préavis de licenciement ?", "model": "tokenfree/gemini-2.5-flash"},
+        headers=_headers(token),
+    )
+    assert response.status_code == 403
+    assert "requires a higher subscription tier" in response.json()["detail"]
+
+
+def test_chat_unknown_model_falls_back_to_default(client):
+    """A stale model id stored on an old client must not brick the request."""
     _, token = _register(client)
     response = client.post(
         "/api/v1/chat",
         json={"query": "Quel est le préavis de licenciement ?", "model": "openrouter/openai/gpt-99"},
         headers=_headers(token),
     )
-    assert response.status_code == 403
-    assert "requires a higher subscription tier" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json()["answer"]["answer"].strip()
 
 
 def test_gratuit_default_chat_still_works(client):

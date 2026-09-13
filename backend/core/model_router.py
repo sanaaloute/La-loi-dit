@@ -113,16 +113,27 @@ def resolve_model_entry(
     requested_model: Optional[str] = None,
     query: Optional[str] = None,
 ) -> Optional[catalog.ModelEntry]:
-    """Resolve the gated catalog entry for one request (403 when not allowed)."""
+    """Resolve the gated catalog entry for one request.
+
+    A requested model that exists in the catalog but exceeds the caller's
+    tier is a 403 (paywall). A model removed from the catalog entirely
+    (e.g. a stale selection stored on an old client) falls back to the
+    tier default instead of bricking the request.
+    """
     settings: Settings = ctx.settings
     tier = _tier_of(user)
     if requested_model:
         entry = catalog.find_model(tier, requested_model, settings=settings)
-        if entry is None:
+        if entry is not None:
+            return entry
+        if catalog.find_model("cabinet", requested_model, settings=settings) is not None:
             raise AuthorizationError(
                 f"model '{requested_model}' requires a higher subscription tier"
             )
-        return entry
+        logger.warning(
+            "requested model %r is no longer in the catalog; falling back to the tier default",
+            requested_model,
+        )
     return catalog.find_model(tier, _auto_model_id(tier, query, settings), settings=settings)
 
 

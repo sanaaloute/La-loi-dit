@@ -305,7 +305,8 @@ def test_explicit_model_always_wins():
     client = resolve_llm(ctx, _user("gratuit"), "ollama/qwen3.5:9b", query="Préavis ?")
     assert client.model == "ollama/qwen3.5:9b"
     with pytest.raises(AuthorizationError):
-        resolve_llm(ctx, _user("gratuit"), "openrouter/openai/gpt-99", query="Préavis ?")
+        # Exists in the catalog but above the gratuit tier.
+        resolve_llm(ctx, _user("gratuit"), "tokenfree/gemini-2.5-flash", query="Préavis ?")
 
 
 def test_is_simple_query_heuristic():
