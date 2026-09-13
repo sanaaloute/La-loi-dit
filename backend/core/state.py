@@ -83,6 +83,7 @@ class GraphState(TypedDict, total=False):
     # --- control / bookkeeping ---
     planning_retries: int
     retrieval_retries: int
+    retrieval_retry_new: int  # chunks actually new in the last merge pass (0 = empty retry)
     reflection_count: int
     needs_more_retrieval: bool
     errors: list[str]

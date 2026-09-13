@@ -121,10 +121,21 @@ def build_graph(ctx: AppContext):
         it) and ``retrieval_merge`` counts the pass. The fan-out targets the
         auditor's missing issues rather than the whole plan.
 
+        Empty retry: when a retry pass only re-fetched cached duplicates
+        (``retrieval_retry_new == 0``), re-running reasoning+reflection would
+        analyze the exact same evidence twice for minutes of pure latency —
+        skip straight to synthesis instead.
+
         Fast lane: simple FACTUAL/DEFINITION questions with decent coverage
         and no unresolved conflict skip the two serial analysis LLM calls
         (reasoning, reflection) and go straight to synthesis.
         """
+        if (
+            state.get("retrieval_retries", 0) > 0
+            and state.get("retrieval_retry_new", 1) == 0
+            and state.get("evidence")
+        ):
+            return "response_generator"
         report = state.get("coverage_report")
         if (
             report is not None
@@ -140,7 +151,17 @@ def build_graph(ctx: AppContext):
             return "response_generator"
         return "reasoning_agent"
 
-    _FAST_LANE_TYPES = frozenset({QuestionType.FACTUAL, QuestionType.DEFINITION})
+    # Broad RIGHTS/PROCEDURE questions are the most common user questions;
+    # when coverage is good and conflicts are resolved they take the fast lane
+    # too (reasoning+reflection cost ~2-4 min on the local model).
+    _FAST_LANE_TYPES = frozenset(
+        {
+            QuestionType.FACTUAL,
+            QuestionType.DEFINITION,
+            QuestionType.RIGHTS,
+            QuestionType.PROCEDURE,
+        }
+    )
 
     def _fast_lane_eligible(state: GraphState) -> bool:
         if not settings.fast_lane_enabled:

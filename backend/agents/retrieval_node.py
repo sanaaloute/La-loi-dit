@@ -82,6 +82,8 @@ class RetrievalMergeAgent(Agent):
         existing = list(state.get("evidence", []))
         branch_chunks = list(state.get("branch_evidence", []))
         branch_traces = list(state.get("branch_trace", []))
+        existing_ids = {c.chunk_id for c in existing}
+        new_chunks = [c for c in branch_chunks if c.chunk_id not in existing_ids]
         merged = {c.chunk_id: c for c in [*existing, *branch_chunks]}
 
         retries = state.get("retrieval_retries", 0)
@@ -98,6 +100,9 @@ class RetrievalMergeAgent(Agent):
         return {
             "evidence": list(merged.values()),
             "retrieval_retries": retries,
+            # 0 on a retry pass that only re-fetched cached duplicates — the
+            # signal the graph uses to skip the redundant second analysis.
+            "retrieval_retry_new": len(new_chunks),
             "needs_more_retrieval": False,
             "trace": [
                 *state.get("trace", []),

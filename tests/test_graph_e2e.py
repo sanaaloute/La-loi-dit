@@ -144,6 +144,84 @@ async def test_fast_lane_skips_reasoning_and_reflection(monkeypatch, ctx):
 async def test_full_path_kept_for_complex_questions(monkeypatch, ctx):
     from backend.core.models import QuestionType
 
-    ran = await _run_stubbed_graph(monkeypatch, ctx, QuestionType.RIGHTS)
+    ran = await _run_stubbed_graph(monkeypatch, ctx, QuestionType.CASE_ANALYSIS)
     assert "reasoning_agent" in ran
     assert "reflection_agent" in ran
+
+
+async def test_empty_retry_skips_second_analysis(monkeypatch, ctx):
+    """A retrieval retry that only re-fetches cached duplicates must skip the
+    second reasoning+reflection pass (same inputs, minutes of pure latency)."""
+    import backend.agents as agents_pkg
+    import backend.workflows.graph as graph_module
+    from backend.core.models import CoverageReport, EvidenceChunk, QuestionType, RetrievalPlan
+    from backend.workflows.graph import build_graph, initial_state
+
+    ran: list[str] = []
+    chunk = EvidenceChunk(chunk_id="c1", content="preuve")
+
+    def rec(name):
+        async def stub(state, ctx):
+            ran.append(name)
+            return {}
+
+        return stub
+
+    for node_name, (module_name, attr) in {
+        "input_guardrail": ("input_guardrail", "input_guardrail_node"),
+        "query_router": ("query_router", "query_router_node"),
+        "context_agent": ("context_agent", "context_agent_node"),
+        "memory_agent": ("memory_agent", "memory_agent_node"),
+        "conflict_resolver": ("conflict_resolver", "conflict_resolver_node"),
+        "evidence_ranking": ("evidence_ranking", "evidence_ranking_node"),
+        "parent_expansion": ("parent_expansion", "parent_expansion_node"),
+        "reasoning_agent": ("reasoning_agent", "reasoning_agent_node"),
+        "reflection_agent": ("reflection_agent", "reflection_agent_node"),
+        "response_generator": ("response_generator", "response_generator_node"),
+        "claim_verification": ("claim_verification", "claim_verification_node"),
+        "citation_verification": ("citation_verification", "citation_verification_node"),
+        "output_guardrail": ("output_guardrail", "output_guardrail_node"),
+    }.items():
+        monkeypatch.setattr(getattr(agents_pkg, module_name), attr, rec(node_name))
+
+    async def plan_stub(state, ctx):
+        ran.append("planner")
+        return {"plan": RetrievalPlan(question_type=QuestionType.CASE_ANALYSIS, sub_questions=["q"])}
+
+    async def branch_stub(state, ctx):
+        ran.append("retrieval_branch")
+        return {"branch_evidence": [chunk]}
+
+    merge_calls = {"n": 0}
+
+    async def merge_stub(state, ctx):
+        merge_calls["n"] += 1
+        retry = merge_calls["n"] > 1
+        ran.append("retrieval_merge")
+        return {
+            "evidence": [chunk],
+            "retrieval_retries": 1 if retry else 0,
+            # Retry pass: zero new chunks (cache duplicates only).
+            "retrieval_retry_new": 0 if retry else 1,
+            "needs_more_retrieval": False,
+        }
+
+    async def coverage_stub(state, ctx):
+        ran.append("coverage_auditor")
+        first_pass = state.get("retrieval_retries", 0) == 0
+        return {
+            "coverage_report": CoverageReport(coverage=0.1, missing_issues=["x"]),
+            "needs_more_retrieval": first_pass,  # ask for the retry once
+        }
+
+    monkeypatch.setattr(graph_module, "planner_node", plan_stub)
+    monkeypatch.setattr(agents_pkg.retrieval_node, "retrieval_branch_node", branch_stub)
+    monkeypatch.setattr(agents_pkg.retrieval_node, "retrieval_merge_node", merge_stub)
+    monkeypatch.setattr(agents_pkg.coverage_auditor, "coverage_auditor_node", coverage_stub)
+
+    graph = build_graph(ctx)
+    await graph.ainvoke(initial_state("question de test"))
+    assert merge_calls["n"] == 2  # the retry pass happened
+    assert "reasoning_agent" not in ran
+    assert "reflection_agent" not in ran
+    assert "response_generator" in ran
