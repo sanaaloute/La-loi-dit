@@ -199,6 +199,11 @@ class Settings(BaseSettings):
     default_top_k: int = 8
     retrieval_fetch_k: int = 20  # candidates fetched per worker before fusion/rerank
     rerank_llm_enabled: bool = True  # LLM rescore blended into rerank (one extra call per retrieval branch)
+    # Candidates entering the expensive rerank passes (dense re-embedding +
+    # LLM rescore) per branch. The fused list is RRF-ordered, so truncation
+    # keeps the likely-best candidates; uncapped reranking dominates query
+    # latency on local GPU (every branch re-embeds every candidate).
+    rerank_max_candidates: int = 16
     rrf_k: int = 60  # reciprocal-rank-fusion constant
     retrieval_similarity_floor: float = 0.45  # strong semantic match floor
     retrieval_weak_similarity_floor: float = 0.25
@@ -226,6 +231,11 @@ class Settings(BaseSettings):
     retrieval_dense_similarity_floor_cap: float = 0.45  # cap on retrieval_similarity_floor with a real dense embedder
     retrieval_discriminative_df_ratio: float = 0.2  # max candidate-set doc-frequency share for a "discriminative" term
     rerank_llm_excerpt_chars: int = 300  # chars of each chunk shown in the LLM rescore prompt
+    # Only the top-k heuristic candidates get the LLM rescore (the most
+    # expensive per-branch stage on a local GPU); the tail keeps its
+    # heuristic score. 0 disables the rescore without touching
+    # rerank_llm_enabled semantics.
+    rerank_llm_top_k: int = 8
     rerank_llm_blend_weight: float = 0.5  # weight of the LLM rescore in the final rerank blend
     reranker_max_retries: int = 1  # extra attempts after the first API rerank failure
     graph_expansion_score: float = 0.01  # retrieval score stamped on graph-expansion candidates

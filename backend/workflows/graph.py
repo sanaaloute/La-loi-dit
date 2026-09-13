@@ -108,6 +108,10 @@ def build_graph(ctx: AppContext):
         sub_questions = [q for q in (plan.sub_questions if plan else []) if q.strip()]
         if not sub_questions:
             sub_questions = [state["query"]]
+        # Cap the fan-out: branches run on a single local GPU, so each extra
+        # branch serializes as ~1-2 min of embedding/rerank time. The
+        # sub-question task budget doubles as the branch budget.
+        sub_questions = sub_questions[: max(1, settings.planner_max_sub_question_tasks)]
         return [
             Send("retrieval_branch", {**state, "branch_query": q, "branch_index": i})
             for i, q in enumerate(sub_questions)

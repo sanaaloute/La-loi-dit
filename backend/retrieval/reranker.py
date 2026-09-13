@@ -24,6 +24,20 @@ from backend.core.prompts import get_prompt
 
 logger = logging.getLogger(__name__)
 
+# Process-local memoization of rerank chunk embeddings (chunk_id -> vector).
+# Bounded FIFO; the corpus is stable between reindexes and the parallel
+# branches of one question overlap heavily, so this kills most repeat
+# embeddings on the GPU.
+_EMBED_CACHE_MAX = 4096
+_EMBED_CACHE: "dict[str, list[float]]" = {}
+
+
+def _embed_cache_put(chunk_id: str, vector: list[float]) -> None:
+    if len(_EMBED_CACHE) >= _EMBED_CACHE_MAX:
+        _EMBED_CACHE.pop(next(iter(_EMBED_CACHE)))
+    _EMBED_CACHE[chunk_id] = vector
+
+
 # Stopwords excluded from the shared-token relevance signal (FR + EN).
 _STOPWORDS = {
     "le", "la", "les", "de", "des", "du", "un", "une", "et", "en", "au", "aux",
@@ -95,6 +109,11 @@ async def rerank(
     confidence_weight = settings.rerank_confidence_weight
     lexical_weight = max(0.0, 1.0 - similarity_weight - confidence_weight)
 
+    # Cap the candidates entering the expensive passes: the input is
+    # RRF-ordered, so truncation keeps the likely-best ones. Uncapped
+    # reranking re-embeds every candidate on the GPU per branch.
+    chunks = chunks[: max(1, settings.rerank_max_candidates)]
+
     # Use the real dense model for reranking when available; otherwise fall back
     # to the same hashing embedder used by the offline vector store so the
     # similarity signal stays consistent with what produced retrieval_score.
@@ -103,11 +122,18 @@ async def rerank(
     try:
         # retrieval_text carries the contextual prefix when set, matching what
         # the vector store embedded at ingest time; raw content otherwise.
-        vectors = await embedder.embed(
-            [query, *[chunk.retrieval_text or chunk.content for chunk in chunks]]
-        )
+        # Chunk vectors are memoized process-locally by chunk_id: the corpus
+        # is stable between reindexes, and parallel branches of one question
+        # overlap heavily — re-embedding them per branch dominates latency.
+        chunk_vectors: list[Optional[list[float]]] = [_EMBED_CACHE.get(c.chunk_id) for c in chunks]
+        missing_idx = [i for i, v in enumerate(chunk_vectors) if v is None]
+        to_embed = [query, *[chunks[i].retrieval_text or chunks[i].content for i in missing_idx]]
+        vectors = await embedder.embed(to_embed)
         query_vector = vectors[0]
-        chunk_vectors = vectors[1:]
+        for i, vec in zip(missing_idx, vectors[1:]):
+            _embed_cache_put(chunks[i].chunk_id, vec)
+            chunk_vectors[i] = vec
+        chunk_vectors = [v or [] for v in chunk_vectors]
     except Exception as exc:
         logger.warning("rerank embedding failed, using zero similarity: %s", exc)
         query_vector = []
@@ -133,13 +159,27 @@ async def rerank(
             + confidence_weight * confidence
         )
 
-    llm_scores = await _llm_refine(
-        query, chunks, llm, excerpt_chars=settings.rerank_llm_excerpt_chars
-    )
+    # LLM rescore only the best heuristic candidates: the call is the most
+    # expensive stage of a branch on a local model, and the tail candidates
+    # would rank last regardless.
+    llm_k = max(0, settings.rerank_llm_top_k)
+    llm_idx = sorted(range(len(chunks)), key=lambda i: heuristic[i], reverse=True)[:llm_k]
+    llm_scores: Optional[list[Optional[float]]] = None
+    if llm_idx and llm is not None:
+        subset = await _llm_refine(
+            query,
+            [chunks[i] for i in llm_idx],
+            llm,
+            excerpt_chars=settings.rerank_llm_excerpt_chars,
+        )
+        if subset is not None:
+            llm_scores = [None] * len(chunks)
+            for i, s in zip(llm_idx, subset):
+                llm_scores[i] = s
     llm_blend = settings.rerank_llm_blend_weight
     for i, chunk in enumerate(chunks):
         score = heuristic[i]
-        if llm_scores is not None:
+        if llm_scores is not None and llm_scores[i] is not None:
             score = (1.0 - llm_blend) * score + llm_blend * llm_scores[i]
         chunk.rerank_score = max(0.0, min(1.0, score))
 
