@@ -160,8 +160,8 @@ below `human_review_threshold`) and high-risk query patterns.
 
 ## Confidence model (spec §39)
 
-`FinalAnswer.confidence` is a single aggregate: **0.4 × citation accuracy +
-0.6 × sub-question coverage** (weights in `response_generator`), with trust
+`FinalAnswer.confidence` is a single aggregate: **0.6 × citation accuracy +
+0.4 × sub-question coverage** (weights in `response_generator`), with trust
 adjustments — each unresolved conflict multiplies it by 0.85 (graded
 dampener, `confidence_unresolved_conflict_dampening`, exponent capped at
 `confidence_conflict_max_dampenings` = 3), a reflection-flagged incomplete answer caps it at 0.75, and citation verification scales it by the

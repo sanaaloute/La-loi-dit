@@ -1,9 +1,9 @@
 """Output Guardrail Agent.
 
-Final policy gate before the answer leaves the system.  Applies confidence
-thresholds, unsafe-legal-advice detection and the disclaimer (full legal
-disclaimer for high-impact question types or low-confidence / human-review
-answers, short informational note otherwise — spec §33).
+Final policy gate before the answer leaves the system. Applies output safety
+checks, replaces retrieval answers below the confidence threshold with an
+honest insufficient-information response, labels general-knowledge answers,
+and applies the appropriate legal disclaimer to sufficiently grounded answers.
 Uses the ``check_output`` and ``apply_confidence_policy`` tools.
 """
 
@@ -58,12 +58,11 @@ class OutputGuardrailAgent(Agent):
     async def run(self, state: GraphState, ctx: AppContext) -> dict[str, Any]:
         answer: FinalAnswer = state["final_answer"]
         evidence = list(state.get("ranked_evidence", []))
+        route = state.get("route", "retrieval")
 
         from backend.guardrails.output_guard import check_output
 
-        answer = await check_output(
-            answer, evidence, ctx.settings, route=state.get("route", "retrieval")
-        )
+        answer = await check_output(answer, evidence, ctx.settings, route=route)
 
         lowered = (state.get("query", "") + " " + answer.answer).lower()
         if any(p in lowered for p in _HIGH_RISK_PATTERNS):
@@ -83,13 +82,31 @@ class OutputGuardrailAgent(Agent):
                 answer.requires_human_review = True
             answer.warnings.extend(policy.get("warnings", []))
 
-        # Context-sensitive disclaimer (spec §33): full legal disclaimer for
-        # high-impact question types, human-review or low-confidence answers;
-        # short informational note otherwise. Direct-route answers (casual
-        # conversation, no legal corpus involved) get neither — the direct
-        # prompt already frames the informational nature when pertinent.
-        if state.get("route") != "direct":
-            english = answer.language.startswith("en")
+        low_confidence = (
+            route == "retrieval"
+            and not answer.refused
+            and answer.confidence < ctx.settings.confidence_threshold
+        )
+        english = answer.language.startswith("en")
+        if low_confidence:
+            # Do not expose a weak legal synthesis as if it were dependable.
+            answer.answer = get_prompt(
+                "RESPONSE_LOW_CONFIDENCE_EN" if english else "RESPONSE_LOW_CONFIDENCE_FR"
+            )
+            answer.citations = []
+            answer.evidence = []
+            answer.claims = []
+            answer.warnings = []
+            answer.conflicts = []
+            answer.requires_human_review = False
+            answer.refused = False
+            answer.refusal_reason = None
+            answer.metadata["low_confidence_fallback"] = True
+        elif route == "general":
+            note = get_prompt("GENERAL_KNOWLEDGE_NOTE_EN" if english else "GENERAL_KNOWLEDGE_NOTE_FR")
+            if note.strip() not in answer.answer:
+                answer.answer = answer.answer.rstrip() + note
+        elif route != "direct":
             full = get_prompt("DISCLAIMER_EN" if english else "DISCLAIMER_FR")
             note = get_prompt("INFO_NOTE_EN" if english else "INFO_NOTE_FR")
             # Claim verification flagged deductions or unverifiable statements:
@@ -99,9 +116,6 @@ class OutputGuardrailAgent(Agent):
                 caution = get_prompt("CLAIM_UNCERTAINTY_NOTE_EN" if english else "CLAIM_UNCERTAINTY_NOTE_FR")
                 if caution.strip() not in answer.answer:
                     answer.answer = answer.answer.rstrip() + caution
-            # Unresolved source conflicts stay internal: the confidence score
-            # already reflects them (dampened upstream), and the conflict
-            # resolver keeps the newer/authoritative version anyway.
             if self._needs_full_disclaimer(state, answer, ctx):
                 disclaimer = full
             else:
@@ -109,19 +123,17 @@ class OutputGuardrailAgent(Agent):
             if full.strip() not in answer.answer and note.strip() not in answer.answer:
                 answer.answer = answer.answer.rstrip() + disclaimer
 
-        # Production: internal diagnostics (coverage gaps, unresolved
-        # conflicts, claim-verification notes…) stay in the trace/logs; the
-        # user only sees the answer and the legal disclaimer.  Development
-        # keeps them visible for tuning.
+        # Production: internal diagnostics stay in the trace/logs.
         if getattr(ctx.settings, "is_production", False):
             answer.warnings = []
             answer.conflicts = []
 
+        status = "low-confidence fallback" if low_confidence else ("REFUSED" if answer.refused else "approved")
         return {
             "final_answer": answer,
             "trace": [
                 *state.get("trace", []),
-                f"output_guardrail: {'REFUSED' if answer.refused else 'approved'}"
+                f"output_guardrail: {status}"
                 f"{' (human review)' if answer.requires_human_review else ''}",
             ],
         }

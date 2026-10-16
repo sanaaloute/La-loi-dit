@@ -427,7 +427,6 @@ export default function ChatScreen() {
                 <Text style={styles.quotaTitle}>Quota journalier atteint</Text>
               </View>
               <Text style={styles.quotaText}>{msg.text}</Text>
-              <Text style={styles.quotaHint}>Passez à l'offre supérieure pour continuer.</Text>
             </View>
           ) : response ? (
             <AnswerView answer={response.answer} />

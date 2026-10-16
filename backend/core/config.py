@@ -181,16 +181,6 @@ class Settings(BaseSettings):
     langfuse_secret_key: str = ""
     langfuse_host: str = "http://localhost:3100"
 
-    # --- billing (Paddle; disabled = platform fully functional) ---
-    paddle_enabled: bool = False
-    paddle_env: str = "sandbox"  # sandbox | production
-    paddle_api_key: str = ""
-    paddle_webhook_secret: str = ""
-    paddle_price_pro: str = ""
-    paddle_price_cabinet: str = ""
-    paddle_checkout_success_url: str = "http://localhost:3000/tarifs?success=1"
-    paddle_checkout_cancel_url: str = "http://localhost:3000/tarifs?canceled=1"
-
     # --- Tuning (policy/tuning knobs; defaults preserve current behavior) ---
     # retry budgets (bounded loops, see docs/workflow.md "RETRY STRATEGY")
     max_retrieval_retries: int = 1
@@ -462,8 +452,8 @@ class Settings(BaseSettings):
     # response generator / confidence
     answer_max_excerpt_chars: int = 4000  # per-excerpt char cap in the evidence block sent to the LLM
     answer_child_preview_chars: int = 200  # child-chunk preview length inside a parent excerpt
-    confidence_citation_weight: float = 0.4  # weight of citation accuracy in the aggregate confidence
-    confidence_coverage_weight: float = 0.6  # weight of sub-question coverage in the aggregate confidence
+    confidence_citation_weight: float = 0.6  # weight of citation accuracy in the aggregate confidence
+    confidence_coverage_weight: float = 0.4  # weight of sub-question coverage in the aggregate confidence
     confidence_unresolved_conflict_dampening: float = 0.85  # per-unresolved-conflict multiplier on the aggregate confidence
     confidence_conflict_max_dampenings: int = 3  # cap on the dampening exponent: heavily-conflicted answers decay to 0.85³, not toward zero
     confidence_reflection_gap_cap: float = 0.75  # confidence cap when reflection flags unanswered parts
@@ -524,16 +514,6 @@ class Settings(BaseSettings):
         if self.strict_infra is not None:
             return self.strict_infra
         return self.env == "production"
-
-    @property
-    def billing_enabled(self) -> bool:
-        """True only when Paddle is enabled AND fully configured."""
-        return bool(
-            self.paddle_enabled
-            and self.paddle_api_key
-            and self.paddle_price_pro
-            and self.paddle_price_cabinet
-        )
 
     def ensure_data_dir(self) -> Path:
         self.data_dir.mkdir(parents=True, exist_ok=True)

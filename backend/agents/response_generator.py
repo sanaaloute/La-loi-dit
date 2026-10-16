@@ -1,13 +1,11 @@
 """Response Generator Agent.
 
-Composes the final answer strictly from ranked evidence (grounded answer
-policy).  Every substantive statement carries a numeric citation.  The answer
-text is ALWAYS produced by an LLM — never by a pre-written template: when
-every provider fails (see the failover chain in ``backend.core.llm``), the
-user gets an honest unavailability message, not fabricated legal content.
-Confidence blends citation accuracy with sub-question coverage, capped when
-conflicts stay unresolved or the reflection step flags unanswered parts, so a
-fully-cited but partial or contested answer never displays "100%".
+Composes retrieval answers strictly from ranked evidence, with numeric
+citations for substantive statements, and handles direct/general routes without
+fabricated corpus references. The answer text is ALWAYS produced by an LLM —
+never by a pre-written legal template: provider failure yields an honest status
+message instead. Retrieval confidence blends citation accuracy with
+sub-question coverage and is reduced by conflicts or unanswered parts.
 """
 
 from __future__ import annotations
@@ -153,9 +151,8 @@ class ResponseGeneratorAgent(CompletionAgent):
         template.  This keeps the final answer an actual answer to the
         question rather than a bare list of articles whenever possible.
         """
-        # Direct route (query router short-circuit): plain conversational
-        # answer, no evidence screening, citations or grounding machinery.
-        if state.get("route") == "direct":
+        # Direct/general routes: no evidence screening, citations or grounding.
+        if state.get("route") in {"direct", "general"}:
             return await self._run_direct(state, ctx)
         # Retrieved-document injection screening (spec §42): sanitize the
         # evidence BEFORE it reaches the prompt. When every chunk is dropped,
@@ -191,15 +188,13 @@ class ResponseGeneratorAgent(CompletionAgent):
         return self._parse_final(text, state, ctx)
 
     async def _run_direct(self, state: GraphState, ctx: AppContext) -> dict[str, Any]:
-        """Conversational answer for the direct route: no retrieval, no citations.
+        """Answer conversation or stable general knowledge without retrieval.
 
         The query router already established that the question does not need
-        the legal corpus; the answer must never present itself as grounded
-        legal research (no [n] markers, no Sources section — enforced by the
-        RESPONSE_DIRECT_SYSTEM prompt). The direct route bypasses the context
-        agent, so the recent conversation is loaded here to keep small talk
-        and follow-ups coherent across turns.
+        the legal corpus. Both routes bypass the context agent, so recent
+        conversation is loaded here to keep follow-ups coherent.
         """
+        route = state.get("route", "direct")
         language = state.get("language") or "fr"
         settings = ctx.settings
         conversation_text = ""
@@ -223,20 +218,28 @@ class ResponseGeneratorAgent(CompletionAgent):
                 conversation_text = ""  # memory outage must not break the answer
         user_message = f"{conversation_text}Question: {state.get('original_query') or state['query']}\nLanguage: {language}"
         errors: list[str] = []
+        prompt_name = "RESPONSE_GENERAL_SYSTEM" if route == "general" else "RESPONSE_DIRECT_SYSTEM"
         try:
             text = await ctx.llm.complete(
-                get_prompt("RESPONSE_DIRECT_SYSTEM"),
+                get_prompt(prompt_name),
                 user_message,
                 temperature=ctx.settings.llm_temperature,
             )
         except Exception as exc:
             text = ""
             errors.append(f"{self.name}: LLM completion failed: {exc!r}")
-        draft = text.strip() or self._unavailable_message(language)
+        if text.strip():
+            draft = text.strip()
+        elif route == "general":
+            draft = get_prompt(
+                "RESPONSE_LOW_CONFIDENCE_EN" if language.startswith("en") else "RESPONSE_LOW_CONFIDENCE_FR"
+            )
+        else:
+            draft = self._unavailable_message(language)
         answer = FinalAnswer(
             answer=draft,
             language=language,
-            metadata={"route": "direct"},
+            metadata={"route": route},
         )
         return {
             "final_answer": answer,
@@ -244,7 +247,7 @@ class ResponseGeneratorAgent(CompletionAgent):
             "errors": [*state.get("errors", []), *errors],
             "trace": [
                 *state.get("trace", []),
-                f"response_generator: direct answer ({len(draft)} chars)",
+                f"response_generator: {route} answer ({len(draft)} chars)",
             ],
         }
 

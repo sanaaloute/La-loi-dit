@@ -370,9 +370,22 @@ sender: `backend/core/push.py`; dead tokens pruned on DeviceNotRegistered).
 
 ### DELETE /api/v1/push/token `{ "token": "…" }` → `204` (owner-scoped, call it on logout).
 
+## Models and usage (`backend/api/routers/models.py`, `usage.py`)
+
+`GET /api/v1/models` returns the full configured model catalog. Every model is
+allowed for every caller; legacy tier claims no longer lock models.
+
+`GET /api/v1/usage/me` returns today's usage, 30-day history, and the shared
+budgets: `daily_token_budget` (also exposed as `daily_budget` for compatibility),
+`daily_request_budget`, `remaining_tokens`, and `remaining_requests`. Defaults
+are 5 000 000 tokens and 30 requests per account per day.
+
 ## Admin (`backend/api/routers/admin.py`)
 
-All endpoints require the ADMIN role, are read-only and work offline.
+All endpoints require the ADMIN role. `GET/PATCH
+/api/v1/admin/settings/daily-budgets` reads and updates the global budget for
+all users; the PATCH body is a flat object such as
+`{"daily_request_budget": 30, "daily_token_budget": 5000000}`.
 
 ### GET /api/v1/admin/audit-log?limit=100
 

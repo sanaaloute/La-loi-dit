@@ -147,7 +147,7 @@ async def chat_cancel(
 @router.get("/chat/sessions/{session_id}/run")
 async def get_chat_run_status(
     session_id: str,
-    user: TokenPayload = Depends(require_role(Role.VIEWER)),
+    user: TokenPayload = Depends(require_user),
 ) -> dict[str, Any]:
     """Best-effort status of an in-flight run, used by the UI progress poll.
 
@@ -1047,22 +1047,6 @@ async def get_chat_session(
             for index, m in enumerate(messages)
         ],
     }
-
-
-@router.get("/chat/sessions/{session_id}/run")
-async def get_chat_run_status(
-    session_id: str,
-    user: TokenPayload = Depends(require_user),
-) -> dict[str, bool]:
-    """Whether a chat run is currently in flight for this session.
-
-    Lets a client whose stream dropped tell "the server is still computing my
-    answer" (keep polling the history) from "nothing is running" (the turn
-    failed or never started — retry instead of waiting). Session ids are
-    unguessable uuids; the boolean leaks nothing else.
-    """
-    task = _RUNNING.get(session_id)
-    return {"running": task is not None and not task.done()}
 
 
 @router.delete("/chat/sessions/{session_id}", status_code=204, response_class=Response)

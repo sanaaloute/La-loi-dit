@@ -272,7 +272,7 @@ async def _user_display_map(request: Request) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Dashboard: users, usage, tier budgets, providers
+# Dashboard: users, usage, global daily budget, providers
 # ---------------------------------------------------------------------------
 
 
@@ -295,9 +295,8 @@ class AdminUsersResponse(BaseModel):
 
 
 class AdminUserPatch(BaseModel):
-    """Editable account fields (at least one required)."""
+    """Editable account fields; legacy subscription tiers are not managed."""
 
-    tier: Optional[str] = None
     role: Optional[str] = None
 
 
@@ -376,22 +375,15 @@ async def patch_user(
     request: Request,
     user: TokenPayload = Depends(require_role(Role.ADMIN)),
 ) -> AdminUserEntry:
-    """Update a user's tier and/or role.
-
-    An admin cannot change their OWN tier/role (lockout protection); unknown
-    tiers/roles and unknown users are rejected.
-    """
-    if payload.tier is None and payload.role is None:
-        raise HTTPException(status_code=400, detail="nothing to update: provide tier and/or role")
-    if payload.tier is not None and payload.tier not in catalog.TIER_ORDER:
-        raise HTTPException(status_code=400, detail=f"unknown tier: {payload.tier}")
-    if payload.role is not None:
-        try:
-            Role(payload.role)
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"unknown role: {payload.role}") from None
+    """Update a user's role, with self-lockout and single-admin protection."""
+    if payload.role is None:
+        raise HTTPException(status_code=400, detail="nothing to update: provide role")
+    try:
+        Role(payload.role)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"unknown role: {payload.role}") from None
     if user_id in {user.user_id, user.sub}:
-        raise HTTPException(status_code=400, detail="an admin cannot change their own tier/role")
+        raise HTTPException(status_code=400, detail="an admin cannot change their own role")
 
     store = _user_store(request)
     record = await store.get_by_id(user_id)
@@ -403,9 +395,7 @@ async def patch_user(
         if await store.has_admin():
             raise HTTPException(status_code=400, detail="an admin account already exists")
 
-    if payload.tier is not None:
-        await store.set_tier(user_id, payload.tier)
-    if payload.role is not None and not await store.set_role(user_id, payload.role):
+    if not await store.set_role(user_id, payload.role):
         raise HTTPException(status_code=400, detail=f"unknown role: {payload.role}")
     updated = await store.get_by_id(user_id)
     return await _user_entry(store, updated)
@@ -436,77 +426,64 @@ async def usage_overview(
     return AdminUsageResponse(per_user=users, totals=totals)
 
 
-class TierBudgetPatch(BaseModel):
-    """Daily budget fields adjustable per tier (all optional)."""
+class DailyBudgetPatch(BaseModel):
+    """Global daily budget fields adjustable for every user (all optional)."""
 
     daily_token_budget: Optional[int] = None
     daily_request_budget: Optional[int] = None
 
 
-class TierBudgetsResponse(BaseModel):
-    """Per-tier daily budgets: effective values and built-in defaults."""
+class DailyBudgetsResponse(BaseModel):
+    """Global effective budgets and built-in defaults."""
 
-    effective: dict[str, dict[str, int]]
-    defaults: dict[str, dict[str, int]]
+    effective: dict[str, int]
+    defaults: dict[str, int]
 
 
-async def _stored_budget_overrides(store: Any) -> dict[str, dict[str, int]]:
-    """Persisted budget overrides (validated; {} when unset/unusable)."""
-    raw = await store.get_setting(catalog.TIER_BUDGETS_SETTING_KEY)
+async def _stored_budget_overrides(store: Any) -> dict[str, int]:
+    """Persisted global budget override (validated; {} when unset/unusable)."""
+    raw = await store.get_setting(catalog.DAILY_BUDGETS_SETTING_KEY)
     return catalog.parse_budget_overrides(raw)
 
 
-def _tier_budgets_response(request: Request) -> TierBudgetsResponse:
-    return TierBudgetsResponse(
-        effective=catalog.effective_tier_budgets(settings=get_ctx(request).settings),
-        defaults=catalog.default_tier_budgets(),
+def _daily_budgets_response(request: Request) -> DailyBudgetsResponse:
+    settings = get_ctx(request).settings
+    return DailyBudgetsResponse(
+        effective=catalog.effective_daily_budgets(settings=settings),
+        defaults=catalog.default_daily_budgets(settings=settings),
     )
 
 
-@router.get("/settings/tier-budgets", response_model=TierBudgetsResponse)
-async def get_tier_budgets(request: Request) -> TierBudgetsResponse:
-    """Effective per-tier daily budgets (built-in defaults + admin overrides).
-
-    The persisted overrides are (re)loaded into the catalog cache on every
-    read, so a restart picks them up even before the next write.
-    """
+@router.get("/settings/daily-budgets", response_model=DailyBudgetsResponse)
+async def get_daily_budgets(request: Request) -> DailyBudgetsResponse:
+    """Return the global daily budgets, reloading the persisted override."""
     store = _user_store(request)
     catalog.set_budget_overrides(await _stored_budget_overrides(store))
-    return _tier_budgets_response(request)
+    return _daily_budgets_response(request)
 
 
-@router.patch("/settings/tier-budgets", response_model=TierBudgetsResponse)
-async def patch_tier_budgets(
-    payload: dict[str, TierBudgetPatch],
+@router.patch("/settings/daily-budgets", response_model=DailyBudgetsResponse)
+async def patch_daily_budgets(
+    payload: DailyBudgetPatch,
     request: Request,
-) -> TierBudgetsResponse:
-    """Merge admin budget overrides, persist them and refresh the catalog.
-
-    Unknown tiers and negative values are rejected; 0 lifts the budget
-    (unlimited). Omitted fields keep their current (overridden or default)
-    value.
-    """
-    if not payload:
-        raise HTTPException(status_code=400, detail="nothing to update: provide at least one tier")
-    for tier, fields in payload.items():
-        if tier not in catalog.TIER_ORDER:
-            raise HTTPException(status_code=400, detail=f"unknown tier: {tier}")
-        for field, value in fields.model_dump(exclude_none=True).items():
-            if value < 0:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"{field} for tier '{tier}' must be a non-negative integer (0 = unlimited)",
-                )
+) -> DailyBudgetsResponse:
+    """Merge, persist, and immediately apply the global budget override."""
+    updates = payload.model_dump(exclude_none=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="nothing to update: provide at least one budget")
+    for field, value in updates.items():
+        if value < 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{field} must be a non-negative integer (0 = unlimited)",
+            )
 
     store = _user_store(request)
     overrides = await _stored_budget_overrides(store)
-    for tier, fields in payload.items():
-        updates = fields.model_dump(exclude_none=True)
-        if updates:
-            overrides.setdefault(tier, {}).update(updates)
-    await store.set_setting(catalog.TIER_BUDGETS_SETTING_KEY, json.dumps(overrides))
+    overrides.update(updates)
+    await store.set_setting(catalog.DAILY_BUDGETS_SETTING_KEY, json.dumps(overrides))
     catalog.set_budget_overrides(overrides)
-    return _tier_budgets_response(request)
+    return _daily_budgets_response(request)
 
 
 @router.get("/providers", response_model=ProvidersResponse)

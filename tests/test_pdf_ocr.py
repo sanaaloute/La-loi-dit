@@ -274,7 +274,7 @@ def test_ocr_child_env_caps_thread_pools(tmp_path, monkeypatch):
     monkeypatch.setenv("LEGAL_AI_OCR_CPU_THREADS", "2")
     get_settings.cache_clear()
     try:
-        ocr.ocr_images([tmp_path / "page.png"])
+        ocr._ocr_images_paddleocr([tmp_path / "page.png"])
     finally:
         get_settings.cache_clear()
 

@@ -1,20 +1,19 @@
-"""Subscription tier catalog — single source of truth for model gating.
+"""Shared model/feature catalog and daily usage budgets.
 
-Tiers (cumulative): ``gratuit`` < ``pro`` < ``cabinet``. Each tier lists the
-providers and models it unlocks, the export formats it may use, and the daily
-token/request budgets enforced by the model router. Model ids are namespaced
+Legacy tier names remain in tokens and database rows for backward
+compatibility, but they no longer unlock different capabilities: every user
+gets every configured provider, model and feature. Model ids are namespaced
 ``"provider/..."`` so the frontend picker and the model router share one
 vocabulary.
 
-The whole catalog can be replaced at runtime with the
-``LEGAL_AI_TIER_CATALOG_JSON`` env var (JSON with the same shape). Invalid
-JSON or a structurally unusable document falls back to the built-in catalog
-with a logged warning.
+The catalog can be replaced at runtime with ``LEGAL_AI_TIER_CATALOG_JSON``
+(the legacy JSON shape). Invalid JSON or a structurally unusable document
+falls back to the built-in catalog with a logged warning.
 
-Admins can additionally tune the per-tier daily budgets at runtime (see the
-``/admin/settings/tier-budgets`` endpoints): the overrides are persisted in
-the users DB (app_settings key ``tier_budgets``) and merged into ``get_tier``
-through a module-level cache, so hot paths never touch the DB.
+Admins can tune one global daily token/request budget at runtime (see the
+``/admin/settings/daily-budgets`` endpoints). The override is persisted in the
+users DB (app_settings key ``daily_budgets``) and merged through a module-level
+cache, so hot paths never touch the DB.
 """
 
 from __future__ import annotations
@@ -30,9 +29,8 @@ from backend.core.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
-# Lowest-to-highest tier order; index = rank.
+# Legacy tier names are retained only to read old tokens, rows and catalog JSON.
 TIER_ORDER = ["gratuit", "pro", "cabinet"]
-
 DEFAULT_TIER = "gratuit"
 
 
@@ -44,11 +42,9 @@ class ModelEntry(BaseModel):
     label: str = ""
 
 
-# Provider vocabulary shared across the catalog.
 _ALL_PROVIDERS = ["ollama", "tokenfree", "openrouter"]
-_FREE_PROVIDERS = ["ollama", "openrouter"]
 
-# Full model catalog (pro / cabinet tiers).
+# Full model catalog available to every user.
 _ALL_MODELS: list[dict[str, str]] = [
     # Ollama Cloud models verified against the account's plan
     # (https://ollama.com/cloud). nemotron-3-nano:30b and minimax-m3
@@ -84,41 +80,22 @@ _ALL_MODELS: list[dict[str, str]] = [
     },
 ]
 
-# Free-tier catalog: OpenRouter and Ollama only.
-_FREE_MODELS: list[dict[str, str]] = [m for m in _ALL_MODELS if m["provider"] in _FREE_PROVIDERS]
-
-# Production quotas. Override via LEGAL_AI_TIER_CATALOG_JSON if needed.
+# Shared production entitlements and daily budgets. Legacy per-tier rate
+# limits remain only as anti-abuse controls, never as feature locks.
+_SHARED_CONFIG: dict[str, Any] = {
+    "providers": _ALL_PROVIDERS,
+    "models": _ALL_MODELS,
+    "features": {"export": ["md", "pdf", "word", "csv"], "drafting": True, "priority": True},
+    "daily_token_budget": 5_000_000,
+    "daily_request_budget": 30,
+}
+_RATE_LIMITS: dict[str, dict[str, int]] = {
+    "gratuit": {"rate_limit_per_minute": 120, "rate_limit_per_second": 3},
+    "pro": {"rate_limit_per_minute": 120, "rate_limit_per_second": 3},
+    "cabinet": {"rate_limit_per_minute": 600, "rate_limit_per_second": 10},
+}
 _TIER_CONFIG: dict[str, dict[str, Any]] = {
-    "gratuit": {
-        "providers": _FREE_PROVIDERS,
-        "models": _FREE_MODELS,
-        # Free + ads model: no monetization quotas (0 = unlimited, see
-        # model_router.enforce_daily_budget). Rate limits stay as anti-abuse
-        # protection — every request burns local GPU time.
-        "features": {"export": ["md", "pdf", "word", "csv"], "drafting": True, "priority": False},
-        "daily_token_budget": 0,
-        "daily_request_budget": 0,
-        "rate_limit_per_minute": 120,
-        "rate_limit_per_second": 3,
-    },
-    "pro": {
-        "providers": _ALL_PROVIDERS,
-        "models": _ALL_MODELS,
-        "features": {"export": ["md", "pdf", "word", "csv"], "drafting": True, "priority": False},
-        "daily_token_budget": 10_000_000,
-        "daily_request_budget": 500,
-        "rate_limit_per_minute": 120,
-        "rate_limit_per_second": 3,
-    },
-    "cabinet": {
-        "providers": _ALL_PROVIDERS,
-        "models": _ALL_MODELS,
-        "features": {"export": ["md", "pdf", "word", "csv"], "drafting": True, "priority": True},
-        "daily_token_budget": 100_000_000,
-        "daily_request_budget": 10_000,
-        "rate_limit_per_minute": 600,
-        "rate_limit_per_second": 10,
-    },
+    tier: {**_SHARED_CONFIG, **_RATE_LIMITS[tier]} for tier in TIER_ORDER
 }
 
 # Dev rate limits (effectively unlimited) used when LEGAL_AI_TIER_CATALOG_JSON
@@ -138,10 +115,6 @@ TIER_CATALOG: dict[str, dict[str, Any]] = {
     }
     for tier, cfg in _TIER_CONFIG.items()
 }
-
-
-def _normalise_tier(tier: Optional[str]) -> str:
-    return tier if tier in TIER_ORDER else DEFAULT_TIER
 
 
 def _validate_catalog(raw: Any) -> Optional[dict[str, dict[str, Any]]]:
@@ -187,67 +160,47 @@ def _catalog(settings: Optional[Settings] = None) -> dict[str, dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# Admin-adjustable daily budget overrides
+# Admin-adjustable global daily budget
 # ---------------------------------------------------------------------------
 
-#: Budget fields an admin may tune per tier.
 BUDGET_FIELDS = ("daily_token_budget", "daily_request_budget")
 
-#: app_settings key under which the overrides are persisted (JSON object:
-#: ``{"gratuit": {"daily_token_budget": N, ...}, ...}``).
-TIER_BUDGETS_SETTING_KEY = "tier_budgets"
+#: app_settings key for one flat JSON object shared by every account. This is
+#: deliberately separate from the legacy per-tier ``tier_budgets`` key.
+DAILY_BUDGETS_SETTING_KEY = "daily_budgets"
 
 # Module-level cache so hot paths (check_budget, /usage/me) never hit the DB
-# on every call. Written by set_budget_overrides — called by the admin
-# endpoints and once at app startup with the persisted value.
-#
-# Multi-worker deployments run several uvicorn processes and a PATCH only
-# refreshes the serving worker, so the cache carries a short TTL: once stale,
-# the next async enforcement point (check_budget) re-reads the persisted
-# value via refresh_budget_overrides. get_tier itself stays sync and cheap —
-# it serves the cache and never touches the DB.
-_budget_overrides: dict[str, dict[str, int]] = {}
+# on every call. Multi-worker deployments re-read it after a short TTL.
+_budget_overrides: dict[str, int] = {}
 _budget_overrides_loaded_at = 0.0  # monotonic timestamp; 0 = never loaded
-
-#: How long a worker may serve its process-local overrides before re-reading
-#: the persisted ``tier_budgets`` setting.
 BUDGET_OVERRIDES_TTL_SECONDS = 30.0
 
 
-def parse_budget_overrides(raw: Optional[str]) -> dict[str, dict[str, int]]:
-    """Validate the stored overrides JSON; ``{}`` on anything unusable."""
+def parse_budget_overrides(raw: Optional[str]) -> dict[str, int]:
+    """Validate the flat stored budget JSON; ``{}`` on anything unusable."""
     if not raw:
         return {}
     try:
         parsed = json.loads(raw)
     except ValueError:
-        logger.warning("invalid tier budget overrides JSON; ignoring")
+        logger.warning("invalid daily budget override JSON; ignoring")
         return {}
     if not isinstance(parsed, dict):
         return {}
-    overrides: dict[str, dict[str, int]] = {}
-    for tier, fields in parsed.items():
-        if tier not in TIER_ORDER or not isinstance(fields, dict):
-            continue
-        valid = {
-            field: int(value)
-            for field, value in fields.items()
-            # 0 is meaningful: it lifts the daily budget entirely (unlimited).
-            if field in BUDGET_FIELDS and isinstance(value, int) and not isinstance(value, bool) and value >= 0
-        }
-        if valid:
-            overrides[tier] = valid
-    return overrides
+    return {
+        field: int(value)
+        for field, value in parsed.items()
+        if field in BUDGET_FIELDS
+        and isinstance(value, int)
+        and not isinstance(value, bool)
+        and value >= 0
+    }
 
 
-def set_budget_overrides(overrides: Optional[dict[str, dict[str, int]]]) -> None:
-    """Replace the budget-override cache (``None``/``{}`` clears it).
-
-    Explicit writes (admin PATCH, startup load) also reset the TTL clock —
-    the serving worker never needs to re-read what it just wrote.
-    """
+def set_budget_overrides(overrides: Optional[dict[str, int]]) -> None:
+    """Replace the global budget-override cache and reset its TTL clock."""
     global _budget_overrides, _budget_overrides_loaded_at
-    _budget_overrides = {tier: dict(fields) for tier, fields in (overrides or {}).items()}
+    _budget_overrides = dict(overrides or {})
     _budget_overrides_loaded_at = time.monotonic()
 
 
@@ -257,99 +210,82 @@ def budget_overrides_stale() -> bool:
 
 
 async def refresh_budget_overrides(user_store: Any) -> None:
-    """Re-read the persisted overrides when the TTL expired — never raises.
-
-    At most one indexed key read per TTL window: the TTL clock is reset on
-    failure too, so a DB outage keeps serving the last known/default values
-    instead of being retried on every request.
-    """
+    """Re-read the global budget when the TTL expires; never raises."""
     global _budget_overrides_loaded_at
     if user_store is None or not budget_overrides_stale():
         return
     try:
-        raw = await user_store.get_setting(TIER_BUDGETS_SETTING_KEY)
+        raw = await user_store.get_setting(DAILY_BUDGETS_SETTING_KEY)
         set_budget_overrides(parse_budget_overrides(raw))
     except Exception:
-        logger.warning("tier budget overrides reload failed; keeping cached values", exc_info=True)
+        logger.warning("daily budget override reload failed; keeping cached values", exc_info=True)
         _budget_overrides_loaded_at = time.monotonic()
 
 
-def get_budget_overrides() -> dict[str, dict[str, int]]:
-    """The currently active overrides (copy)."""
-    return {tier: dict(fields) for tier, fields in _budget_overrides.items()}
+def get_budget_overrides() -> dict[str, int]:
+    """The currently active global overrides (copy)."""
+    return dict(_budget_overrides)
 
 
-def default_tier_budgets(*, settings: Optional[Settings] = None) -> dict[str, dict[str, int]]:
-    """The catalog's per-tier daily budgets (before any admin override).
-
-    Read from the effective catalog — so a ``LEGAL_AI_TIER_CATALOG_JSON``
-    override is reflected in the admin UI "Par défaut" hints too.
-    """
+def default_daily_budgets(*, settings: Optional[Settings] = None) -> dict[str, int]:
+    """Shared daily budgets before the admin override."""
     catalog = _catalog(settings)
-    return {
-        tier: {
-            field: int((catalog.get(tier) or catalog.get(DEFAULT_TIER, {})).get(field, 0) or 0)
-            for field in BUDGET_FIELDS
-        }
-        for tier in TIER_ORDER
-    }
+    cfg = catalog.get(DEFAULT_TIER, {})
+    return {field: int(cfg.get(field, 0) or 0) for field in BUDGET_FIELDS}
 
 
-def effective_tier_budgets(*, settings: Optional[Settings] = None) -> dict[str, dict[str, int]]:
-    """Per-tier daily budgets as actually enforced (defaults + overrides)."""
-    return {
-        tier: {field: int(get_tier(tier, settings=settings).get(field, 0) or 0) for field in BUDGET_FIELDS}
-        for tier in TIER_ORDER
-    }
+def effective_daily_budgets(*, settings: Optional[Settings] = None) -> dict[str, int]:
+    """Shared daily budgets as actually enforced (defaults + override)."""
+    cfg = get_tier(None, settings=settings)
+    return {field: int(cfg.get(field, 0) or 0) for field in BUDGET_FIELDS}
 
 
 def get_tier(tier: Optional[str], *, settings: Optional[Settings] = None) -> dict[str, Any]:
-    """Return the catalog config for `tier` (unknown tiers degrade to gratuit).
+    """Return shared entitlements/budgets plus legacy anti-abuse rate limits.
 
-    Admin budget overrides are merged on top; the returned dict is a copy in
-    that case so the cached catalog is never mutated. The override cache is
-    process-local with a short TTL — async enforcement points (check_budget)
-    re-read the persisted value once it goes stale, so this sync hot path
-    never touches the DB itself.
+    Only the rate-limit fields vary by legacy tier. Features, providers,
+    models, and daily budgets always come from the shared default config.
     """
     catalog = _catalog(settings)
-    normalised = _normalise_tier(tier)
-    cfg = catalog.get(normalised, catalog.get(DEFAULT_TIER, {}))
-    overrides = _budget_overrides.get(normalised)
-    if overrides:
-        cfg = {**cfg, **overrides}
+    shared = catalog.get(DEFAULT_TIER, {})
+    legacy = catalog.get(tier if tier in TIER_ORDER else DEFAULT_TIER, shared)
+    cfg = {
+        **shared,
+        "rate_limit_per_minute": legacy.get("rate_limit_per_minute"),
+        "rate_limit_per_second": legacy.get("rate_limit_per_second"),
+    }
+    if _budget_overrides:
+        cfg = {**cfg, **_budget_overrides}
     return cfg
 
 
 def allowed_models(tier: Optional[str], *, settings: Optional[Settings] = None) -> list[ModelEntry]:
-    """Models the tier may select, in catalog order."""
-    return [ModelEntry(**entry) for entry in get_tier(tier, settings=settings).get("models", [])]
+    """Every configured model, deduplicated in catalog order; tier is ignored."""
+    catalog = _catalog(settings)
+    models: dict[str, ModelEntry] = {}
+    for known_tier in TIER_ORDER:
+        cfg = catalog.get(known_tier) or (catalog.get(DEFAULT_TIER, {}) if known_tier == DEFAULT_TIER else {})
+        for entry in cfg.get("models", []):
+            model = ModelEntry(**entry)
+            models.setdefault(model.id, model)
+    return list(models.values())
 
 
 def is_model_allowed(tier: Optional[str], model_id: str, *, settings: Optional[Settings] = None) -> bool:
-    return any(entry.id == model_id for entry in allowed_models(tier, settings=settings))
+    return any(entry.id == model_id for entry in allowed_models(None, settings=settings))
 
 
 def find_model(tier: Optional[str], model_id: str, *, settings: Optional[Settings] = None) -> Optional[ModelEntry]:
-    """Return the catalog entry for `model_id` when allowed for `tier`."""
-    for entry in allowed_models(tier, settings=settings):
+    """Return any configured catalog entry for `model_id`; tier is ignored."""
+    for entry in allowed_models(None, settings=settings):
         if entry.id == model_id:
             return entry
     return None
 
 
 def default_model(tier: Optional[str], *, settings: Optional[Settings] = None) -> str:
-    """The tier's default model.
-
-    Ollama Cloud is the platform default for EVERY tier: its first catalog
-    entry wins regardless of the deployment's ``llm_provider``. Users can
-    override the choice from the UI model picker. When the tier's catalog
-    has no Ollama entry, the deployment's default provider wins instead;
-    failing both, the MID option applies — catalog model lists are ordered
-    cheap -> premium, and cheap-model routing (see model_router) drops
-    trivial queries to the first (cheapest) entry.
-    """
-    models = allowed_models(tier, settings=settings)
+    """The shared default model, preferring Ollama then the configured provider."""
+    models = allowed_models(None, settings=settings)
     if not models:
         return ""
     for entry in models:
@@ -364,30 +300,12 @@ def default_model(tier: Optional[str], *, settings: Optional[Settings] = None) -
 
 
 def all_models_with_access(tier: Optional[str], *, settings: Optional[Settings] = None) -> list[dict[str, Any]]:
-    """Every catalog model annotated with `allowed` and `tier_required`.
-
-    Drives the frontend picker: users see the full catalogue, with the models
-    above their tier marked as locked. `tier_required` is the lowest tier
-    whose model list contains the id.
-    """
-    catalog = _catalog(settings)
-    current = _normalise_tier(tier)
-    allowed_ids = {entry.id for entry in allowed_models(current, settings=settings)}
-
-    annotated: dict[str, dict[str, Any]] = {}
-    for known_tier in TIER_ORDER:
-        cfg = catalog.get(known_tier)
-        if not cfg:
-            continue
-        rank = TIER_ORDER.index(known_tier)
-        for entry in cfg.get("models", []):
-            model_id = entry["id"]
-            if model_id in annotated:
-                continue  # first (lowest) tier wins for tier_required
-            annotated[model_id] = {
-                **ModelEntry(**entry).model_dump(),
-                "allowed": model_id in allowed_ids,
-                "tier_required": known_tier,
-            }
-    # Insertion order is already lowest-tier-first; keep it stable.
-    return list(annotated.values())
+    """Every catalog model, always allowed; legacy response shape is retained."""
+    return [
+        {
+            **entry.model_dump(),
+            "allowed": True,
+            "tier_required": DEFAULT_TIER,
+        }
+        for entry in allowed_models(None, settings=settings)
+    ]

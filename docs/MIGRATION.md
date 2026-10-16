@@ -180,7 +180,7 @@ Related pre-existing knobs that the new components also honor:
   screening), "citation d'article non vérifiée", "réponse potentiellement
   incomplète", unverifiable-citation removals, claim-verification flags, and
   `requires_human_review` escalations for contradicted or unsafe content.
-- **Confidence semantics**: the aggregate is 0.4 × citation accuracy + 0.6 ×
+- **Confidence semantics**: the aggregate is 0.6 × citation accuracy + 0.4 ×
   sub-question coverage, dampened ×0.85 per unresolved conflict and capped at
   0.75 for reflection-flagged gaps — a fully-cited but partial answer no longer
   displays "100%". Per-dimension detail is in `confidence_breakdown`;

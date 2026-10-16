@@ -393,7 +393,7 @@ class ChatRequest(BaseModel):
     user_id: Optional[str] = None
     language: Optional[str] = None
     scenario_date: Optional[date] = None
-    model: Optional[str] = None  # catalog model id, tier-gated (None = tier default)
+    model: Optional[str] = None  # catalog model id (None = shared default)
 
 
 class ChatResponse(BaseModel):

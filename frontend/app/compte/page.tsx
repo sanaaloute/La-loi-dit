@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { AlertTriangle, ArrowRight, Brain, Building2, Loader2, LogOut, Trash2, UserCircle } from "lucide-react";
+import { AlertTriangle, Brain, Building2, Loader2, LogOut, Trash2, UserCircle } from "lucide-react";
 import AppHeader from "@/components/AppHeader";
 import ErrorCard from "@/components/ui/ErrorCard";
 import GatePanel from "@/components/ui/GatePanel";
@@ -13,16 +12,12 @@ import {
   deleteAccount,
   eraseMemories,
   getPreferences,
-  getSubscription,
   listMemories,
   logout,
   me,
   putPreferences,
   usageMe,
   type MemoryEntry,
-  type SubscriptionInfo,
-  type SubscriptionStatus,
-  type Tier,
   type UsageResponse,
   type UserProfile,
 } from "@/lib/api";
@@ -34,34 +29,14 @@ import {
   type PersonaKey,
 } from "@/lib/persona";
 
-const TIER_STYLES: Record<Tier, { label: string; className: string }> = {
-  gratuit: { label: "Gratuit", className: "border-gray-300 bg-gray-100 text-gray-600" },
-  pro: { label: "Pro", className: "border-accent/40 bg-accent/10 text-accent" },
-  cabinet: { label: "Cabinet", className: "border-ink/40 bg-ink/10 text-ink" },
-};
-
-const STATUS_STYLES: Record<SubscriptionStatus, { label: string; className: string }> = {
-  active: { label: "Actif", className: "border-accent/30 bg-accent/10 text-accent" },
-  past_due: { label: "En retard de paiement", className: "border-warn-border/60 bg-warn-bg text-warn-text" },
-  canceled: { label: "Résilié", className: "border-red-700/30 bg-red-700/10 text-red-700" },
-  none: { label: "Aucun", className: "border-gray-300 bg-gray-100 text-gray-600" },
-};
-
 function formatNumber(n: number): string {
   return n.toLocaleString("fr-FR");
-}
-
-function formatDate(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
 }
 
 export default function ComptePage() {
   const [token, setToken] = useAuthToken();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [usage, setUsage] = useState<UsageResponse | null>(null);
-  const [subscription, setSubscription] = useState<SubscriptionInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -92,13 +67,6 @@ export default function ComptePage() {
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
-      });
-    getSubscription(token)
-      .then((s) => {
-        if (!cancelled) setSubscription(s);
-      })
-      .catch(() => {
-        // Abonnement indisponible : la carte correspondante est simplement masquée.
       });
     return () => {
       cancelled = true;
@@ -180,12 +148,6 @@ export default function ComptePage() {
     }
   }
 
-  const tierStyle = profile ? TIER_STYLES[profile.tier] : null;
-  const subTierStyle = subscription
-    ? TIER_STYLES[subscription.tier as Tier] ?? null
-    : null;
-  const subStatusStyle = subscription ? STATUS_STYLES[subscription.status] : null;
-
   const consumed = usage ? usage.today.tokens_in + usage.today.tokens_out : 0;
   const budget = usage?.daily_budget ?? 0;
   const pct = budget > 0 ? Math.min(100, (consumed / budget) * 100) : 0;
@@ -247,13 +209,6 @@ export default function ComptePage() {
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    {tierStyle && (
-                      <span
-                        className={`rounded-full border px-2.5 py-1 text-xs font-medium ${tierStyle.className}`}
-                      >
-                        {tierStyle.label}
-                      </span>
-                    )}
                     <button
                       type="button"
                       onClick={() => {
@@ -272,50 +227,6 @@ export default function ComptePage() {
               </section>
             )}
 
-            {/* Subscription card */}
-            {subscription && (
-              <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-2xl backdrop-blur-xl sm:p-6">
-                <h2 className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-                  Abonnement
-                </h2>
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="space-y-2">
-                    <p className="flex flex-wrap items-center gap-2">
-                      {subTierStyle && (
-                        <span
-                          className={`rounded-full border px-2.5 py-1 text-xs font-medium ${subTierStyle.className}`}
-                        >
-                          {subTierStyle.label}
-                        </span>
-                      )}
-                      {subStatusStyle && (
-                        <span
-                          className={`rounded-full border px-2.5 py-1 text-xs font-medium ${subStatusStyle.className}`}
-                        >
-                          {subStatusStyle.label}
-                        </span>
-                      )}
-                    </p>
-                    {subscription.current_period_end && (
-                      <p className="text-xs text-gray-500">
-                        {subscription.cancel_at_period_end
-                          ? `Résiliation en fin de période — accès jusqu'au ${formatDate(subscription.current_period_end)}`
-                          : `Renouvellement le ${formatDate(subscription.current_period_end)}`}
-                      </p>
-                    )}
-                  </div>
-                  <Link
-                    href="/tarifs"
-                    className="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-700 transition-colors hover:border-accent/40 hover:bg-gray-100"
-                  >
-                    Voir les offres
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  </Link>
-                </div>
-              </section>
-            )}
-
             {/* Today's usage */}
             <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-2xl backdrop-blur-xl sm:p-6">
               <h2 className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
@@ -328,9 +239,14 @@ export default function ComptePage() {
                   {budget > 0 ? ` / ${formatNumber(budget)} tokens` : " tokens (illimité)"}
                 </p>
                 <p className="text-xs text-gray-500">
-                  {budget > 0 ? `${formatNumber(usage.remaining_tokens)} restants — ` : ""}
-                  {formatNumber(usage.today.requests)}{" "}
-                  requête{usage.today.requests > 1 ? "s" : ""} aujourd&apos;hui
+                  {budget > 0 ? `${formatNumber(usage.remaining_tokens)} tokens restants — ` : ""}
+                  {formatNumber(usage.today.requests)}
+                  {usage.daily_request_budget > 0
+                    ? ` / ${formatNumber(usage.daily_request_budget)} requêtes`
+                    : " requêtes (illimitées)"}
+                  {usage.daily_request_budget > 0
+                    ? ` — ${formatNumber(usage.remaining_requests)} restantes`
+                    : ""}
                 </p>
               </div>
               <div className="h-2.5 overflow-hidden rounded-full bg-gray-100">
@@ -339,9 +255,10 @@ export default function ComptePage() {
                   style={{ width: `${pct}%` }}
                 />
               </div>
-              {pct >= 100 && (
+              {(pct >= 100 ||
+                (usage.daily_request_budget > 0 && usage.today.requests >= usage.daily_request_budget)) && (
                 <p className="mt-2 text-xs text-red-700">
-                  Quota journalier atteint — passez à l&apos;offre supérieure pour continuer.
+                  Quota journalier atteint — réessayez demain.
                 </p>
               )}
             </section>

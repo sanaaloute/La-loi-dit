@@ -22,7 +22,6 @@ os.environ["LEGAL_AI_LANGFUSE_SECRET_KEY"] = ""
 
 from backend.core import catalog  # noqa: E402
 from backend.core.config import Settings, get_settings  # noqa: E402
-from backend.core.exceptions import AuthorizationError  # noqa: E402
 from backend.core.model_router import is_simple_query, resolve_llm  # noqa: E402
 from backend.core.models import Role  # noqa: E402
 from backend.security.jwt import TokenPayload  # noqa: E402
@@ -145,7 +144,7 @@ def test_budget_exceeded_returns_429(tmp_path, monkeypatch):
         assert response.status_code == 429
         assert "Quota journalier de tokens atteint" in response.json()["detail"]
 
-        # Drafting is blocked too (pro tier needed for the feature itself).
+        # Drafting uses the same global budget, even with a legacy pro tier.
         me = client.get("/api/v1/auth/me", headers=_headers(token)).json()
         asyncio.run(client.app.state.ctx.user_store.set_tier(me["id"], "pro"))
         response = client.post(
@@ -167,6 +166,34 @@ def test_budget_exceeded_returns_429(tmp_path, monkeypatch):
         # Anonymous users are not metered: unaffected by quotas.
         response = client.post("/api/v1/chat", json={"query": "Le préavis au Burkina ?"})
         assert response.status_code == 200
+
+
+def _tiny_request_budget_catalog() -> str:
+    override = json.loads(json.dumps(catalog.TIER_CATALOG))
+    for tier in override.values():
+        tier["daily_token_budget"] = 0
+        tier["daily_request_budget"] = 1
+    return json.dumps(override)
+
+
+def test_request_budget_exceeded_returns_429(tmp_path, monkeypatch):
+    with _make_client(
+        tmp_path,
+        monkeypatch,
+        {"LEGAL_AI_TIER_CATALOG_JSON": _tiny_request_budget_catalog()},
+    ) as client:
+        _, token = _register(client)
+        _chat(client, "Première question juridique ?", token)
+        response = client.post(
+            "/api/v1/chat",
+            json={"query": "Deuxième question juridique ?"},
+            headers=_headers(token),
+        )
+        assert response.status_code == 429
+        detail = response.json()["detail"]
+        assert "Quota journalier de requêtes atteint" in detail
+        assert "Réessayez demain" in detail
+        assert "offre" not in detail.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -260,16 +287,20 @@ def test_usage_me_shape_and_remaining_math(client):
     _, token = _register(client)
     usage = client.get("/api/v1/usage/me", headers=_headers(token)).json()
     assert usage["tier"] == "gratuit"
-    assert usage["daily_budget"] == 0  # gratuit tier: unlimited (free + ads)
+    assert usage["daily_budget"] == 5_000_000
+    assert usage["daily_token_budget"] == 5_000_000
+    assert usage["daily_request_budget"] == 30
     assert usage["today"] == {"tokens_in": 0, "tokens_out": 0, "requests": 0}
-    assert usage["remaining_tokens"] == 0
+    assert usage["remaining_tokens"] == 5_000_000
+    assert usage["remaining_requests"] == 30
     assert usage["history"] == []
 
     _chat(client, "Quel est le préavis de licenciement au Burkina Faso ?", token)
     usage = client.get("/api/v1/usage/me", headers=_headers(token)).json()
     consumed = usage["today"]["tokens_in"] + usage["today"]["tokens_out"]
     assert consumed > 0
-    assert usage["remaining_tokens"] == 0  # unlimited: nothing left to enforce
+    assert usage["remaining_tokens"] == 5_000_000 - consumed
+    assert usage["remaining_requests"] == 29
     assert usage["history"][0]["requests"] == 1
 
 
@@ -304,9 +335,8 @@ def test_explicit_model_always_wins():
     ctx = _ctx(Settings(llm_provider="openai"))
     client = resolve_llm(ctx, _user("gratuit"), "ollama/gpt-oss:120b", query="Préavis ?")
     assert client.model == "ollama/gpt-oss:120b"
-    with pytest.raises(AuthorizationError):
-        # Exists in the catalog but above the gratuit tier.
-        resolve_llm(ctx, _user("gratuit"), "tokenfree/gemini-2.5-flash", query="Préavis ?")
+    tokenfree = resolve_llm(ctx, _user("gratuit"), "tokenfree/gemini-2.5-flash", query="Préavis ?")
+    assert tokenfree.provider == "tokenfree"
 
 
 def test_is_simple_query_heuristic():

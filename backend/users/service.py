@@ -78,12 +78,6 @@ class UserRecord(BaseModel):
     tier: str = "gratuit"
     workspace_id: str = ""
     created_at: str = ""
-    # --- billing (Paddle) ---
-    paddle_customer_id: str = ""
-    paddle_subscription_id: str = ""
-    subscription_status: str = "none"
-    subscription_period_end: str = ""
-    subscription_cancel_at_period_end: bool = False
 
 
 class UserPromptRecord(BaseModel):
@@ -190,12 +184,6 @@ class UserStore:
             tier=row.tier or "gratuit",
             workspace_id=row.workspace_id or "",
             created_at=row.created_at or "",
-            # getattr: rows from a not-yet-migrated database lack these columns
-            paddle_customer_id=getattr(row, "paddle_customer_id", "") or "",
-            paddle_subscription_id=getattr(row, "paddle_subscription_id", "") or "",
-            subscription_status=getattr(row, "subscription_status", "") or "none",
-            subscription_period_end=getattr(row, "subscription_period_end", "") or "",
-            subscription_cancel_at_period_end=bool(getattr(row, "subscription_cancel_at_period_end", 0) or 0),
         )
 
     async def _get_by_email(self, email: str) -> Optional[UserRecord]:
@@ -374,7 +362,7 @@ class UserStore:
         return await self.count_admins() > 0
 
     async def set_tier(self, user_id: str, tier: str) -> None:
-        """Update a user's subscription tier (no-op when DB down)."""
+        """Update legacy tier metadata; this has no effect on user access."""
         if not await self._ensure_db():
             return None
         from sqlalchemy import update
@@ -614,55 +602,6 @@ class UserStore:
         async with self._session_factory() as session:
             rows = (await session.execute(select(t.c.token))).all()
         return [r.token for r in rows]
-
-    async def set_billing_state(
-        self,
-        user_id: str,
-        *,
-        tier: Optional[str] = None,
-        status: Optional[str] = None,
-        customer_id: Optional[str] = None,
-        subscription_id: Optional[str] = None,
-        period_end: Optional[str] = None,
-        cancel_at_period_end: Optional[bool] = None,
-    ) -> None:
-        """Persist billing/subscription state (only non-None fields)."""
-        if not await self._ensure_db():
-            return None
-        from sqlalchemy import update
-
-        values: dict[str, Any] = {}
-        if tier is not None:
-            values["tier"] = tier
-        if status is not None:
-            values["subscription_status"] = status
-        if customer_id is not None:
-            values["paddle_customer_id"] = customer_id
-        if subscription_id is not None:
-            values["paddle_subscription_id"] = subscription_id
-        if period_end is not None:
-            values["subscription_period_end"] = period_end
-        if cancel_at_period_end is not None:
-            values["subscription_cancel_at_period_end"] = int(cancel_at_period_end)
-        if not values:
-            return
-        t = TABLES["users"]
-        async with self._session_factory() as session:
-            await session.execute(update(t).where(t.c.id == user_id).values(**values))
-            await session.commit()
-
-    async def get_by_paddle_customer_id(self, customer_id: str) -> Optional[UserRecord]:
-        """Resolve an account from its Paddle customer id (webhook fallback)."""
-        if not customer_id or not await self._ensure_db():
-            return None
-        from sqlalchemy import select
-
-        t = TABLES["users"]
-        async with self._session_factory() as session:
-            row = (
-                await session.execute(select(t).where(t.c.paddle_customer_id == customer_id))
-            ).first()
-        return self._row_to_record(row) if row else None
 
     # ------------------------------------------------------------------
     # Token metering (per-day usage rows)
@@ -932,7 +871,7 @@ class UserStore:
         }
 
     # ------------------------------------------------------------------
-    # App settings (key-value, e.g. admin tier budget overrides)
+    # App settings (key-value, e.g. the global daily-budget override)
     # ------------------------------------------------------------------
 
     async def get_setting(self, key: str) -> Optional[str]:

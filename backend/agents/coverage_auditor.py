@@ -25,6 +25,8 @@ _COVERAGE_STOPWORDS = {
     "code", "droits", "droit", "burkina", "faso", "comment", "quoi", "quand",
     "après", "avant", "contre", "chez", "tout", "tous", "toute", "toutes",
     "faire", "fait", "doit", "peut", "plus", "très", "aussi", "ainsi",
+    # Generic legal-question phrasing, not evidence-discriminating terms.
+    "règles", "regles", "applicables", "création", "creation", "rules", "applicable",
 }
 
 

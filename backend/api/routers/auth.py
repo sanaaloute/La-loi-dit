@@ -7,8 +7,8 @@ Two account sources, checked in order:
      env var, plus the development-only admin/admin123 bootstrap) — kept so
      local dev and existing tooling work unchanged.
 
-DB-user tokens carry ``user_id`` and ``tier`` claims; dev-store tokens get
-tier "cabinet" so the local dev admin sees every model.
+DB-user tokens carry ``user_id`` and legacy ``tier`` claims; dev-store tokens
+use "cabinet" for compatibility. Neither affects feature or model access.
 """
 
 from __future__ import annotations

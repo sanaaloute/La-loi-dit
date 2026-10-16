@@ -187,9 +187,11 @@ Settings (env prefix `LEGAL_AI_`):
 
 Deployment (offline-first):
 
-1. Re-run `scripts/download_wheels.sh` after pulling this change — it fetches
-   the cp312 linux wheels for the new requirements (PyMuPDF, paddlepaddle,
-   paddleocr, Pillow, opencv-contrib-python-headless and their deps).
+1. Re-run `scripts/download_wheels.sh` after pulling this change — it detects
+   the host architecture (aarch64 on Apple Silicon, x86_64 on Intel) and fetches
+   the matching cp312 wheels for PyMuPDF, paddlepaddle, paddleocr, Pillow,
+   opencv-contrib-python-headless, uv, and their deps. The backend uses
+   `uv pip install` with these wheels offline-first, then the configured mirror.
 2. Pre-download the OCR models (once, on a networked machine) into the models
    dir so the container initializes offline:
    `PADDLE_PDX_CACHE_HOME=data/ocr_models python -c "from paddleocr import PaddleOCR; PaddleOCR(lang='fr', device='cpu')"`

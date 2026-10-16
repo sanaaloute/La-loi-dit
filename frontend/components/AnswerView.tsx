@@ -35,9 +35,12 @@ export function ConfidenceBadge({ confidence }: { confidence: number }) {
 }
 
 export default function AnswerView({ answer }: AnswerViewProps) {
-  // Direct-route answers (casual conversation, no legal retrieval): render
-  // the reply plainly — a confidence score is meaningless there.
-  const isDirect = answer.metadata?.route === "direct";
+  // Conversation, general knowledge, and confidence fallbacks have no
+  // meaningful retrieval-confidence score to display.
+  const isUnscored =
+    answer.metadata?.route === "direct" ||
+    answer.metadata?.route === "general" ||
+    answer.metadata?.low_confidence_fallback === true;
   if (answer.refused) {
     return (
       <div className="rounded-xl border border-red-700/30 bg-red-700/10 p-4">
@@ -57,7 +60,7 @@ export default function AnswerView({ answer }: AnswerViewProps) {
 
   return (
     <div className="space-y-3">
-      {!isDirect && (
+      {!isUnscored && (
         <div className="flex flex-wrap items-center gap-2">
           <ConfidenceBadge confidence={answer.confidence} />
           {answer.requires_human_review && (

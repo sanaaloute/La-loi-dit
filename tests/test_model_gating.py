@@ -20,7 +20,7 @@ os.environ["LEGAL_AI_LANGFUSE_SECRET_KEY"] = ""
 
 from backend.core import catalog  # noqa: E402
 from backend.core.config import Settings, get_settings  # noqa: E402
-from backend.core.exceptions import AuthorizationError, UserAlreadyExistsError  # noqa: E402
+from backend.core.exceptions import UserAlreadyExistsError  # noqa: E402
 from backend.core.llm import LLMClient  # noqa: E402
 from backend.core.model_router import resolve_llm  # noqa: E402
 from backend.core.models import Role  # noqa: E402
@@ -71,30 +71,23 @@ def _headers(token: str) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-def test_catalog_tiers_restricted_in_dev_mode():
-    """Gratuit only sees OpenRouter + Ollama; paid tiers see the full catalog."""
+def test_catalog_full_access_for_legacy_tiers():
     gratuit = {m.id for m in catalog.allowed_models("gratuit")}
     pro = {m.id for m in catalog.allowed_models("pro")}
     cabinet = {m.id for m in catalog.allowed_models("cabinet")}
-    assert gratuit < pro  # strict subset
-    assert pro == cabinet
-    assert all(m.provider in ("ollama", "openrouter") for m in catalog.allowed_models("gratuit"))
-    assert any(m.provider == "tokenfree" for m in catalog.allowed_models("pro"))
+    assert gratuit == pro == cabinet
+    assert any(m.provider == "tokenfree" for m in catalog.allowed_models("gratuit"))
 
 
-def test_is_model_allowed_per_tier():
-    assert catalog.is_model_allowed("gratuit", "ollama/gpt-oss:20b")
-    assert catalog.is_model_allowed("gratuit", "openrouter/openai/gpt-oss-20b:free")
-    assert catalog.is_model_allowed("pro", "openrouter/openai/gpt-oss-20b:free")
-    assert catalog.is_model_allowed("pro", "openrouter/google/gemma-4-26b-a4b-it:free")
-    assert catalog.is_model_allowed("cabinet", "openrouter/google/gemma-4-26b-a4b-it:free")
+def test_is_model_allowed_for_every_legacy_tier():
+    for tier in catalog.TIER_ORDER:
+        assert catalog.is_model_allowed(tier, "ollama/gpt-oss:20b")
+        assert catalog.is_model_allowed(tier, "openrouter/openai/gpt-oss-20b:free")
+        assert catalog.is_model_allowed(tier, "tokenfree/gemini-2.5-flash")
     assert not catalog.is_model_allowed("cabinet", "openrouter/openai/gpt-99")
 
 
 def test_default_model_and_unknown_tier():
-    # Default = the first Ollama Cloud catalog entry, for every tier (users
-    # can pick another model from the UI; cheap routing handles trivial
-    # queries). Gratuit catalog is OpenRouter + Ollama only.
     assert catalog.default_model("gratuit") == "ollama/gpt-oss:20b"
     assert catalog.default_model("pro") == "ollama/gpt-oss:20b"
     assert catalog.get_tier("inconnu") == catalog.get_tier("gratuit")
@@ -102,15 +95,10 @@ def test_default_model_and_unknown_tier():
 
 def test_all_models_with_access_annotations():
     annotated = {m["id"]: m for m in catalog.all_models_with_access("pro")}
-    assert annotated["ollama/gpt-oss:20b"]["allowed"] is True
-    assert annotated["ollama/gpt-oss:20b"]["tier_required"] == "gratuit"
-    assert annotated["openrouter/openai/gpt-oss-20b:free"]["allowed"] is True
-    assert annotated["openrouter/openai/gpt-oss-20b:free"]["tier_required"] == "gratuit"
-    assert annotated["openrouter/google/gemma-4-26b-a4b-it:free"]["allowed"] is True
-    assert annotated["openrouter/google/gemma-4-26b-a4b-it:free"]["tier_required"] == "gratuit"
-    # TokenFree models are above gratuit.
-    assert annotated["tokenfree/gemini-2.5-flash"]["allowed"] is True
-    assert annotated["tokenfree/gemini-2.5-flash"]["tier_required"] == "pro"
+    for model_id, model in annotated.items():
+        assert model["allowed"] is True, model_id
+        assert model["tier_required"] == "gratuit"
+    assert "tokenfree/gemini-2.5-flash" in annotated
 
 
 def test_catalog_env_override(monkeypatch):
@@ -141,33 +129,33 @@ def test_catalog_env_override_invalid_falls_back(monkeypatch):
         get_settings.cache_clear()
 
 
-def test_default_daily_budgets_per_tier():
-    """The built-in catalog carries the real per-tier production quotas.
-
-    Free + ads model: the gratuit tier has no daily budgets (0 = unlimited).
-    """
-    assert catalog.get_tier("gratuit")["daily_token_budget"] == 0
-    assert catalog.get_tier("pro")["daily_token_budget"] == 10_000_000
-    assert catalog.get_tier("cabinet")["daily_token_budget"] == 100_000_000
-    assert catalog.get_tier("gratuit")["daily_request_budget"] == 0
-    assert catalog.get_tier("pro")["daily_request_budget"] == 500
-    assert catalog.get_tier("cabinet")["daily_request_budget"] == 10_000
+def test_shared_daily_budget_defaults_for_every_legacy_tier():
+    for tier in catalog.TIER_ORDER:
+        config = catalog.get_tier(tier)
+        assert config["daily_token_budget"] == 5_000_000
+        assert config["daily_request_budget"] == 30
+        assert config["features"]["drafting"] is True
+        assert config["features"]["priority"] is True
 
 
-def test_budget_overrides_merge_into_get_tier():
-    """Admin overrides win over the defaults without mutating the catalog."""
+def test_global_budget_override_merges_for_every_legacy_tier():
     try:
-        catalog.set_budget_overrides({"gratuit": {"daily_token_budget": 2_000_000}})
-        assert catalog.get_tier("gratuit")["daily_token_budget"] == 2_000_000
-        # Untouched fields and tiers keep their catalog values.
-        assert catalog.get_tier("gratuit")["daily_request_budget"] == 0
-        assert catalog.get_tier("pro")["daily_token_budget"] == 10_000_000
-        assert catalog.TIER_CATALOG["gratuit"]["daily_token_budget"] == 0
-        assert catalog.effective_tier_budgets()["gratuit"]["daily_token_budget"] == 2_000_000
-        assert catalog.default_tier_budgets()["gratuit"]["daily_token_budget"] == 0
+        catalog.set_budget_overrides({"daily_token_budget": 2_000_000})
+        for tier in catalog.TIER_ORDER:
+            assert catalog.get_tier(tier)["daily_token_budget"] == 2_000_000
+            assert catalog.get_tier(tier)["daily_request_budget"] == 30
+        assert catalog.TIER_CATALOG["gratuit"]["daily_token_budget"] == 5_000_000
+        assert catalog.effective_daily_budgets() == {
+            "daily_token_budget": 2_000_000,
+            "daily_request_budget": 30,
+        }
+        assert catalog.default_daily_budgets() == {
+            "daily_token_budget": 5_000_000,
+            "daily_request_budget": 30,
+        }
     finally:
         catalog.set_budget_overrides({})
-    assert catalog.get_tier("gratuit")["daily_token_budget"] == 0
+    assert catalog.get_tier("gratuit")["daily_token_budget"] == 5_000_000
 
 
 def test_parse_budget_overrides_filters_garbage():
@@ -175,17 +163,18 @@ def test_parse_budget_overrides_filters_garbage():
     assert catalog.parse_budget_overrides("") == {}
     assert catalog.parse_budget_overrides("{not json") == {}
     assert catalog.parse_budget_overrides('["gratuit"]') == {}
+    assert catalog.parse_budget_overrides('{"gratuit": {"daily_token_budget": 5}}') == {}
     parsed = catalog.parse_budget_overrides(
         json.dumps(
             {
-                "gratuit": {"daily_token_budget": 5, "rate_limit_per_minute": 1, "bad": True},
-                "gold": {"daily_token_budget": 5},
-                "pro": {"daily_token_budget": -3},
+                "daily_token_budget": 5,
+                "daily_request_budget": -3,
+                "rate_limit_per_minute": 1,
+                "bad": True,
             }
         )
     )
-    # Unknown tiers/fields and negative values are dropped.
-    assert parsed == {"gratuit": {"daily_token_budget": 5}}
+    assert parsed == {"daily_token_budget": 5}
 
 
 class _FakeSettingStore:
@@ -205,19 +194,16 @@ class _FakeSettingStore:
 
 async def test_budget_overrides_refresh_after_ttl(monkeypatch):
     """A stale override cache is re-read from the DB; a fresh one is not."""
-    store = _FakeSettingStore(json.dumps({"gratuit": {"daily_token_budget": 7}}))
+    store = _FakeSettingStore(json.dumps({"daily_token_budget": 7}))
     try:
         catalog.set_budget_overrides({})
-        # Fresh cache: no DB read at all.
         await catalog.refresh_budget_overrides(store)
         assert store.reads == 0
-        assert catalog.get_tier("gratuit")["daily_token_budget"] == 0
-        # Stale cache (TTL expired): one indexed read, overrides applied —
-        # this is how a PATCH served by another uvicorn worker propagates.
+        assert catalog.get_tier("gratuit")["daily_token_budget"] == 5_000_000
         monkeypatch.setattr(catalog, "_budget_overrides_loaded_at", 0.0)
         await catalog.refresh_budget_overrides(store)
         assert store.reads == 1
-        assert catalog.get_tier("gratuit")["daily_token_budget"] == 7
+        assert catalog.get_tier("cabinet")["daily_token_budget"] == 7
     finally:
         catalog.set_budget_overrides({})
 
@@ -225,19 +211,17 @@ async def test_budget_overrides_refresh_after_ttl(monkeypatch):
 async def test_budget_overrides_refresh_never_raises(monkeypatch):
     """A DB outage keeps the last known values and resets the TTL clock."""
     store = _FakeSettingStore(error=RuntimeError("db down"))
-    catalog.set_budget_overrides({"pro": {"daily_request_budget": 9}})
+    catalog.set_budget_overrides({"daily_request_budget": 9})
     monkeypatch.setattr(catalog, "_budget_overrides_loaded_at", 0.0)
     try:
         await catalog.refresh_budget_overrides(store)  # must not raise
         assert catalog.get_tier("pro")["daily_request_budget"] == 9
-        # The TTL clock was bumped too: no per-request retry storm.
         assert not catalog.budget_overrides_stale()
     finally:
         catalog.set_budget_overrides({})
 
 
-def test_default_tier_budgets_reflect_env_catalog(monkeypatch):
-    """The admin UI "Par défaut" hints follow LEGAL_AI_TIER_CATALOG_JSON."""
+def test_default_daily_budgets_reflect_env_catalog(monkeypatch):
     override = {
         "gratuit": {
             "providers": ["mock"],
@@ -250,11 +234,9 @@ def test_default_tier_budgets_reflect_env_catalog(monkeypatch):
     monkeypatch.setenv("LEGAL_AI_TIER_CATALOG_JSON", json.dumps(override))
     get_settings.cache_clear()
     try:
-        defaults = catalog.default_tier_budgets()
-        assert defaults["gratuit"] == {"daily_token_budget": 42, "daily_request_budget": 3}
-        # Tiers missing from the override fall back to its default tier,
-        # exactly like get_tier does.
-        assert defaults["pro"] == {"daily_token_budget": 42, "daily_request_budget": 3}
+        assert catalog.default_daily_budgets() == {"daily_token_budget": 42, "daily_request_budget": 3}
+        assert catalog.get_tier("pro")["daily_token_budget"] == 42
+        assert catalog.get_tier("pro")["daily_request_budget"] == 3
     finally:
         get_settings.cache_clear()
 
@@ -380,17 +362,15 @@ async def test_tokenfree_completion_kwargs(monkeypatch):
     assert captured["api_key"] == "tf-key"
 
 
-def test_resolve_llm_tokenfree_uses_tokenfree_key():
+def test_resolve_llm_tokenfree_uses_tokenfree_key_for_every_legacy_tier():
     settings = Settings(llm_provider="openai", llm_api_key="sk-main", tokenfree_api_key="tf-test")
     ctx = SimpleNamespace(settings=settings, llm=None)
-    # TokenFree models are not available on the gratuit tier.
-    with pytest.raises(AuthorizationError, match="requires a higher subscription tier"):
-        resolve_llm(ctx, _user("gratuit"), "tokenfree/gemini-2.5-flash")
-    client = resolve_llm(ctx, _user("pro"), "tokenfree/gemini-2.5-flash")
-    assert client.provider == "tokenfree"
-    assert client.model == "openai/gemini-2.5-flash"
-    assert client.api_key == "tf-test"
-    assert client.api_base == "https://www.tokenfree.com/v1"
+    for tier in catalog.TIER_ORDER:
+        client = resolve_llm(ctx, _user(tier), "tokenfree/gemini-2.5-flash")
+        assert client.provider == "tokenfree"
+        assert client.model == "openai/gemini-2.5-flash"
+        assert client.api_key == "tf-test"
+        assert client.api_base == "https://www.tokenfree.com/v1"
 
 
 # ---------------------------------------------------------------------------
@@ -411,11 +391,10 @@ def test_resolve_llm_allows_tier_model():
     assert client.api_key == "or-test"
 
 
-def test_resolve_llm_denies_tier_gated_model():
+def test_resolve_llm_allows_formerly_tier_gated_model():
     ctx = SimpleNamespace(settings=Settings(llm_provider="openai"), llm=None)
-    # tokenfree models exist in the catalog but above the gratuit tier.
-    with pytest.raises(AuthorizationError, match="requires a higher subscription tier"):
-        resolve_llm(ctx, _user("gratuit"), "tokenfree/gemini-2.5-flash")
+    client = resolve_llm(ctx, _user("gratuit"), "tokenfree/gemini-2.5-flash")
+    assert client.provider == "tokenfree"
 
 
 def test_resolve_llm_removed_model_falls_back_to_default():
@@ -435,11 +414,10 @@ def test_resolve_llm_defaults_to_tier_model():
     assert resolve_llm(ctx, _user("pro")).model == "ollama/gpt-oss:20b"
 
 
-def test_resolve_llm_mock_mode_keeps_ctx_llm_but_gates():
+def test_resolve_llm_mock_mode_keeps_ctx_llm_for_all_models():
     ctx = SimpleNamespace(settings=Settings(llm_provider="mock"), llm="MOCK-LLM")
     assert resolve_llm(ctx, _user("gratuit"), "openrouter/google/gemma-4-26b-a4b-it:free") == "MOCK-LLM"
-    with pytest.raises(AuthorizationError):
-        resolve_llm(ctx, _user("gratuit"), "tokenfree/gemini-2.5-flash")
+    assert resolve_llm(ctx, _user("gratuit"), "tokenfree/gemini-2.5-flash") == "MOCK-LLM"
 
 
 # ---------------------------------------------------------------------------
@@ -529,15 +507,22 @@ def test_gratuit_user_allowed_premium_model_on_chat(client):
     assert response.status_code == 200
 
 
-def test_chat_denies_tier_gated_model(client):
+def test_chat_allows_every_model_for_gratuit_user(client):
     _, token = _register(client)
     response = client.post(
         "/api/v1/chat",
         json={"query": "Quel est le préavis de licenciement ?", "model": "tokenfree/gemini-2.5-flash"},
         headers=_headers(token),
     )
-    assert response.status_code == 403
-    assert "requires a higher subscription tier" in response.json()["detail"]
+    assert response.status_code == 200, response.text
+
+
+def test_billing_endpoints_are_removed(client):
+    _, token = _register(client)
+    headers = _headers(token)
+    assert client.get("/api/v1/billing/config").status_code == 404
+    assert client.get("/api/v1/billing/subscription", headers=headers).status_code == 404
+    assert client.post("/api/v1/billing/checkout", json={"tier": "pro"}, headers=headers).status_code == 404
 
 
 def test_chat_unknown_model_falls_back_to_default(client):
@@ -584,27 +569,25 @@ def test_db_tier_change_unlocks_models_without_new_token(client):
 # ---------------------------------------------------------------------------
 
 
-def test_models_endpoint_anonymous_sees_gratuit(client):
+def test_models_endpoint_anonymous_gets_full_access(client):
     response = client.get("/api/v1/models")
     assert response.status_code == 200
     data = response.json()
     assert data["default_model"] == "ollama/gpt-oss:20b"
     by_id = {m["id"]: m for m in data["models"]}
-    assert by_id["ollama/gpt-oss:20b"]["allowed"] is True
-    assert by_id["openrouter/openai/gpt-oss-20b:free"]["allowed"] is True
-    assert by_id["openrouter/google/gemma-4-26b-a4b-it:free"]["allowed"] is True
-    assert by_id["openrouter/google/gemma-4-26b-a4b-it:free"]["tier_required"] == "gratuit"
-    assert by_id["tokenfree/gemini-2.5-flash"]["allowed"] is False
-    assert by_id["tokenfree/gemini-2.5-flash"]["tier_required"] == "pro"
+    for model_id, model in by_id.items():
+        assert model["allowed"] is True, model_id
+        assert model["tier_required"] == "gratuit"
+    assert "tokenfree/gemini-2.5-flash" in by_id
 
 
-def test_models_endpoint_respects_token_tier(client):
+def test_models_endpoint_full_access_with_legacy_token_tier(client):
     settings = get_settings()
     token = create_access_token("dev-pro", Role.USER, settings, tier="pro")
     response = client.get("/api/v1/models", headers=_headers(token))
     by_id = {m["id"]: m for m in response.json()["models"]}
     assert by_id["openrouter/openai/gpt-oss-20b:free"]["allowed"] is True
-    assert by_id["openrouter/google/gemma-4-26b-a4b-it:free"]["allowed"] is True
+    assert by_id["tokenfree/gemini-2.5-flash"]["allowed"] is True
 
 
 # ---------------------------------------------------------------------------

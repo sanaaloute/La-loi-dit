@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookMarked, FilePenLine, Library, Menu, MessageSquare, Scale, ShieldCheck, Tag, UserCircle } from "lucide-react";
+import { BookMarked, FilePenLine, Library, Menu, MessageSquare, Scale, ShieldCheck, UserCircle } from "lucide-react";
 import ThemeToggle from "@/components/ThemeToggle";
 import { useAuthToken } from "@/lib/useAuth";
 import { me } from "@/lib/api";
@@ -26,7 +26,6 @@ const NAV_LINKS = [
   { href: "/explorer", label: "Explorer", icon: Library },
   { href: "/redaction", label: "Rédaction", icon: FilePenLine },
   { href: "/marques", label: "Marques", icon: BookMarked },
-  { href: "/tarifs", label: "Tarifs", icon: Tag },
   { href: "/compte", label: "Compte", icon: UserCircle },
 ];
 

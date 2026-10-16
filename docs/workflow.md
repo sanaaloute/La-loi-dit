@@ -21,7 +21,7 @@ flowchart TB
     ref --> END1((END))
 
     lg --> qr[query_router]
-    qr -->|route == "direct"| rg
+    qr -->|route == "direct" or "general"| rg
     qr -->|retrieval| pl[planner]
     pl --> ca[context_agent]
     ca --> ma[memory_agent]
@@ -39,15 +39,20 @@ flowchart TB
     rf -->|"should_retry_retrieval AND<br/>reflection_count ≤ 1 AND<br/>retrieval_retries < 1"| rc
     rf -->|else| rg[response_generator]
 
-    rg --> clv[claim_verification]
+    rg -->|direct/general| og[output_guardrail]
+    rg -->|retrieval| clv[claim_verification]
     clv --> cv[citation_verification]
-    cv --> og[output_guardrail]
+    cv --> og
     og --> END2((END))
 ```
 
 Notes on the routing functions (verbatim from `graph.py`):
 
 - `_route_after_guardrail` — blocked queries go straight to `refusal`.
+- `_route_after_router` — `DIRECT` and `GENERAL` skip legal retrieval;
+  everything else uses the grounded retrieval pipeline.
+- `_route_after_response` — direct/general answers skip claim/citation
+  verification but still pass through the output guardrail.
 - `_route_after_reasoning` — the reasoning agent may request one extra
   retrieval pass (`needs_more_retrieval`) as long as the shared retrieval
   retry budget is not exhausted.

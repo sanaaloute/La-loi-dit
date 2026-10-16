@@ -15,6 +15,9 @@ _DISCLAIMER_MARKERS = (
 
 
 async def test_seeded_labor_question_returns_grounded_answer(seeded_graph, seeded_ctx):
+    # Exercise the grounded synthesis path itself; the sub-0.55 replacement is
+    # covered separately in test_guardrails.py.
+    seeded_ctx.settings.confidence_threshold = 0.0
     state = initial_state(
         "Quel est le préavis de licenciement pour un employé mensualisé au Burkina Faso ?"
     )
@@ -40,6 +43,16 @@ async def test_seeded_labor_question_returns_grounded_answer(seeded_graph, seede
         assert any(t.startswith(node) for t in response.trace), f"missing trace for {node}"
 
 
+async def test_sarl_question_keeps_grounded_answer(seeded_graph, seeded_ctx):
+    state = initial_state("Quelles sont les règles OHADA applicables à la création d'une SARL ?")
+    response = await run_query(seeded_graph, seeded_ctx, state)
+    answer = response.answer
+
+    assert not answer.metadata.get("low_confidence_fallback")
+    assert answer.confidence >= 0.55
+    assert any(c.verified for c in answer.citations), "expected verified OHADA citations"
+
+
 async def test_coverage_auditor_reretrieval_respects_retry_budget(graph, ctx):
     """Empty store: the auditor requests one re-retrieval, bounded by max_retrieval_retries."""
     state = initial_state("Quel est le préavis de licenciement au Burkina Faso ?")
@@ -50,11 +63,13 @@ async def test_coverage_auditor_reretrieval_respects_retry_budget(graph, ctx):
     assert final["retrieval_retries"] == ctx.settings.max_retrieval_retries
 
 
-async def test_empty_store_declares_insufficient_evidence(graph, ctx):
+async def test_empty_store_returns_low_confidence_fallback(graph, ctx):
+    from backend.core.prompts import get_prompt
+
     state = initial_state("Quel est le préavis de licenciement au Burkina Faso ?")
     response = await run_query(graph, ctx, state)
-    lowered = response.answer.answer.lower()
-    assert "insuffisant" in lowered or "insufficient" in lowered
+    assert response.answer.answer == get_prompt("RESPONSE_LOW_CONFIDENCE_FR")
+    assert response.answer.metadata["low_confidence_fallback"] is True
     assert not response.answer.refused
 
 

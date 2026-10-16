@@ -31,9 +31,12 @@ interface AnswerViewProps {
 export default function AnswerView({ answer }: AnswerViewProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  // Direct-route answers (casual conversation, no legal retrieval): render
-  // the reply plainly — a confidence score is meaningless there.
-  const isDirect = answer.metadata?.route === "direct";
+  // Conversation, general knowledge, and confidence fallbacks have no
+  // meaningful retrieval-confidence score to display.
+  const isUnscored =
+    answer.metadata?.route === "direct" ||
+    answer.metadata?.route === "general" ||
+    answer.metadata?.low_confidence_fallback === true;
 
   if (answer.refused) {
     return (
@@ -54,7 +57,7 @@ export default function AnswerView({ answer }: AnswerViewProps) {
 
   return (
     <View style={styles.container}>
-      {!isDirect && (
+      {!isUnscored && (
         <View style={[styles.row, styles.badges]}>
           <ConfidenceBadge confidence={answer.confidence} />
           {answer.requires_human_review && (

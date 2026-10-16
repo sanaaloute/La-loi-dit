@@ -1,10 +1,9 @@
 """Query Router Agent.
 
-Runs right after the input guardrail and decides whether a query needs the
-legal retrieval pipeline at all.  Short greetings, thanks, goodbyes and meta
-questions about the assistant are answered directly by the response
-generator (``route == "direct"``); everything else follows the full
-planner/retrieval/reasoning path (``route == "retrieval"``).
+Runs right after the input guardrail and selects one of three paths:
+conversation (``direct``), stable general knowledge without corpus citations
+(``general``), or the full planner/retrieval/reasoning path (``retrieval``).
+Specific, current or document-dependent legal questions always use retrieval.
 
 Fail-safe by design: any doubt, LLM error or unparseable classification
 routes to retrieval, so a possible legal question never loses its grounding.
@@ -107,11 +106,11 @@ def parse_route(text: str) -> str:
     if not tokens:
         return "retrieval"
     token = tokens[0].strip(".!:»«\"'").upper()
-    return "direct" if token == "DIRECT" else "retrieval"
+    return {"DIRECT": "direct", "GENERAL": "general"}.get(token, "retrieval")
 
 
 class QueryRouterAgent(Agent):
-    """Routes guardrail-approved queries to the direct or retrieval path."""
+    """Routes guardrail-approved queries to direct, general, or retrieval."""
 
     name = "query_router"
     # Resolved through the prompt registry (backend.core.prompts.QUERY_ROUTER_SYSTEM)

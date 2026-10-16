@@ -4,16 +4,8 @@ import { Fragment, useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import ErrorCard from "@/components/ui/ErrorCard";
 import LoadingState from "@/components/ui/LoadingState";
-import { adminApi, listModels, type ModelInfo, type ProvidersResponse, type Tier } from "@/lib/api";
+import { adminApi, listModels, type ModelInfo, type ProvidersResponse } from "@/lib/api";
 import { EmptyState, SectionCard, StatusBadge, TableShell, Td, Th, THead, formatCheckName, formatCheckValue } from "./ui";
-
-const TIER_STYLES: Record<Tier, { label: string; className: string }> = {
-  gratuit: { label: "Gratuit", className: "border-gray-300 bg-gray-100 text-gray-600" },
-  pro: { label: "Pro", className: "border-accent/40 bg-accent/10 text-accent" },
-  cabinet: { label: "Cabinet", className: "border-ink/40 bg-ink/10 text-ink" },
-};
-
-const TIER_ORDER: Tier[] = ["gratuit", "pro", "cabinet"];
 
 export default function ProvidersTab() {
   const [providers, setProviders] = useState<ProvidersResponse | null>(null);
@@ -131,25 +123,15 @@ export default function ProvidersTab() {
                       <tr>
                         <Td colSpan={6} className="bg-gray-50">
                           <div className="flex flex-wrap gap-1.5">
-                            {p.models.map((m) => {
-                              const badge = m.tier_required !== "gratuit" ? TIER_STYLES[m.tier_required] : null;
-                              return (
-                                <span
-                                  key={m.id}
-                                  title={m.id}
-                                  className="inline-flex items-center gap-1.5 rounded-full border border-gray-300 bg-gray-50 px-2.5 py-1 text-xs text-gray-700"
-                                >
-                                  {m.label}
-                                  {badge && (
-                                    <span
-                                      className={`rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${badge.className}`}
-                                    >
-                                      {badge.label}
-                                    </span>
-                                  )}
-                                </span>
-                              );
-                            })}
+                            {p.models.map((m) => (
+                              <span
+                                key={m.id}
+                                title={m.id}
+                                className="inline-flex items-center gap-1.5 rounded-full border border-gray-300 bg-gray-50 px-2.5 py-1 text-xs text-gray-700"
+                              >
+                                {m.label}
+                              </span>
+                            ))}
                           </div>
                         </Td>
                       </tr>
@@ -162,33 +144,20 @@ export default function ProvidersTab() {
         )}
       </SectionCard>
 
-      {/* Tier defaults */}
-      <SectionCard title="Modèles par défaut par offre">
+      {/* Shared default */}
+      <SectionCard title="Modèle par défaut — tous les utilisateurs">
         {!providers || Object.keys(providers.defaults).length === 0 ? (
           <EmptyState message="Aucun modèle par défaut défini." />
         ) : (
-          <div className="grid gap-3 sm:grid-cols-3">
-            {TIER_ORDER.map((tier) => {
-              const style = TIER_STYLES[tier];
-              const modelId = providers.defaults[tier];
-              const model = models?.find((m) => m.id === modelId);
-              return (
-                <div
-                  key={tier}
-                  className="rounded-xl border border-gray-200 bg-gray-50 p-4"
-                >
-                  <span
-                    className={`inline-block rounded-full border px-2.5 py-1 text-xs font-medium ${style.className}`}
-                  >
-                    {style.label}
-                  </span>
-                  <p className="mt-2 truncate text-sm font-medium text-gray-900" title={modelId}>
-                    {model?.label ?? modelId ?? "—"}
-                  </p>
-                  {model && <p className="mt-0.5 truncate font-mono text-[11px] text-gray-500">{model.id}</p>}
-                </div>
-              );
-            })}
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <p className="truncate text-sm font-medium text-gray-900" title={providers.defaults.gratuit}>
+              {models?.find((m) => m.id === providers.defaults.gratuit)?.label ??
+                providers.defaults.gratuit ??
+                "—"}
+            </p>
+            <p className="mt-0.5 truncate font-mono text-[11px] text-gray-500">
+              {providers.defaults.gratuit}
+            </p>
           </div>
         )}
       </SectionCard>
@@ -230,27 +199,16 @@ export default function ProvidersTab() {
                 <Th>Libellé</Th>
                 <Th>Identifiant</Th>
                 <Th>Fournisseur</Th>
-                <Th>Offre requise</Th>
               </tr>
             </THead>
             <tbody>
-              {models.map((m) => {
-                const style = TIER_STYLES[m.tier_required];
-                return (
-                  <tr key={m.id}>
-                    <Td className="text-gray-700">{m.label}</Td>
-                    <Td className="font-mono text-xs">{m.id}</Td>
-                    <Td className="text-xs">{m.provider}</Td>
-                    <Td>
-                      <span
-                        className={`inline-block rounded-full border px-2 py-0.5 text-[11px] font-medium ${style.className}`}
-                      >
-                        {style.label}
-                      </span>
-                    </Td>
-                  </tr>
-                );
-              })}
+              {models.map((m) => (
+                <tr key={m.id}>
+                  <Td className="text-gray-700">{m.label}</Td>
+                  <Td className="font-mono text-xs">{m.id}</Td>
+                  <Td className="text-xs">{m.provider}</Td>
+                </tr>
+              ))}
             </tbody>
           </TableShell>
         )}

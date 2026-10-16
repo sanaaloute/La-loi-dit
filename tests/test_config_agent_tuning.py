@@ -54,8 +54,8 @@ def test_agent_tuning_defaults_match_legacy_constants():
     assert s.planner_max_sub_question_tasks == 6
     assert s.answer_max_excerpt_chars == 4000
     assert s.answer_child_preview_chars == 200
-    assert s.confidence_citation_weight == 0.4
-    assert s.confidence_coverage_weight == 0.6
+    assert s.confidence_citation_weight == 0.6
+    assert s.confidence_coverage_weight == 0.4
     assert s.confidence_unresolved_conflict_dampening == 0.85
     assert s.confidence_reflection_gap_cap == 0.75
     assert s.source_default_authority_weight == 0.15
@@ -111,8 +111,8 @@ def test_confidence_blend_weights_change_aggregate():
     default = agent._parse_final("Le préavis est d'un mois [1].", _answer_state(Settings()), _ctx(Settings()))
     tuned = Settings(confidence_citation_weight=1.0, confidence_coverage_weight=0.0)
     overridden = agent._parse_final("Le préavis est d'un mois [1].", _answer_state(tuned), _ctx(tuned))
-    # default: 0.4 * 1.0 + 0.6 * 0.5 = 0.7 ; override: 1.0 * 1.0 + 0.0 * 0.5 = 1.0
-    assert default["final_answer"].confidence == 0.7
+    # default: 0.6 * 1.0 + 0.4 * 0.5 = 0.8 ; override: 1.0 * 1.0 + 0.0 * 0.5 = 1.0
+    assert default["final_answer"].confidence == 0.8
     assert overridden["final_answer"].confidence == 1.0
 
 
@@ -126,13 +126,13 @@ def test_unresolved_conflict_dampening_is_configurable():
         resolved=False,
     )
     tuned = Settings(confidence_unresolved_conflict_dampening=0.5)
-    # Base blend: 0.4 * 1.0 + 0.6 * 0.5 = 0.7, dampened once: 0.7 * 0.5 = 0.35.
+    # Base blend: 0.6 * 1.0 + 0.4 * 0.5 = 0.8, dampened once: 0.8 * 0.5 = 0.4.
     update = agent._parse_final(
         "Le préavis est d'un mois [1].",
         _answer_state(tuned, conflicts=[conflict]),
         _ctx(tuned),
     )
-    assert update["final_answer"].confidence == 0.35
+    assert update["final_answer"].confidence == 0.4
 
 
 def test_conflict_dampening_exponent_is_capped():
@@ -150,13 +150,13 @@ def test_conflict_dampening_exponent_is_capped():
         for i in range(5)
     ]
     tuned = Settings(confidence_unresolved_conflict_dampening=0.5)
-    # Base 0.7 x 0.5^3 (capped, not ^5) = 0.0875 -> 0.09.
+    # Base 0.8 x 0.5^3 (capped, not ^5) = 0.1.
     update = agent._parse_final(
         "Le préavis est d'un mois [1].",
         _answer_state(tuned, conflicts=conflicts),
         _ctx(tuned),
     )
-    assert update["final_answer"].confidence == 0.09
+    assert update["final_answer"].confidence == 0.1
 
 
 def test_excerpt_and_retrieval_mean_knobs():

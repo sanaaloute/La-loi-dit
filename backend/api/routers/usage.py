@@ -1,4 +1,4 @@
-"""Usage router: per-user token consumption vs. tier daily budget."""
+"""Usage router: per-user consumption against the shared daily budgets."""
 
 from __future__ import annotations
 
@@ -21,13 +21,12 @@ async def usage_me(
     request: Request,
     user: TokenPayload = Depends(require_user),
 ) -> dict[str, Any]:
-    """Return the caller's token usage: today, remaining budget, 30-day history.
-
-    Dev-store users (no DB id) are unmetered: zeros and an empty history.
-    """
+    """Return today's usage, both remaining budgets, and 30-day history."""
     ctx = get_ctx(request)
     tier = user.tier or "gratuit"
-    budget = catalog.get_tier(tier, settings=ctx.settings).get("daily_token_budget", 0)
+    config = catalog.get_tier(None, settings=ctx.settings)
+    token_budget = config.get("daily_token_budget", 0)
+    request_budget = config.get("daily_request_budget", 0)
 
     history: list[dict[str, Any]] = []
     if user.user_id and ctx.user_store is not None:
@@ -38,11 +37,14 @@ async def usage_me(
     if history and history[0].get("day") == today_iso:
         today = {k: history[0][k] for k in _EMPTY_TODAY}
 
-    remaining = max(0, budget - (today["tokens_in"] + today["tokens_out"]))
+    tokens_used = today["tokens_in"] + today["tokens_out"]
     return {
         "tier": tier,
-        "daily_budget": budget,
+        "daily_budget": token_budget,
+        "daily_token_budget": token_budget,
+        "daily_request_budget": request_budget,
         "today": today,
-        "remaining_tokens": remaining,
+        "remaining_tokens": max(0, token_budget - tokens_used),
+        "remaining_requests": max(0, request_budget - today["requests"]),
         "history": history,
     }

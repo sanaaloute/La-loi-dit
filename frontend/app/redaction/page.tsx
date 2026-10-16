@@ -22,7 +22,6 @@ import ErrorCard from "@/components/ui/ErrorCard";
 import GatePanel from "@/components/ui/GatePanel";
 import LoadingState from "@/components/ui/LoadingState";
 import PageShell from "@/components/ui/PageShell";
-import UpgradePanel from "@/components/ui/UpgradePanel";
 import { useAuthToken } from "@/lib/useAuth";
 import {
   ApiError,
@@ -31,12 +30,10 @@ import {
   exportDraft,
   getModel,
   listDraftTemplates,
-  me,
   type DraftField,
   type DraftResponse,
   type DraftTemplate,
   type ExportFormat,
-  type UserProfile,
 } from "@/lib/api";
 
 type Step = "templates" | "form" | "result";
@@ -53,11 +50,6 @@ const DRAFT_EXPORTS: { id: ExportFormat | "md"; label: string; icon: React.Eleme
   { id: "word", label: "Word", icon: FileText, ext: "docx" },
   { id: "md", label: "Markdown", icon: FileCode, ext: "md" },
 ];
-
-function isForbidden(err: unknown): boolean {
-  if (err instanceof ApiError) return err.status === 403;
-  return err instanceof Error && err.message.includes("403");
-}
 
 const INPUT_CLASS =
   "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-accent/60 focus:outline-none";
@@ -112,9 +104,7 @@ function FieldInput({
 
 export default function RedactionPage() {
   const [token] = useAuthToken();
-  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [templates, setTemplates] = useState<DraftTemplate[] | null>(null);
-  const [forbidden, setForbidden] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [step, setStep] = useState<Step>("templates");
@@ -138,16 +128,7 @@ export default function RedactionPage() {
         if (!cancelled) setTemplates(res.templates);
       })
       .catch((err) => {
-        if (cancelled) return;
-        if (isForbidden(err)) setForbidden(true);
-        else setLoadError(err instanceof Error ? err.message : "Une erreur est survenue.");
-      });
-    me(token)
-      .then((p) => {
-        if (!cancelled) setProfile(p);
-      })
-      .catch(() => {
-        // Profil indisponible : les boutons d'export ne sont pas filtrés.
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : "Une erreur est survenue.");
       });
     return () => {
       cancelled = true;
@@ -202,8 +183,7 @@ export default function RedactionPage() {
       setDraft(result);
       setStep("result");
     } catch (err) {
-      if (isForbidden(err)) setForbidden(true);
-      else if (err instanceof ApiError && err.status === 429) setQuotaError(err.message);
+      if (err instanceof ApiError && err.status === 429) setQuotaError(err.message);
       else setFormError(err instanceof Error ? err.message : "Échec de la génération du document.");
     } finally {
       setBusy(false);
@@ -236,8 +216,6 @@ export default function RedactionPage() {
     }
   }
 
-  const allowedExports = profile?.features?.export;
-
   return (
     <PageShell
       header={<AppHeader token={token} />}
@@ -245,8 +223,6 @@ export default function RedactionPage() {
     >
       {!token ? (
         <GatePanel body="La rédaction de documents nécessite un compte. Connectez-vous depuis l'icône de compte en haut à droite." />
-      ) : forbidden ? (
-        <UpgradePanel body="La génération de documents juridiques (contrats, actes de procédure) est réservée aux offres Pro et Cabinet. Contactez votre administrateur pour mettre à niveau votre compte." />
       ) : loadError ? (
         <ErrorCard message={loadError}>
           <button
@@ -329,9 +305,6 @@ export default function RedactionPage() {
                   Quota journalier atteint
                 </p>
                 <p className="text-xs text-warn-text">{quotaError}</p>
-                <p className="mt-1 text-xs text-warn-text/80">
-                  Passez à l&apos;offre supérieure pour continuer.
-                </p>
               </div>
             )}
             <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-2xl backdrop-blur-xl sm:p-6">
@@ -454,7 +427,7 @@ export default function RedactionPage() {
               </div>
 
               <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-gray-200 pt-4">
-                {DRAFT_EXPORTS.filter((f) => !allowedExports || allowedExports.includes(f.id)).map(
+                {DRAFT_EXPORTS.map(
                   (f) => (
                     <button
                       key={f.id}

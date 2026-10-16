@@ -2,9 +2,9 @@
 
 Enforces three deterministic rules:
   1. Refusal policy — an answer with zero evidence that does not already
-     declare insufficient evidence is refused outright.  Direct-route answers
-     (``route == "direct"``: greetings, meta questions, general conversation)
-     are exempt — they are conversational by design and carry no evidence.
+     declare insufficient evidence is refused outright. Direct conversation
+     and general-knowledge routes are exempt because they carry no evidence
+     by design and never claim corpus grounding.
   2. Unsafe legal advice — matching content is kept but gets a warning and
      is escalated for human review.
   3. Citation integrity — every citation must be ``verified=True`` and
@@ -78,8 +78,8 @@ async def check_output(
     effective_evidence = evidence if evidence else answer.evidence
 
     # --- 1. refusal policy: no evidence and no honest declaration ---
-    # Direct-route answers legitimately have no evidence (see module docstring).
-    if route != "direct" and not effective_evidence and not answer.refused:
+    # Direct/general routes legitimately have no corpus evidence.
+    if route not in {"direct", "general"} and not effective_evidence and not answer.refused:
         lowered = answer.answer.lower()
         declares_insufficient = any(p in lowered for p in _INSUFFICIENT_EVIDENCE_PHRASES)
         if not declares_insufficient:

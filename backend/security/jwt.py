@@ -25,7 +25,7 @@ class TokenPayload(BaseModel):
     role: Role
     exp: int
     user_id: Optional[str] = None  # DB user id (None for dev-store users)
-    tier: str = "gratuit"  # subscription tier claim
+    tier: str = "gratuit"  # legacy subscription claim; not an entitlement
     jti: Optional[str] = None  # JWT ID for single-session enforcement
 
 

@@ -13,7 +13,7 @@ flowchart LR
     ig -->|allowed| lg[language_gate]
     ig -->|blocked| ref[refusal]
     lg --> qr[query_router]
-    qr -->|direct| rg[response_generator]
+    qr -->|direct/general| rg[response_generator]
     qr -->|retrieval| pl[planner]
     pl --> ca[context_agent]
     ca --> ma[memory_agent]
@@ -31,7 +31,7 @@ flowchart LR
     rf -.->|should_retry_retrieval, iteration ≤ 1| fan
     rf --> rg
     rg --> clv[claim_verification]
-    rg -->|direct route| og
+    rg -->|direct/general routes| og
     clv --> cv[citation_verification]
     cv --> og[output_guardrail]
     og --> a[Final answer]
@@ -67,7 +67,8 @@ Converts the raw question into a `RetrievalPlan`: sub-questions, typed
 language. With a real LLM provider it calls `complete_json` (which itself
 allows one corrective retry); on any failure — and with the `mock` provider
 — it uses `heuristic_plan`, a keyword-driven deterministic planner that can
-never hallucinate. Also extracts an optional `scenario_date` for legal
+never hallucinate. Tool-transcript output is also rejected and falls back to
+that deterministic plan. Also extracts an optional `scenario_date` for legal
 timeline reasoning.
 
 ## context_agent (`backend/agents/context_agent.py`)
@@ -168,18 +169,21 @@ into the `FinalAnswer` (text cleanup, confidence scaled by citation accuracy).
 
 ## response_generator (`backend/agents/response_generator.py`)
 
-Composes the final answer strictly from the numbered evidence excerpts,
-citing every substantive statement. Without an LLM it uses a deterministic
-template that quotes only real evidence — it cannot invent legal content.
-Retrieval language is French; the LLM translates when the user asked in
-another language (the template states the language limitation).
+Composes retrieval answers strictly from numbered evidence excerpts, citing
+every substantive statement. Direct conversation and stable general-knowledge
+routes skip retrieval and citations; general answers use model knowledge only
+for concepts that do not depend on a current or jurisdiction-specific text and
+receive an explicit ungrounded-note.
 
 ## output_guardrail (`backend/agents/output_guardrail.py`)
 
-Final policy gate. Applies confidence thresholds (warning below 0.55,
-`requires_human_review` below 0.40), unsafe-legal-advice detection, and
-appends the mandatory legal disclaimer (French/English). When claim
-verification flagged deductions or unverifiable statements
+Final policy gate. Performs unsafe-output checks, then replaces any non-refused
+retrieval answer below confidence 0.55 with a localized insufficient-information
+message (citations/evidence are cleared and `low_confidence_fallback` is set).
+Safety refusals take precedence; direct/general routes are not subject to that
+retrieval-confidence fallback. Sufficiently grounded answers receive the
+appropriate legal disclaimer (French/English). When claim verification flagged
+deductions or unverifiable statements
 (`FinalAnswer.metadata["inferred_claims"]` / `["unverified_claims"]`), a
 bilingual caution note is appended to the answer body before the disclaimer —
 this note is user-facing and survives the production wiping of internal

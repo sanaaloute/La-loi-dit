@@ -16,42 +16,21 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import {
   eraseMemories,
   getPreferences,
-  getSubscription,
   listMemories,
   listModels,
   usageMe,
   type MemoryRecord,
   type ModelInfo,
   type ModelList,
-  type SubscriptionInfo,
-  type Tier,
   type UsageResponse,
 } from "../../src/lib/api";
 import { useAuth } from "../../src/lib/auth";
-import { longDate, shortDay } from "../../src/lib/format";
+import { shortDay } from "../../src/lib/format";
 import { GOVERNMENT_DISCLAIMER, OFFICIAL_SOURCES } from "../../src/lib/legal-sources";
 import { personaLabel, personaOption } from "../../src/lib/persona";
 import { getModel, setModel } from "../../src/lib/storage";
 import type { ThemeColors } from "../../src/theme";
 import { useTheme } from "../../src/theme-context";
-
-const TIER_LABELS: Record<Tier, string> = {
-  gratuit: "Gratuit",
-  pro: "Pro",
-  cabinet: "Cabinet",
-};
-
-const STATUS_LABELS: Record<SubscriptionInfo["status"], string> = {
-  active: "Actif",
-  past_due: "Paiement en retard",
-  canceled: "Résilié",
-  none: "Aucun abonnement",
-};
-
-const TIER_BADGES: Partial<Record<Tier, string>> = {
-  pro: "Pro",
-  cabinet: "Cabinet",
-};
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)} M`;
@@ -65,7 +44,6 @@ export default function AccountScreen() {
   const { colors, isDark, toggleTheme } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [usage, setUsage] = useState<UsageResponse | null>(null);
-  const [subscription, setSubscription] = useState<SubscriptionInfo | null>(null);
   const [modelList, setModelList] = useState<ModelList | null>(null);
   const [persona, setPersona] = useState<string | null>(null);
   const [memories, setMemories] = useState<MemoryRecord[] | null>(null);
@@ -79,11 +57,10 @@ export default function AccountScreen() {
     if (!token) return;
     setLoading(true);
     void refreshProfile();
-    Promise.allSettled([usageMe(), getSubscription(), listModels(), getPreferences(), listMemories()]).then(
+    Promise.allSettled([usageMe(), listModels(), getPreferences(), listMemories()]).then(
       (results) => {
-        const [u, s, m, p, mem] = results;
+        const [u, m, p, mem] = results;
         setUsage(u.status === "fulfilled" ? u.value : null);
-        setSubscription(s.status === "fulfilled" ? s.value : null);
         setModelList(m.status === "fulfilled" ? m.value : null);
         setPersona(
           p.status === "fulfilled" && typeof p.value.persona === "string"
@@ -128,7 +105,6 @@ export default function AccountScreen() {
     modelList?.models.find((m) => m.id === effectiveModel)?.label ?? "Modèle par défaut";
 
   function pickModel(model: ModelInfo | null) {
-    if (model && !model.allowed) return;
     const id = model?.id ?? null;
     setModel(id);
     setSelectedModel(id);
@@ -233,11 +209,6 @@ export default function AccountScreen() {
                 {profile?.workspace_name ?? ""}
               </Text>
             </View>
-            {profile && (
-              <View style={styles.tierBadge}>
-                <Text style={styles.tierBadgeText}>{TIER_LABELS[profile.tier]}</Text>
-              </View>
-            )}
           </View>
         </View>
 
@@ -258,11 +229,11 @@ export default function AccountScreen() {
                 />
               </View>
               <Text style={styles.usageText}>
-                {formatTokens(todayTotal)} / {formatTokens(usage.daily_budget)} jetons —{" "}
-                {usage.today.requests} requête{usage.today.requests > 1 ? "s" : ""}
+                {formatTokens(todayTotal)} / {usage.daily_token_budget > 0 ? formatTokens(usage.daily_token_budget) : "∞"} jetons —{" "}
+                {usage.today.requests} / {usage.daily_request_budget > 0 ? usage.daily_request_budget : "∞"} requêtes
               </Text>
               <Text style={styles.usageRemaining}>
-                Restant : {formatTokens(usage.remaining_tokens)} jetons
+                Restant : {formatTokens(usage.remaining_tokens)} jetons — {usage.remaining_requests} requêtes
               </Text>
               {chartDays.length > 0 && (
                 <View style={styles.chart}>
@@ -288,42 +259,6 @@ export default function AccountScreen() {
             </>
           ) : (
             <Text style={styles.mutedText}>Utilisation indisponible.</Text>
-          )}
-        </View>
-
-        {/* Abonnement (lecture seule) */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Abonnement</Text>
-          {subscription ? (
-            <View style={styles.subscriptionBlock}>
-              <View style={styles.subscriptionRow}>
-                <Text style={styles.subscriptionLabel}>Offre</Text>
-                <Text style={styles.subscriptionValue}>
-                  {TIER_LABELS[subscription.tier as Tier] ?? subscription.tier}
-                </Text>
-              </View>
-              <View style={styles.subscriptionRow}>
-                <Text style={styles.subscriptionLabel}>Statut</Text>
-                <Text style={styles.subscriptionValue}>{STATUS_LABELS[subscription.status]}</Text>
-              </View>
-              {subscription.current_period_end && (
-                <View style={styles.subscriptionRow}>
-                  <Text style={styles.subscriptionLabel}>
-                    {subscription.cancel_at_period_end ? "Fin le" : "Renouvellement le"}
-                  </Text>
-                  <Text style={styles.subscriptionValue}>
-                    {longDate(subscription.current_period_end)}
-                  </Text>
-                </View>
-              )}
-              <Text style={styles.subscriptionHint}>
-                La souscription et le changement d'offre se gèrent sur l'application web.
-              </Text>
-            </View>
-          ) : (
-            <Text style={styles.mutedText}>
-              {loading ? "Chargement…" : "Abonnement indisponible."}
-            </Text>
           )}
         </View>
 
@@ -463,25 +398,18 @@ export default function AccountScreen() {
                 )}
               </Pressable>
               {(modelList?.models ?? []).map((model) => {
-                const badge = model.allowed ? undefined : TIER_BADGES[model.tier_required];
                 const selected = selectedModel === model.id;
                 return (
                   <Pressable
                     key={model.id}
-                    style={[styles.modelRow, !model.allowed && { opacity: 0.55 }]}
+                    style={styles.modelRow}
                     onPress={() => pickModel(model)}
-                    disabled={!model.allowed}
                   >
                     <View style={styles.modelRowText}>
                       <Text style={styles.modelLabel}>{model.label}</Text>
                       <Text style={styles.modelProvider}>{model.provider}</Text>
                     </View>
                     {selected && <Ionicons name="checkmark-circle" size={18} color={colors.accent} />}
-                    {badge && (
-                      <View style={styles.modelBadge}>
-                        <Text style={styles.modelBadgeText}>{badge}</Text>
-                      </View>
-                    )}
                   </Pressable>
                 );
               })}

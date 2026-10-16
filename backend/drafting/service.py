@@ -8,7 +8,7 @@ Pipeline (``generate_draft``):
 2. **Ground** — a handful of citable provisions are retrieved with the
    existing ``RetrievalCoordinator`` (vector + keyword tasks built from the
    template's legal domain query), exactly like the chat graph does.
-3. **Enrich** — the per-request (tier-gated) LLM rewrites the draft to fit
+3. **Enrich** — the per-request LLM rewrites the draft to fit
    the fields and free-form instructions, citing ONLY the retrieved
    provisions with ``[n]`` markers. The mock provider skips this step, so
    offline runs keep the deterministic skeleton.

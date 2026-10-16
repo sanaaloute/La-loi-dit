@@ -99,7 +99,7 @@ Docker Compose: API, Celery, Nginx, PostgreSQL, Redis, Milvus, Temporal, Prometh
 ### 3.4 Legal-reasoning weaknesses
 1. **No case-analysis flow** (facts → issues → applicable law → application; LAW vs APPLICATION vs ASSUMPTION labeling).
 2. **No deterministic legal calculators** (préavis, indemnité de licenciement, délais); generic calculator/date tools exist but are unwired.
-3. **Confidence model is a single float** (0.4·citation_accuracy + 0.6·coverage with caps), not the spec's multi-dimensional model (source/retrieval/legal_support/temporal/citation/coverage).
+3. **Confidence model is a single float** (0.6·citation_accuracy + 0.4·coverage with caps), not the spec's multi-dimensional model (source/retrieval/legal_support/temporal/citation/coverage).
 4. **Response format** is not the spec's sectioned layout; disclaimers are fixed boilerplate, not context-sensitive.
 5. **Retrieved-document injection defense missing** — chunks enter prompts unscanned and unwrapped as DATA; only user-query injection is blocked.
 

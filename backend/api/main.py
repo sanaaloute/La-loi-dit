@@ -44,16 +44,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.ctx = ctx
     app.state.graph = build_graph(ctx)
 
-    # Load persisted admin tier-budget overrides into the catalog cache so
-    # enforcement matches the stored settings from the first request.
+    # Load the persisted global daily-budget override into the catalog cache.
     if ctx.user_store is not None:
         try:
             from backend.core import catalog
 
-            raw = await ctx.user_store.get_setting(catalog.TIER_BUDGETS_SETTING_KEY)
+            raw = await ctx.user_store.get_setting(catalog.DAILY_BUDGETS_SETTING_KEY)
             catalog.set_budget_overrides(catalog.parse_budget_overrides(raw))
         except Exception:
-            logger.warning("could not load tier budget overrides", exc_info=True)
+            logger.warning("could not load daily budget override", exc_info=True)
 
     from backend.api.routers.auth import build_user_store
 
@@ -313,12 +312,11 @@ def create_app() -> FastAPI:
         return PlainTextResponse(generate_latest().decode("utf-8"), media_type=CONTENT_TYPE_LATEST)
 
     # --- routers under /api/v1 ---
-    from backend.api.routers import admin, articles, auth, billing, bookmarks, chat, citations, documents, draft, export, freshness, legal, models, push, search, share, sources, usage
+    from backend.api.routers import admin, articles, auth, bookmarks, chat, citations, documents, draft, export, freshness, legal, models, push, search, share, sources, usage
 
     app.include_router(admin.router, prefix="/api/v1")
     app.include_router(articles.router, prefix="/api/v1")
     app.include_router(auth.router, prefix="/api/v1")
-    app.include_router(billing.router, prefix="/api/v1")
     app.include_router(bookmarks.router, prefix="/api/v1")
     app.include_router(chat.router, prefix="/api/v1")
     app.include_router(citations.router, prefix="/api/v1")

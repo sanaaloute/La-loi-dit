@@ -85,9 +85,9 @@ overrides service addresses). Key groups:
   default 2 in the compose `api` command)
 - **Observability**: `LEGAL_AI_OTEL_ENDPOINT` / `LEGAL_AI_OTEL_ENABLED`,
   `LEGAL_AI_LANGFUSE_*`
-- **Billing**: `LEGAL_AI_PADDLE_*` — disabled by default; see
-  [billing.md](billing.md) for the full Paddle setup (sandbox vs prod,
-  price ids, webhook registration, ngrok for local testing).
+- **Docker builds**: `PYTHON_IMAGE`, `NODE_IMAGE`, `PIP_INDEX_URL`, and
+  `NPM_REGISTRY` select base-image/package mirrors. Backend Python packages
+  are installed with uv, using local wheels offline-first when available.
 
 ## Strict infrastructure mode
 
@@ -122,22 +122,19 @@ changes the contract:
   in strict mode with a critical dependency down (503, see above). Both
   endpoints are exempt from rate limiting, as is `/metrics`.
 
-## Per-tier rate limits
+## Usage limits
 
-`LEGAL_AI_RATE_LIMIT_PER_MINUTE` is now only the **anonymous/IP** default.
-Authenticated requests are limited per subscription tier from the catalog
-(`backend/core/catalog.py`, overridable via `LEGAL_AI_TIER_CATALOG_JSON`):
+All users have access to every feature and configured model; legacy JWT/DB
+tier values no longer change entitlements. Anti-abuse per-minute/per-second
+limits from the shared catalog remain active, while
+`LEGAL_AI_RATE_LIMIT_PER_MINUTE` is the **anonymous/IP** default. Invalid or
+expired tokens also fall back to that anonymous IP bucket.
 
-| Tier | Requests/minute |
-|---|---|
-| anonymous (per IP) | `LEGAL_AI_RATE_LIMIT_PER_MINUTE` (30) |
-| gratuit | 30 |
-| pro | 120 |
-| cabinet | 600 |
-
-The middleware resolves the tier from the JWT `tier` claim — no database
-lookup on the hot path; invalid/expired tokens fall back to the anonymous IP
-bucket.
+Metered accounts share one daily budget: **30 requests and 5 000 000 tokens**.
+Admins can change both values globally in the Quotas tab or through
+`GET/PATCH /api/v1/admin/settings/daily-budgets`; the override is persisted as
+`daily_budgets`. Anonymous callers are not daily-metered and remain protected
+by the IP rate limits.
 
 ## Scaling workers
 

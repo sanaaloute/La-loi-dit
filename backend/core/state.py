@@ -49,11 +49,11 @@ class GraphState(TypedDict, total=False):
     session_id: str
     language: str  # response language requested by the user
     scenario_date: Optional[str]  # ISO date for legal timeline reasoning
-    llm: Any  # per-request LLMClient override (tier-gated); nodes fall back to ctx.llm
+    llm: Any  # per-request LLMClient override; nodes fall back to ctx.llm
 
     # --- pipeline artefacts ---
     guardrail: GuardrailResult
-    route: str  # "retrieval" (default) or "direct" — set by the query router
+    route: str  # "retrieval" (default), "direct", or "general" — query router
     plan: RetrievalPlan
     conversation_context: list[dict[str, Any]]
     memories: list[dict[str, Any]]

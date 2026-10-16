@@ -3,14 +3,8 @@
 import { useEffect, useState } from "react";
 import ErrorCard from "@/components/ui/ErrorCard";
 import LoadingState from "@/components/ui/LoadingState";
-import { adminApi, type Tier, type TierBudgetsPatch, type TierBudgetsResponse } from "@/lib/api";
+import { adminApi, type DailyBudgetPatch, type DailyBudgetsResponse } from "@/lib/api";
 import { INPUT_CLASS, PRIMARY_BUTTON_CLASS, SectionCard, formatNumber } from "./ui";
-
-const TIER_OPTIONS: { value: Tier; label: string }[] = [
-  { value: "gratuit", label: "Gratuit" },
-  { value: "pro", label: "Pro" },
-  { value: "cabinet", label: "Cabinet" },
-];
 
 const BUDGET_FIELDS = [
   { key: "daily_token_budget", label: "Tokens par jour" },
@@ -18,21 +12,17 @@ const BUDGET_FIELDS = [
 ] as const;
 
 type BudgetField = (typeof BUDGET_FIELDS)[number]["key"];
-type Draft = Record<Tier, Record<BudgetField, string>>;
+type Draft = Record<BudgetField, string>;
 
-function toDraft(data: TierBudgetsResponse): Draft {
-  const draft = {} as Draft;
-  for (const { value: tier } of TIER_OPTIONS) {
-    draft[tier] = {
-      daily_token_budget: String(data.effective[tier].daily_token_budget),
-      daily_request_budget: String(data.effective[tier].daily_request_budget),
-    };
-  }
-  return draft;
+function toDraft(data: DailyBudgetsResponse): Draft {
+  return {
+    daily_token_budget: String(data.effective.daily_token_budget),
+    daily_request_budget: String(data.effective.daily_request_budget),
+  };
 }
 
 export default function QuotasTab() {
-  const [budgets, setBudgets] = useState<TierBudgetsResponse | null>(null);
+  const [budgets, setBudgets] = useState<DailyBudgetsResponse | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +34,7 @@ export default function QuotasTab() {
     setLoading(true);
     setError(null);
     try {
-      const data = await adminApi.tierBudgets();
+      const data = await adminApi.dailyBudgets();
       setBudgets(data);
       setDraft(toDraft(data));
     } catch (err) {
@@ -64,20 +54,17 @@ export default function QuotasTab() {
     setActionError(null);
     setSaved(false);
     try {
-      // Only send the fields that actually changed.
-      const patch: TierBudgetsPatch = {};
-      for (const { value: tier } of TIER_OPTIONS) {
-        for (const { key } of BUDGET_FIELDS) {
-          const raw = draft[tier][key].replace(/[\s ]/g, "");
-          if (raw === String(budgets.effective[tier][key])) continue;
-          const parsed = Number(raw);
-          if (!Number.isInteger(parsed) || parsed < 0) {
-            throw new Error("Les quotas doivent être des nombres entiers positifs ou nuls (0 = illimité).");
-          }
-          patch[tier] = { ...patch[tier], [key]: parsed };
+      const patch: DailyBudgetPatch = {};
+      for (const { key } of BUDGET_FIELDS) {
+        const raw = draft[key].replace(/[\s ]/g, "");
+        if (raw === String(budgets.effective[key])) continue;
+        const parsed = Number(raw);
+        if (!Number.isInteger(parsed) || parsed < 0) {
+          throw new Error("Les quotas doivent être des nombres entiers positifs ou nuls (0 = illimité).");
         }
+        patch[key] = parsed;
       }
-      const updated = Object.keys(patch).length > 0 ? await adminApi.patchTierBudgets(patch) : budgets;
+      const updated = Object.keys(patch).length > 0 ? await adminApi.patchDailyBudgets(patch) : budgets;
       setBudgets(updated);
       setDraft(toDraft(updated));
       setSaved(true);
@@ -108,7 +95,7 @@ export default function QuotasTab() {
       {actionError && <ErrorCard message={actionError} />}
 
       <SectionCard
-        title="Quotas journaliers par offre"
+        title="Quotas journaliers — tous les utilisateurs"
         actions={
           <button type="button" onClick={() => void save()} disabled={saving} className={PRIMARY_BUTTON_CLASS}>
             {saving ? "Enregistrement…" : "Enregistrer"}
@@ -116,47 +103,38 @@ export default function QuotasTab() {
         }
       >
         <div className="space-y-4">
-          {TIER_OPTIONS.map(({ value: tier, label }) => (
-            <div
-              key={tier}
-              className="grid grid-cols-1 gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 sm:grid-cols-3 sm:items-end"
-            >
-              <div>
-                <p className="text-sm font-semibold text-gray-900">{label}</p>
-                <p className="mt-0.5 text-[11px] text-gray-500">
-                  Par défaut :{" "}
-                  {budgets.defaults[tier].daily_token_budget === 0
-                    ? "tokens illimités"
-                    : `${formatNumber(budgets.defaults[tier].daily_token_budget)} tokens`}
-                  {", "}
-                  {budgets.defaults[tier].daily_request_budget === 0
-                    ? "requêtes illimitées"
-                    : `${formatNumber(budgets.defaults[tier].daily_request_budget)} requêtes`}
-                </p>
-              </div>
-              {BUDGET_FIELDS.map(({ key, label: fieldLabel }) => (
-                <label key={key} className="block">
-                  <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-gray-500">
-                    {fieldLabel}
-                  </span>
-                  <input
-                    type="number"
-                    min={0}
-                    step={1}
-                    value={draft[tier][key]}
-                    onChange={(e) =>
-                      setDraft((prev) =>
-                        prev ? { ...prev, [tier]: { ...prev[tier], [key]: e.target.value } } : prev,
-                      )
-                    }
-                    disabled={saving}
-                    aria-label={`${fieldLabel} — offre ${label}`}
-                    className={INPUT_CLASS}
-                  />
-                </label>
-              ))}
+          <div className="grid grid-cols-1 gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 sm:grid-cols-3 sm:items-end">
+            <div>
+              <p className="text-sm font-semibold text-gray-900">Tous les comptes</p>
+              <p className="mt-0.5 text-[11px] text-gray-500">
+                Par défaut :{" "}
+                {budgets.defaults.daily_token_budget === 0
+                  ? "tokens illimités"
+                  : `${formatNumber(budgets.defaults.daily_token_budget)} tokens`}
+                {", "}
+                {budgets.defaults.daily_request_budget === 0
+                  ? "requêtes illimitées"
+                  : `${formatNumber(budgets.defaults.daily_request_budget)} requêtes`}
+              </p>
             </div>
-          ))}
+            {BUDGET_FIELDS.map(({ key, label }) => (
+              <label key={key} className="block">
+                <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                  {label}
+                </span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={draft[key]}
+                  onChange={(e) => setDraft((prev) => (prev ? { ...prev, [key]: e.target.value } : prev))}
+                  disabled={saving}
+                  aria-label={`${label} — tous les utilisateurs`}
+                  className={INPUT_CLASS}
+                />
+              </label>
+            ))}
+          </div>
           <p className="text-[11px] text-gray-500">
             {saved
               ? "Quotas enregistrés — appliqués immédiatement à tous les utilisateurs."

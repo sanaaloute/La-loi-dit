@@ -1,8 +1,7 @@
-"""Models router: expose the tier catalog to the frontend model picker.
+"""Models router: expose the full shared catalog to the frontend picker.
 
-Bearer optional — anonymous callers see the gratuit catalog. Every catalog
-model is returned with an `allowed` flag and the tier that unlocks it, so
-the UI can render the full catalogue with locked entries.
+Bearer optional. Legacy tier claims are accepted for compatibility, but every
+model is available to every caller and is returned with `allowed = true`.
 """
 
 from __future__ import annotations

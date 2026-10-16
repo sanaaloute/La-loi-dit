@@ -31,9 +31,9 @@ def _identity(request: Request) -> tuple[str, int, int, Optional[str], Optional[
     """Rate-limit/session identity for one request.
 
     Returns ``(key, per_minute_limit, per_second_limit, user_id, jti)``. The
-    Bearer JWT is decoded WITHOUT any DB hit: the tier claim drives the
-    per-tier limits and the user id/sub the bucket key. Invalid/expired tokens
-    degrade to the anonymous IP path — never to a 500.
+    Bearer JWT is decoded WITHOUT any DB hit: shared catalog limits and the
+    user id/sub form the bucket key. Invalid/expired tokens degrade to the
+    anonymous IP path — never to a 500.
     """
     settings = _settings_for(request)
     header = request.headers.get("authorization", "")
@@ -105,7 +105,7 @@ def _session_violation_response() -> JSONResponse:
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Per-tier rate limiter + single active session enforcement.
+    """Shared-catalog rate limiter + single active session enforcement.
 
     Enforces per-second burst limits and per-minute sustained limits. With
     multiple uvicorn workers the in-process deques are per-process — effective

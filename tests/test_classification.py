@@ -64,8 +64,8 @@ def _doc(name: str, text: str = "Code du travail. Article 1. Dispositions.") -> 
 
 
 def test_enrich_metadata_fills_structured_fields_from_title_map():
-    enriched = IngestionPipeline._enrich_metadata({}, _doc("code-du-travail-burkina-faso.pdf"))
-    assert enriched["document_name"] == "Code du travail du Burkina Faso (Loi 028-2008/AN)"
+    enriched = IngestionPipeline._enrich_metadata({}, _doc("burkina-faso_code_travail_028-2008-an_code-du-travail.pdf"))
+    assert enriched["document_name"] == "Code du travail du Burkina Faso (Loi n°028-2008/AN)"
     assert enriched["law_number"] == "028-2008/AN"
     assert enriched["document_type"] == DocumentType.CODE
     assert enriched["authority"] == AuthorityLevel.LAW
@@ -74,7 +74,7 @@ def test_enrich_metadata_fills_structured_fields_from_title_map():
 def test_enrich_metadata_keeps_explicit_values():
     enriched = IngestionPipeline._enrich_metadata(
         {"document_type": DocumentType.TREATY, "law_number": "X-1"},
-        _doc("code-du-travail-burkina-faso.pdf"),
+        _doc("burkina-faso_code_travail_028-2008-an_code-du-travail.pdf"),
     )
     assert enriched["document_type"] == DocumentType.TREATY
     assert enriched["law_number"] == "X-1"

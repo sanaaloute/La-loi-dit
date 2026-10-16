@@ -1,20 +1,20 @@
 # syntax=docker/dockerfile:1
 
 # ---------------------------------------------------------------------------
-# Builder: install all Python dependencies into /install — fully OFFLINE.
-# The wheels are pre-downloaded on the host (scripts/download_wheels.sh) so the
-# build never touches a package registry: slow/filtered build networks only
-# need the base image. PIP_INDEX_URL remains as an escape hatch for builds on
-# healthy networks (fallback if a wheel is missing).
+# Builder: install all Python dependencies into /install with uv. Local wheels
+# are used offline-first; an incomplete or wrong-architecture wheelhouse falls
+# back to the configured package mirror instead of breaking the build.
 # ---------------------------------------------------------------------------
-FROM python:3.12-slim AS builder
+ARG PYTHON_IMAGE=python:3.12-slim
+FROM ${PYTHON_IMAGE} AS builder
 
-ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_DEFAULT_TIMEOUT=600 \
     PIP_RETRIES=10 \
-    PIP_INDEX_URL=${PIP_INDEX_URL}
+    PIP_INDEX_URL=${PIP_INDEX_URL} \
+    UV_DEFAULT_INDEX=${PIP_INDEX_URL}
 
 WORKDIR /build
 COPY requirements.txt ./
@@ -22,22 +22,24 @@ COPY requirements.txt ./
 # (grpcio, pydantic-core, SQLAlchemy, lxml, temporalio, ...); the only sdist
 # (sgmllib3k, pure Python) installs without a compiler.
 COPY docker/wheels ./wheels
-# Offline-first install when wheels are present; otherwise fall back to the
-# configured index (PIP_INDEX_URL) so the image can build on fresh servers.
-# Offline-first install when wheels are present. If the local set is
-# incomplete (requirements.txt changed without re-running the download
-# script), fall back to an index-assisted install that still prefers the
-# local wheels — so a stale wheels dir never hard-fails the build.
+# Install uv from the wheelhouse when possible, otherwise from the mirror.
 RUN if [ -n "$(find ./wheels -type f -name '*.whl' 2>/dev/null | head -1)" ]; then \
-        echo "Installing Python deps from local wheels" && \
-        (pip install --no-index --find-links ./wheels --prefix=/install -r requirements.txt \
-            || { echo "Local wheels incomplete; fetching missing from ${PIP_INDEX_URL}" && \
-                 pip install --find-links ./wheels --prefix=/install -r requirements.txt; }) && \
-        pip install --no-index --find-links ./wheels --prefix=/install --no-deps setuptools wheel; \
+        pip install --no-index --find-links ./wheels uv || pip install uv; \
     else \
-        echo "No local wheels; installing from ${PIP_INDEX_URL}" && \
-        pip install --prefix=/install -r requirements.txt && \
-        pip install --prefix=/install --no-deps setuptools wheel; \
+        pip install uv; \
+    fi
+# uv selects the correct platform wheels and is substantially faster than pip
+# on index-assisted builds. Offline wheels remain the first choice.
+RUN if [ -n "$(find ./wheels -type f -name '*.whl' 2>/dev/null | head -1)" ]; then \
+        echo "Installing Python deps from local wheels with uv" && \
+        (uv pip install --no-index --find-links ./wheels --prefix=/install -r requirements.txt \
+            || { echo "Local wheels incomplete; fetching missing from ${UV_DEFAULT_INDEX}" && \
+                 uv pip install --find-links ./wheels --prefix=/install -r requirements.txt; }) && \
+        uv pip install --no-index --find-links ./wheels --prefix=/install --no-deps setuptools wheel; \
+    else \
+        echo "No local wheels; installing from ${UV_DEFAULT_INDEX} with uv" && \
+        uv pip install --prefix=/install -r requirements.txt && \
+        uv pip install --prefix=/install --no-deps setuptools wheel; \
     fi
 # paddlex (a paddleocr dep) hard-pins opencv-contrib-python, whose cv2 build
 # needs the libgl system library. Swap it for the headless build pinned in
@@ -48,19 +50,19 @@ RUN if [ -n "$(find ./wheels -type f -name '*.whl' 2>/dev/null | head -1)" ]; th
 RUN SITE=/install/lib/python3.12/site-packages && \
     if [ -d "$SITE/cv2" ]; then rm -rf "$SITE/cv2"; fi && \
     if [ -n "$(find ./wheels -type f -name '*.whl' 2>/dev/null | head -1)" ]; then \
-        pip install --no-index --find-links ./wheels --prefix=/install --no-deps \
+        uv pip install --no-index --find-links ./wheels --prefix=/install --no-deps \
             opencv-contrib-python-headless==4.10.0.84 \
-            || pip install --find-links ./wheels --prefix=/install --no-deps \
+            || uv pip install --find-links ./wheels --prefix=/install --no-deps \
             opencv-contrib-python-headless==4.10.0.84; \
     else \
-        pip install --prefix=/install --no-deps \
+        uv pip install --prefix=/install --no-deps \
             opencv-contrib-python-headless==4.10.0.84; \
     fi
 
 # ---------------------------------------------------------------------------
 # Runtime: minimal image, non-root user, application code only
 # ---------------------------------------------------------------------------
-FROM python:3.12-slim AS runtime
+FROM ${PYTHON_IMAGE} AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

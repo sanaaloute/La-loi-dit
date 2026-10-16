@@ -32,8 +32,9 @@ services:
       context: .
       dockerfile: docker/backend.Dockerfile
       args:
-        # PyPI index for the image build (mirror friendly; see .env).
-        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        # Base image and PyPI index (China-friendly defaults; see .env).
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-docker.m.daocloud.io/library/python:3.12-slim}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
     image: legal-ai-burkina:latest
     # Multi-worker uvicorn (default 2; override with LEGAL_AI_WEB_WORKERS).
     command: uvicorn backend.api.main:app --host 0.0.0.0 --port 8000 --workers ${LEGAL_AI_WEB_WORKERS}
@@ -179,7 +180,8 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
         API_PROXY_TARGET: ${API_PROXY_TARGET}
-        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
+        NODE_IMAGE: ${NODE_IMAGE:-docker.m.daocloud.io/library/node:22-bookworm-slim}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
       API_PROXY_TARGET: ${API_PROXY_TARGET}

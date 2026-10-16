@@ -1,10 +1,8 @@
 """Tests for the query router (backend/agents/query_router.py).
 
-Covers the deterministic direct-route pre-pass (greetings, thanks, meta
-questions), the LLM classification fail-safe (any error or unparseable
-output keeps the retrieval route), the graph wiring (direct short-circuits
-the retrieval pipeline; blocked queries never reach the router) and the
-output-guardrail exemption for direct answers.
+Covers deterministic conversation shortcuts, three-way DIRECT/GENERAL/
+RETRIEVAL classification, fail-safe retrieval on uncertainty, graph wiring,
+and the output-guardrail exemptions for non-corpus answers.
 """
 
 from __future__ import annotations
@@ -101,6 +99,8 @@ def test_direct_shortcut_rejects_long_messages():
 def test_parse_route_fail_safe():
     assert parse_route("DIRECT") == "direct"
     assert parse_route("direct.") == "direct"
+    assert parse_route("GENERAL") == "general"
+    assert parse_route("general.") == "general"
     assert parse_route("RETRIEVAL") == "retrieval"
     assert parse_route("je ne sais pas, peut-être les deux") == "retrieval"
     assert parse_route("") == "retrieval"
@@ -128,6 +128,17 @@ async def test_llm_direct_classification_is_honored(settings):
         _router_ctx(settings, llm),
     )
     assert result["route"] == "direct"
+    assert llm.calls == 1
+
+
+async def test_llm_general_classification_is_honored(settings):
+    llm = StubLLM("GENERAL")
+    agent = QueryRouterAgent()
+    result = await agent.run(
+        {"query": "Qu'est-ce que la démocratie ?", "trace": []},
+        _router_ctx(settings, llm),
+    )
+    assert result["route"] == "general"
     assert llm.calls == 1
 
 
@@ -204,6 +215,12 @@ async def test_output_guard_exempts_direct_route_from_zero_evidence_refusal(sett
     assert not result.refused
 
 
+async def test_output_guard_exempts_general_route_from_zero_evidence_refusal(settings):
+    answer = FinalAnswer(answer="La démocratie repose sur la participation citoyenne.", language="fr")
+    result = await check_output(answer, [], settings, route="general")
+    assert not result.refused
+
+
 async def test_output_guard_still_refuses_evidenceless_retrieval_answer(settings):
     answer = FinalAnswer(answer="Voici la règle applicable en la matière.", language="fr")
     result = await check_output(answer, [], settings, route="retrieval")
@@ -230,3 +247,48 @@ async def test_response_generator_direct_answer_has_no_citations_or_sources(sett
     assert not answer.evidence
     assert "## Sources" not in answer.answer
     assert answer.metadata.get("route") == "direct"
+
+
+async def test_response_generator_general_answer_has_no_citations_or_sources(settings):
+    from backend.agents.response_generator import ResponseGeneratorAgent
+
+    llm = StubLLM("La démocratie est un mode de gouvernement fondé sur la participation citoyenne.")
+    agent = ResponseGeneratorAgent()
+    result = await agent.run(
+        {
+            "query": "Qu'est-ce que la démocratie ?",
+            "route": "general",
+            "language": "fr",
+            "trace": [],
+            "errors": [],
+        },
+        SimpleNamespace(llm=llm, settings=settings),
+    )
+    answer = result["final_answer"]
+    assert answer.answer.startswith("La démocratie est")
+    assert not answer.citations
+    assert not answer.evidence
+    assert answer.metadata.get("route") == "general"
+
+
+async def test_general_concept_skips_retrieval_and_gets_transparency_note(graph, ctx):
+    class GeneralLLM:
+        async def complete(self, system: str, user: str, temperature=None) -> str:
+            if "routeur de requêtes" in system.lower():
+                return "GENERAL"
+            return "La démocratie est un mode de gouvernement fondé sur la participation citoyenne."
+
+    ctx.llm = GeneralLLM()
+    response = await run_query(graph, ctx, initial_state("Qu'est-ce que la démocratie ?"))
+    answer = response.answer
+
+    assert not answer.refused
+    assert answer.metadata.get("route") == "general"
+    assert answer.answer.startswith("La démocratie est")
+    assert "culture générale" in answer.answer
+    assert not answer.citations
+    assert not answer.evidence
+    assert any(t.startswith("query_router: general") for t in response.trace)
+    for node in ("planner", "retrieval", "reasoning_agent", "claim_verification", "citation_verification"):
+        assert not any(t.startswith(node) for t in response.trace), f"{node} should not run"
+    assert any(t.startswith("output_guardrail") for t in response.trace)

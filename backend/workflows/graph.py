@@ -3,7 +3,7 @@
 Pipeline (see docs/architecture.md for the Mermaid diagram):
 
     user -> input_guardrail -> language_gate -> query_router
-         -> (direct) response_generator -> output_guardrail
+         -> (direct/general) response_generator -> output_guardrail
          -> (retrieval) planner -> context_agent -> memory_agent
          -> [fan-out: one retrieval_branch per sub-question, in parallel]
          -> retrieval_merge -> conflict_resolver -> evidence_ranking
@@ -75,8 +75,8 @@ def build_graph(ctx: AppContext):
 
     def bind(fn, role: Optional[str] = None):
         async def node(state: GraphState) -> dict[str, Any]:
-            # Per-request LLM override (tier-gated, set by the API layer):
-            # hand nodes a shallow context copy carrying the override.
+            # Per-request LLM override (set by the API layer): hand nodes a
+            # shallow context copy carrying the override.
             # `role` (spec §46) further binds the node to its role's model
             # when role routing is enabled; otherwise this is a pass-through.
             base_llm = state.get("llm")
@@ -93,8 +93,8 @@ def build_graph(ctx: AppContext):
         return "refusal" if guardrail and not guardrail.allowed else "language_gate"
 
     def _route_after_router(state: GraphState) -> str:
-        """Direct answers short-circuit the whole retrieval pipeline."""
-        return "response_generator" if state.get("route") == "direct" else "planner"
+        """Conversation and general knowledge short-circuit legal retrieval."""
+        return "response_generator" if state.get("route") in {"direct", "general"} else "planner"
 
     def _fanout_retrieval(state: GraphState) -> list[Send]:
         """Fan out one parallel retrieval branch per decomposed sub-question.
@@ -195,9 +195,8 @@ def build_graph(ctx: AppContext):
         return "response_generator"
 
     def _route_after_response(state: GraphState) -> str:
-        """Direct answers skip claim/citation verification (no evidence to
-        verify against) but still pass through the output guardrail."""
-        return "output_guardrail" if state.get("route") == "direct" else "claim_verification"
+        """Direct/general answers have no evidence for claim verification."""
+        return "output_guardrail" if state.get("route") in {"direct", "general"} else "claim_verification"
 
     g = StateGraph(GraphState)
     g.add_node("input_guardrail", bind(input_guardrail.input_guardrail_node))

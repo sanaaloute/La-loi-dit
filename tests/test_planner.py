@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from datetime import date
+from types import SimpleNamespace
 
+from backend.core.config import Settings
 from backend.core.models import QuestionType, SearchKind
-from backend.planner.agent import heuristic_plan
+from backend.planner.agent import PlannerAgent, heuristic_plan
 
 
 def test_government_task_added_for_decret_query():
@@ -60,3 +62,21 @@ def test_heuristic_plan_sets_question_type_and_temporal_intent():
 def test_specific_question_not_expanded():
     plan = heuristic_plan("Quel tribunal est compétent pour un litige de voisinage ?")
     assert plan.sub_questions == ["Quel tribunal est compétent pour un litige de voisinage ?"]
+
+
+def test_tool_transcript_falls_back_to_heuristic_plan():
+    query = "Quelles sont les règles OHADA applicables à la création d'une SARL ?"
+    transcript = (
+        "Here are the tool results:\n--- Tool results ---\n"
+        "Tool build_search_tasks({\"query\": \"build a focused retrieval plan\"}): []"
+    )
+    result = PlannerAgent()._parse_final(
+        transcript,
+        {"query": query},
+        SimpleNamespace(settings=Settings()),
+        [],
+    )
+    plan = result["plan"]
+    assert plan.sub_questions[0] == query
+    assert all("tool results" not in question.lower() for question in plan.sub_questions)
+    assert all("tool results" not in task.query.lower() for task in plan.tasks)

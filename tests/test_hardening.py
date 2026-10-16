@@ -1,4 +1,4 @@
-"""Phase 6 tests: strict infra mode, readiness probes, per-tier rate limits.
+"""Phase 6 tests: strict infra mode, readiness probes, shared rate limits.
 
 Fully offline: "unreachable" deps point at closed localhost ports / missing
 packages, which is exactly the degraded path being tested.

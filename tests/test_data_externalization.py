@@ -95,9 +95,12 @@ def test_freshness_registry_default_matches_builtin():
     assert any(s.url == "https://www.ohada.org/feed/" for s in registry)
 
 
-def test_document_titles_default_matches_builtin():
+def test_document_titles_default_includes_builtin_and_external_entries():
     titles = load_document_titles()
-    assert titles == IngestionPipeline._DOCUMENT_TITLE_MAP
+    fallback = IngestionPipeline._DOCUMENT_TITLE_MAP
+    assert all(titles.get(filename) == title for filename, title in fallback.items())
+    assert len(titles) > len(fallback)
+    assert any(filename.startswith("assemblee_") for filename in titles)
     assert (
         IngestionPipeline._display_name("burkina-faso_code_travail_028-2008-an_code-du-travail.pdf")
         == "Code du travail du Burkina Faso (Loi n°028-2008/AN)"

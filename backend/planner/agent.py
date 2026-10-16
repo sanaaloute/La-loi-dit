@@ -27,6 +27,14 @@ from backend.planner.question_types import classify_question_type, detect_tempor
 from backend.planner.terminology import expand_terms
 
 
+_TOOL_TRANSCRIPT_MARKERS = ("here are the tool results:", "--- tool results ---")
+
+
+def _is_tool_transcript(text: str) -> bool:
+    lowered = text.strip().lower()
+    return any(marker in lowered for marker in _TOOL_TRANSCRIPT_MARKERS)
+
+
 class PlannerAgent(ToolCallingAgent):
     """Turns the user question into a structured retrieval plan."""
 
@@ -66,6 +74,8 @@ class PlannerAgent(ToolCallingAgent):
         ctx: Any,
         tool_history: list[tuple[Any, Any]],
     ) -> dict[str, Any]:
+        if _is_tool_transcript(text):
+            text = ""
         plan = _heuristic_plan(state["query"], state.get("language"), settings=ctx.settings)
         try:
             parsed = json.loads(text.strip()) if text.strip() else {}

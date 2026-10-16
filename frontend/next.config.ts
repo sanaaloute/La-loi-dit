@@ -29,7 +29,7 @@ const nextConfig: NextConfig = {
     // after a redeploy. Hashed assets under /_next keep their immutable
     // year-long cache (correct — their URLs change with every build).
     const noCacheHtml = [{ key: "Cache-Control", value: "no-cache, must-revalidate" }];
-    return ["/", "/redaction", "/compte", "/tarifs", "/admin"].map((source) => ({
+    return ["/", "/redaction", "/compte", "/admin"].map((source) => ({
       source,
       headers: noCacheHtml,
     }));

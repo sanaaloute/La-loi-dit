@@ -214,28 +214,13 @@ export interface UsageDay {
 
 export interface UsageResponse {
   tier: Tier;
-  daily_budget: number;
+  daily_budget: number; // backward-compatible alias of daily_token_budget
+  daily_token_budget: number;
+  daily_request_budget: number;
   today: { tokens_in: number; tokens_out: number; requests: number };
   remaining_tokens: number;
+  remaining_requests: number;
   history: UsageDay[]; // last 30 days, most recent first; zero-activity days omitted
-}
-
-export interface BillingConfig {
-  enabled: boolean;
-  provider: "paddle" | null;
-}
-
-export interface CheckoutResponse {
-  checkout_url: string;
-}
-
-export type SubscriptionStatus = "active" | "past_due" | "canceled" | "none";
-
-export interface SubscriptionInfo {
-  tier: string;
-  status: SubscriptionStatus;
-  current_period_end: string | null; // ISO date
-  cancel_at_period_end: boolean;
 }
 
 export type StreamEvent =
@@ -527,38 +512,6 @@ export async function usageMe(token?: string | null): Promise<UsageResponse> {
     throw new ApiError(detail ?? `Échec du chargement de l'usage (${res.status})`, res.status);
   }
   return (await res.json()) as UsageResponse;
-}
-
-export async function billingConfig(): Promise<BillingConfig> {
-  const res = await apiFetch("/billing/config");
-  if (!res.ok) {
-    const detail = await safeDetail(res);
-    throw new ApiError(detail ?? `Échec du chargement de la configuration de paiement (${res.status})`, res.status);
-  }
-  return (await res.json()) as BillingConfig;
-}
-
-export async function createCheckout(tier: "pro" | "cabinet", token?: string | null): Promise<CheckoutResponse> {
-  const res = await apiFetch("/billing/checkout", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    token,
-    body: JSON.stringify({ tier }),
-  });
-  if (!res.ok) {
-    const detail = await safeDetail(res);
-    throw new ApiError(detail ?? `Échec de la création du paiement (${res.status})`, res.status);
-  }
-  return (await res.json()) as CheckoutResponse;
-}
-
-export async function getSubscription(token?: string | null): Promise<SubscriptionInfo> {
-  const res = await apiFetch("/billing/subscription", { token });
-  if (!res.ok) {
-    const detail = await safeDetail(res);
-    throw new ApiError(detail ?? `Échec du chargement de l'abonnement (${res.status})`, res.status);
-  }
-  return (await res.json()) as SubscriptionInfo;
 }
 
 export async function listModels(token?: string | null): Promise<ModelList> {
@@ -1277,7 +1230,6 @@ export interface AdminUsersResponse {
 }
 
 export interface AdminUserPatch {
-  tier?: Tier;
   role?: AdminRole;
 }
 
@@ -1294,18 +1246,17 @@ export interface AdminUsageResponse {
   totals: Record<string, number>;
 }
 
-export interface TierBudgets {
+export interface DailyBudgets {
   daily_token_budget: number;
   daily_request_budget: number;
 }
 
-export interface TierBudgetsResponse {
-  effective: Record<Tier, TierBudgets>;
-  defaults: Record<Tier, TierBudgets>;
+export interface DailyBudgetsResponse {
+  effective: DailyBudgets;
+  defaults: DailyBudgets;
 }
 
-/** PATCH body: per tier, only the fields to change. */
-export type TierBudgetsPatch = Partial<Record<Tier, Partial<TierBudgets>>>;
+export type DailyBudgetPatch = Partial<DailyBudgets>;
 
 export interface ProviderModelInfo {
   id: string;
@@ -1514,9 +1465,9 @@ export const adminApi = {
       json: body,
     }),
   usage: (days = 30) => adminRequest<AdminUsageResponse>(`/usage?days=${days}`),
-  tierBudgets: () => adminRequest<TierBudgetsResponse>("/settings/tier-budgets"),
-  patchTierBudgets: (body: TierBudgetsPatch) =>
-    adminRequest<TierBudgetsResponse>("/settings/tier-budgets", {
+  dailyBudgets: () => adminRequest<DailyBudgetsResponse>("/settings/daily-budgets"),
+  patchDailyBudgets: (body: DailyBudgetPatch) =>
+    adminRequest<DailyBudgetsResponse>("/settings/daily-budgets", {
       method: "PATCH",
       json: body,
     }),

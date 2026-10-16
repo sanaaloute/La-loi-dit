@@ -187,26 +187,58 @@ async def test_short_note_for_factual_question(ctx):
     assert "Consultez un professionnel du droit" not in text
 
 
-async def test_full_disclaimer_when_human_review_despite_factual_type(ctx):
+async def test_low_confidence_fallback_replaces_grounded_answer(ctx):
+    from backend.agents.output_guardrail import OutputGuardrailAgent
+    from backend.core.prompts import get_prompt
+
+    for confidence in (0.1, 0.54):
+        state = _guardrail_state(_grounded_answer(confidence=confidence), QuestionType.FACTUAL)
+        answer = (await OutputGuardrailAgent().run(state, ctx))["final_answer"]
+        assert answer.confidence == confidence
+        assert answer.answer == get_prompt("RESPONSE_LOW_CONFIDENCE_FR")
+        assert answer.metadata["low_confidence_fallback"] is True
+        assert not answer.citations
+        assert not answer.evidence
+        assert not answer.claims
+        assert not answer.warnings
+        assert not answer.conflicts
+        assert not answer.requires_human_review
+        assert not answer.refused
+        assert "conseil juridique" not in answer.answer
+
+
+async def test_low_confidence_fallback_is_localized_in_english(ctx):
+    from backend.agents.output_guardrail import OutputGuardrailAgent
+    from backend.core.prompts import get_prompt
+
+    grounded = _grounded_answer(confidence=0.54)
+    grounded.language = "en"
+    grounded.answer = "The answer is uncertain [1]."
+    state = _guardrail_state(grounded, QuestionType.DEFINITION)
+    answer = (await OutputGuardrailAgent().run(state, ctx))["final_answer"]
+    assert answer.answer == get_prompt("RESPONSE_LOW_CONFIDENCE_EN")
+
+
+async def test_confidence_exactly_at_threshold_keeps_grounded_answer(ctx):
     from backend.agents.output_guardrail import OutputGuardrailAgent
 
-    # confidence below the human-review threshold escalates even FACTUAL answers.
-    state = _guardrail_state(_grounded_answer(confidence=0.1), QuestionType.FACTUAL)
-    result = await OutputGuardrailAgent().run(state, ctx)
-    answer = result["final_answer"]
-    assert answer.requires_human_review
-    assert "ne constitue pas un conseil juridique" in answer.answer
+    state = _guardrail_state(_grounded_answer(confidence=0.55), QuestionType.DEFINITION)
+    answer = (await OutputGuardrailAgent().run(state, ctx))["final_answer"]
+    assert "low_confidence_fallback" not in answer.metadata
+    assert answer.answer.startswith("Le préavis est d'un mois")
+    assert answer.evidence
 
 
-async def test_full_disclaimer_for_low_confidence_factual_answer(ctx):
+async def test_low_confidence_does_not_replace_direct_conversation(ctx):
     from backend.agents.output_guardrail import OutputGuardrailAgent
 
-    # 0.45: above the human-review threshold, below the confidence threshold.
-    state = _guardrail_state(_grounded_answer(confidence=0.45), QuestionType.DEFINITION)
-    result = await OutputGuardrailAgent().run(state, ctx)
-    answer = result["final_answer"]
-    assert not answer.requires_human_review
-    assert "ne constitue pas un conseil juridique" in answer.answer
+    grounded = _grounded_answer(confidence=0.1)
+    grounded.metadata["route"] = "direct"
+    state = _guardrail_state(grounded, QuestionType.FACTUAL)
+    state["route"] = "direct"
+    answer = (await OutputGuardrailAgent().run(state, ctx))["final_answer"]
+    assert "low_confidence_fallback" not in answer.metadata
+    assert answer.answer == "Le préavis est d'un mois [1]."
 
 
 # ---------------------------------------------------------------------------

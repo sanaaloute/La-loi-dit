@@ -14,17 +14,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import CitationPanel from "../../src/components/CitationPanel";
 import Markdown from "../../src/components/Markdown";
-import UpgradePanel from "../../src/components/UpgradePanel";
 import { PrimaryButton, TextField } from "../../src/components/ui";
 import {
   ApiError,
   createDraft,
   listDraftTemplates,
-  me,
   type DraftField,
   type DraftResponse,
   type DraftTemplate,
-  type UserProfile,
 } from "../../src/lib/api";
 import { shareDraftExport, type MenuFormat } from "../../src/lib/export";
 import { getModel } from "../../src/lib/storage";
@@ -45,11 +42,6 @@ const DRAFT_EXPORTS: { id: MenuFormat; label: string }[] = [
   { id: "word", label: "Word" },
   { id: "md", label: "Markdown" },
 ];
-
-function isForbidden(err: unknown): boolean {
-  if (err instanceof ApiError) return err.status === 403;
-  return err instanceof Error && err.message.includes("403");
-}
 
 function FieldInput({
   field,
@@ -98,9 +90,7 @@ function FieldInput({
 export default function DraftScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [templates, setTemplates] = useState<DraftTemplate[] | null>(null);
-  const [forbidden, setForbidden] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [step, setStep] = useState<Step>("templates");
@@ -119,13 +109,7 @@ export default function DraftScreen() {
     listDraftTemplates()
       .then((res) => setTemplates(res.templates))
       .catch((err) => {
-        if (isForbidden(err)) setForbidden(true);
-        else setLoadError(err instanceof Error ? err.message : "Une erreur est survenue.");
-      });
-    me()
-      .then((p) => setProfile(p))
-      .catch(() => {
-        // Profil indisponible : les boutons d'export ne sont pas filtrés.
+        setLoadError(err instanceof Error ? err.message : "Une erreur est survenue.");
       });
   }
 
@@ -178,8 +162,7 @@ export default function DraftScreen() {
       setDraft(result);
       setStep("result");
     } catch (err) {
-      if (isForbidden(err)) setForbidden(true);
-      else if (err instanceof ApiError && err.status === 429) setQuotaError(err.message);
+      if (err instanceof ApiError && err.status === 429) setQuotaError(err.message);
       else setFormError(err instanceof Error ? err.message : "Échec de la génération du document.");
     } finally {
       setBusy(false);
@@ -198,14 +181,8 @@ export default function DraftScreen() {
     }
   }
 
-  const allowedExports = profile?.features?.export;
-
   let body: React.ReactNode;
-  if (forbidden) {
-    body = (
-      <UpgradePanel body="La génération de documents juridiques (contrats, actes de procédure) est réservée aux offres Pro et Cabinet. Contactez votre administrateur pour mettre à niveau votre compte." />
-    );
-  } else if (loadError) {
+  if (loadError) {
     body = (
       <View style={styles.centerBlock}>
         <Text style={styles.errorText}>{loadError}</Text>
@@ -286,7 +263,6 @@ export default function DraftScreen() {
                 <Text style={styles.quotaTitle}>Quota journalier atteint</Text>
               </View>
               <Text style={styles.quotaText}>{quotaError}</Text>
-              <Text style={styles.quotaHint}>Passez à l'offre supérieure pour continuer.</Text>
             </View>
           )}
           <View style={styles.card}>
@@ -385,7 +361,7 @@ export default function DraftScreen() {
           <Markdown>{draft.draft_markdown}</Markdown>
 
           <View style={styles.exportRow}>
-            {DRAFT_EXPORTS.filter((f) => !allowedExports || allowedExports.includes(f.id)).map((f) => (
+            {DRAFT_EXPORTS.map((f) => (
               <Pressable
                 key={f.id}
                 onPress={() => void handleExport(f.id)}

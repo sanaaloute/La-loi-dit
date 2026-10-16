@@ -105,8 +105,8 @@ async def test_aggregate_is_weighted_mean_of_citation_and_coverage(settings):
     result = await agent.run(state, _ctx(settings, llm))
     answer = result["final_answer"]
     assert answer.confidence_breakdown.coverage == 0.5
-    # 0.4 * citation accuracy + 0.6 * coverage, rounded to 2 decimals.
-    assert answer.confidence == round(0.4 * 1.0 + 0.6 * 0.5, 2)
+    # 0.6 * citation accuracy + 0.4 * coverage, rounded to 2 decimals.
+    assert answer.confidence == round(0.6 * 1.0 + 0.4 * 0.5, 2)
 
 
 @pytest.mark.asyncio

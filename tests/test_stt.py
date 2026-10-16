@@ -166,7 +166,7 @@ def test_transcribe_over_budget_returns_429(client, monkeypatch):
         return "ne doit pas être appelé"
 
     monkeypatch.setattr(stt, "transcribe_audio", fake_transcribe)
-    catalog.set_budget_overrides({"gratuit": {"daily_request_budget": 1}})
+    catalog.set_budget_overrides({"daily_request_budget": 1})
     try:
         response = client.post(
             "/api/v1/chat/transcribe", files=_audio_file(), headers=_headers(token)

@@ -2,18 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Cpu } from "lucide-react";
-import { listModels, setModel, type ModelInfo, type Tier } from "@/lib/api";
+import { listModels, setModel, type ModelInfo } from "@/lib/api";
 
 interface ModelPickerProps {
   token: string | null;
   value: string | null;
   onChange: (model: string | null) => void;
 }
-
-const TIER_BADGES: Partial<Record<Tier, { label: string; className: string }>> = {
-  pro: { label: "Pro", className: "border-accent/40 bg-accent/10 text-accent" },
-  cabinet: { label: "Cabinet", className: "border-ink/40 bg-ink/10 text-ink" },
-};
 
 export default function ModelPicker({ token, value, onChange }: ModelPickerProps) {
   const [models, setModels] = useState<ModelInfo[] | null>(null);
@@ -62,7 +57,6 @@ export default function ModelPicker({ token, value, onChange }: ModelPickerProps
   const current = models.find((m) => m.id === effective);
 
   function select(model: ModelInfo) {
-    if (!model.allowed) return;
     setModel(model.id);
     onChange(model.id);
     setOpen(false);
@@ -83,36 +77,21 @@ export default function ModelPicker({ token, value, onChange }: ModelPickerProps
       </button>
       {open && (
         <div className="absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-gray-200 bg-white p-1.5 shadow-2xl backdrop-blur-xl">
-          {models.map((model) => {
-            const badge = model.allowed ? undefined : TIER_BADGES[model.tier_required];
-            return (
-              <button
-                key={model.id}
-                type="button"
-                onClick={() => select(model)}
-                disabled={!model.allowed}
-                className={`flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
-                  model.allowed
-                    ? "text-gray-700 hover:bg-gray-100"
-                    : "cursor-not-allowed text-gray-500"
-                }`}
-              >
-                <span className="flex min-w-0 items-center gap-2">
-                  <span className="truncate">{model.label}</span>
-                  {model.id === effective && (
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
-                  )}
-                </span>
-                {badge && (
-                  <span
-                    className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${badge.className}`}
-                  >
-                    {badge.label}
-                  </span>
+          {models.map((model) => (
+            <button
+              key={model.id}
+              type="button"
+              onClick={() => select(model)}
+              className="flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100"
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="truncate">{model.label}</span>
+                {model.id === effective && (
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
                 )}
-              </button>
-            );
-          })}
+              </span>
+            </button>
+          ))}
         </div>
       )}
     </div>

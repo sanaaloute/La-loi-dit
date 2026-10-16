@@ -9,15 +9,8 @@ import {
   type AdminUsageResponse,
   type AdminUserEntry,
   type AdminUserPatch,
-  type Tier,
 } from "@/lib/api";
 import { EmptyState, INPUT_CLASS, SectionCard, TableShell, Td, Th, THead, formatNumber } from "./ui";
-
-const TIER_OPTIONS: { value: Tier; label: string }[] = [
-  { value: "gratuit", label: "Gratuit" },
-  { value: "pro", label: "Pro" },
-  { value: "cabinet", label: "Cabinet" },
-];
 
 const ROLE_OPTIONS: { value: AdminRole; label: string }[] = [
   { value: "viewer", label: "Lecteur" },
@@ -66,7 +59,7 @@ export default function UsersTab() {
       const updated = await adminApi.patchUser(id, body);
       setUsers((prev) => prev?.map((u) => (u.id === id ? updated : u)) ?? null);
     } catch (err) {
-      // e.g. 400 "an admin cannot change their own tier/role"
+      // e.g. 400 "an admin cannot change their own role"
       setActionError(err instanceof Error ? err.message : "Échec de la mise à jour de l'utilisateur.");
     } finally {
       setSavingId(null);
@@ -107,7 +100,6 @@ export default function UsersTab() {
                 <Th>E-mail</Th>
                 <Th>Nom</Th>
                 <Th>Rôle</Th>
-                <Th>Offre</Th>
                 <Th>Créé le</Th>
                 <Th>Tokens (jour)</Th>
                 <Th>Requêtes (jour)</Th>
@@ -133,24 +125,6 @@ export default function UsersTab() {
                       ))}
                       {!ROLE_OPTIONS.some((o) => o.value === u.role) && (
                         <option value={u.role}>{u.role}</option>
-                      )}
-                    </select>
-                  </Td>
-                  <Td>
-                    <select
-                      value={u.tier}
-                      onChange={(e) => void patchUser(u.id, { tier: e.target.value as Tier })}
-                      disabled={savingId === u.id}
-                      aria-label={`Offre de ${u.email}`}
-                      className={INPUT_CLASS}
-                    >
-                      {TIER_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                      {!TIER_OPTIONS.some((o) => o.value === u.tier) && (
-                        <option value={u.tier}>{u.tier}</option>
                       )}
                     </select>
                   </Td>

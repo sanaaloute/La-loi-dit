@@ -6,11 +6,11 @@ handling, query routing, planning, memory, retrieval, ranking, reasoning,
 verification and generation — before an answer is returned. Right after the
 input guardrail, a `language_gate` node translates non-French questions into
 French (the corpus is French-only) and records the user's language so the
-answer comes back in it; then a `query_router` node decides whether the
-question needs retrieval at all:
-direct (small-talk / meta) questions short-circuit straight to the response
-generator, skipping the whole retrieval pipeline. The guiding constraint:
-**an answer may only contain claims that trace to retrieved evidence**.
+answer comes back in it; then a `query_router` node selects conversation,
+stable general knowledge, or legal retrieval. Conversation and general-knowledge
+routes skip retrieval; general answers are explicitly labeled as ungrounded.
+For legal retrieval, the guiding constraint remains: **an answer may only
+contain claims that trace to retrieved evidence**.
 
 ```mermaid
 flowchart TB
@@ -24,7 +24,7 @@ flowchart TB
         ig[input_guardrail] -->|allowed| lg[language_gate]
         ig -->|blocked| ref[refusal]
         lg --> qr[query_router]
-        qr -->|direct| rg[response_generator]
+        qr -->|direct/general| rg[response_generator]
         qr -->|retrieval| pl[planner]
         pl --> ca[context_agent]
         ca --> ma[memory_agent]
@@ -39,7 +39,7 @@ flowchart TB
         ra --> rf[reflection]
         rf -->|retry retrieval<br/>max 1 iteration| fan
         rf --> rg[response_generator]
-        rg -->|direct| og
+        rg -->|direct/general| og
         rg --> clv[claim_verification]
         clv --> cv[citation_verification]
         cv --> og[output_guardrail]
@@ -128,14 +128,18 @@ credentials.
 
 ### Grounded answer policy
 
-- The response generator writes **only** from numbered evidence excerpts and
-  must cite every substantive statement with `[n]`.
+- For legal retrieval, the response generator writes **only** from numbered
+  evidence excerpts and must cite every substantive statement with `[n]`.
+- Stable general concepts can use the separate `GENERAL` route; those answers
+  have no corpus citations and carry an explicit general-knowledge note.
 - The citation verification agent rejects any citation that cannot be
   resolved to a real retrieved chunk; rejected citations are removed and
   recorded as warnings.
 - With insufficient evidence, agents say so explicitly instead of guessing.
-- Confidence below `CONFIDENCE_THRESHOLD` (0.55) attaches a warning; below
-  `HUMAN_REVIEW_THRESHOLD` (0.40) the answer is escalated for human review.
+- A non-refused retrieval answer below `CONFIDENCE_THRESHOLD` (0.55) is
+  replaced by the localized insufficient-information response; citations and
+  evidence are cleared. Safety refusals take precedence, and direct/general
+  routes do not use this retrieval-confidence fallback.
 
 ### Bounded retries
 

@@ -1,4 +1,4 @@
-"""Phase 3 tests: legal document drafting (templates, tier gating, grounding).
+"""Phase 3 tests: legal document drafting (templates, shared access, grounding).
 
 Fully offline (mock LLM, tmp SQLite). Fresh app per test with a tmp database.
 """
@@ -71,12 +71,12 @@ def _set_tier(client, token: str, tier: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Templates listing & tier gate
+# Templates listing & authenticated access
 # ---------------------------------------------------------------------------
 
 
-def test_templates_listed_for_privileged_tier(client):
-    token = _admin_token(client)  # dev admin => cabinet tier
+def test_templates_listed_for_authenticated_user(client):
+    token = _admin_token(client)  # dev admin => legacy cabinet metadata
     response = client.get("/api/v1/draft/templates", headers=_headers(token))
     assert response.status_code == 200
     templates = response.json()["templates"]
@@ -102,9 +102,8 @@ def test_templates_listed_for_privileged_tier(client):
     assert "employeur" in required
 
 
-def test_gratuit_user_can_access_drafting_until_payments(client):
-    """TEMP policy: drafting is open to gratuit until payment methods land;
-    it then becomes a paid-tier feature again (see catalog gratuit features)."""
+def test_gratuit_user_can_access_drafting(client):
+    """Legacy gratuit accounts have the same drafting access as every user."""
     _, token = _register(client)
     response = client.get("/api/v1/draft/templates", headers=_headers(token))
     assert response.status_code == 200
@@ -217,11 +216,11 @@ def test_grounded_draft_cites_verified_provision(client):
 # ---------------------------------------------------------------------------
 
 
-def test_me_includes_tier_features(client):
+def test_me_includes_shared_features(client):
     _, token = _register(client)
     me = client.get("/api/v1/auth/me", headers=_headers(token)).json()
     assert me["tier"] == "gratuit"
-    # Free + ads model: gratuit gets the full feature set (see catalog).
+    # Every legacy tier receives the same full feature set.
     assert me["features"]["drafting"] is True
     assert "md" in me["features"]["export"]
     assert "pdf" in me["features"]["export"]

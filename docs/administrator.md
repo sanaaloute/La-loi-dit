@@ -7,28 +7,31 @@ Operational tasks for users with the `admin` (and where noted,
 ## User & role management
 
 - Roles: `admin`, `legal_expert`, `user`, `viewer`
-  (`backend/core/models.py`). Users currently live in an in-memory dev
-  store (`backend/api/routers/auth.py`): `admin`/`admin123` in development,
-  plus entries from `LEGAL_AI_DEV_USERS` (`user:pass:role,...`). There is
-  no self-service registration endpoint; production user management moves
-  to the `users` table in [database.md](database.md).
+  (`backend/core/models.py`). Regular accounts are stored in the `users`
+  table and can self-register with `role=user`. The in-memory dev store
+  (`backend/api/routers/auth.py`) still provides `admin`/`admin123` in
+  development and accepts `LEGAL_AI_DEV_USERS` (`user:pass:role,...`);
+  production bootstraps its single admin through that variable. These roles
+  remain access controls even though subscription tiers no longer exist.
 - Deactivate rather than delete users — audit logs and sessions reference
   `user_id`.
 - Rotate `LEGAL_AI_SECRET_KEY` only with a planned token-invalidation
   window (all JWTs become invalid).
 
-## Tier quotas
+## Daily quotas
 
-- Free + ads model: the `gratuit` tier has **no daily budgets** (0 = unlimited).
-  `pro` keeps 10 000 000 tokens / 500 requêtes, `cabinet` 100 000 000 / 10 000
-  (`backend/core/catalog.py`).
-- Adjust them from the **Quotas** admin tab, or via the API:
-  `GET /api/v1/admin/settings/tier-budgets` returns the effective budgets
-  plus the built-in defaults; `PATCH /api/v1/admin/settings/tier-budgets`
-  merges overrides, e.g. `{"pro": {"daily_token_budget": 20000000}}`.
-  Omitted tiers/fields keep their current value; negative values are
-  rejected, and `0` lifts the budget entirely (unlimited). Overrides are
-  persisted as an app setting and survive restarts.
+- All features and models are free for every user. Legacy `gratuit` / `pro` /
+  `cabinet` values remain in old rows and tokens but no longer change access.
+- Every account shares the same default daily budget: **30 requests and
+  5 000 000 tokens** (`backend/core/catalog.py`). Per-minute/per-second
+  anti-abuse limits still apply.
+- Adjust the global budget from the **Quotas** admin tab, or via the API:
+  `GET /api/v1/admin/settings/daily-budgets` returns the effective budget and
+  built-in default; `PATCH /api/v1/admin/settings/daily-budgets` merges a flat
+  override, e.g. `{"daily_token_budget": 20000000, "daily_request_budget": 30}`.
+  Omitted fields keep their current value; negative values are rejected, and
+  `0` lifts that budget (unlimited). Overrides use the `daily_budgets` app
+  setting and survive restarts.
 
 ## Ingestion operations
 

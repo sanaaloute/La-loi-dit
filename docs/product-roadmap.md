@@ -130,20 +130,14 @@ Ranked by impact/effort — most are "one step away" because the backend is buil
    `set_preferences` is never called; users can't see or erase what's stored.
    Small screen, big trust win (and a GDPR-ish hygiene point).
 
-## P2 — Monetization cleanup
+## P2 — Free-access cleanup (DONE)
 
-- Mobile IAP (StoreKit / Play Billing) mapped onto the same `tier` field —
-  Paddle web checkout in-app conflicts with store rules.
-- Fix the stale `/tarifs` copy (`frontend/app/tarifs/page.tsx:23-73`):
-  "20 000 tokens/jour" contradicts the catalog's 1M; "GPT-4o, Claude" aren't in
-  the model catalog at all.
-- Either enforce the declared gratuit export limit (`md` only,
-  `catalog.py:97` — currently unenforced) or drop it.
-- Per-tier rate limits ship as effectively-unlimited dev values
-  (`catalog.py:123-139`) — enable before paying users exist.
-- "Cabinet" tier has no team features despite the name: workspaces are
-  personal-only (one per account, no invitations). Team workspaces = the B2B
-  upsell when ready.
+- Removed pricing/subscription pages, billing routes, model locks, and paid
+  feature gates on web and mobile. Legacy tier fields no longer affect access.
+- Every user can use every configured model, drafting template, and export
+  format; authentication, admin RBAC, and safety limits remain.
+- One shared daily budget (30 requests / 5 000 000 tokens by default) is
+  enforced and editable globally in the admin Quotas tab.
 
 ## P3 — Later, deliberately
 

@@ -226,24 +226,13 @@ export interface UsageDay {
 
 export interface UsageResponse {
   tier: Tier;
-  daily_budget: number;
+  daily_budget: number; // backward-compatible alias of daily_token_budget
+  daily_token_budget: number;
+  daily_request_budget: number;
   today: { tokens_in: number; tokens_out: number; requests: number };
   remaining_tokens: number;
+  remaining_requests: number;
   history: UsageDay[]; // last 30 days, most recent first; zero-activity days omitted
-}
-
-export interface BillingConfig {
-  enabled: boolean;
-  provider: "paddle" | null;
-}
-
-export type SubscriptionStatus = "active" | "past_due" | "canceled" | "none";
-
-export interface SubscriptionInfo {
-  tier: string;
-  status: SubscriptionStatus;
-  current_period_end: string | null; // ISO date
-  cancel_at_period_end: boolean;
 }
 
 export type StreamEvent =
@@ -557,7 +546,7 @@ export async function confirmPasswordReset(token: string, newPassword: string): 
 }
 
 // ---------------------------------------------------------------------------
-// Account / billing / models
+// Account usage / models
 // ---------------------------------------------------------------------------
 
 export async function usageMe(token?: string | null): Promise<UsageResponse> {
@@ -567,27 +556,6 @@ export async function usageMe(token?: string | null): Promise<UsageResponse> {
     throw new ApiError(detail ?? `Échec du chargement de l'usage (${res.status})`, res.status);
   }
   return (await res.json()) as UsageResponse;
-}
-
-export async function billingConfig(): Promise<BillingConfig> {
-  const res = await apiFetch("/billing/config");
-  if (!res.ok) {
-    const detail = await safeDetail(res);
-    throw new ApiError(
-      detail ?? `Échec du chargement de la configuration de paiement (${res.status})`,
-      res.status,
-    );
-  }
-  return (await res.json()) as BillingConfig;
-}
-
-export async function getSubscription(token?: string | null): Promise<SubscriptionInfo> {
-  const res = await apiFetch("/billing/subscription", { token });
-  if (!res.ok) {
-    const detail = await safeDetail(res);
-    throw new ApiError(detail ?? `Échec du chargement de l'abonnement (${res.status})`, res.status);
-  }
-  return (await res.json()) as SubscriptionInfo;
 }
 
 export async function listModels(token?: string | null): Promise<ModelList> {

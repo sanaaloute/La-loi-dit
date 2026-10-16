@@ -1,23 +1,14 @@
-"""Per-request LLM resolution: subscription tier -> gated LLMClient.
+"""Per-request LLM resolution and shared daily-budget enforcement.
 
-Chat requests carry an optional catalog model id. The router checks the
-caller's tier against the tier catalog (``backend.core.catalog``) and builds
-an ``LLMClient`` for that model; API keys stay server-side (settings).
+Every authenticated user may select any model in ``backend.core.catalog``;
+legacy tier claims do not restrict access. API keys stay server-side. When no
+model is selected, cheap-model routing sends trivially simple queries to the
+first catalog entry and other queries to the shared default.
 
-Cheap-model routing: when the caller did NOT pick a model and the query is
-trivially simple (short, single line, no complexity markers), the tier's
-FIRST (cheapest) catalog model is used instead of the tier default (the mid
-option). Explicit model choices always win.
-
-Offline note: when the process itself runs the deterministic ``mock``
-provider (tests, zero-credential local dev), no real provider is reachable,
-so gating is still enforced but the resolved client stays the mock
-``ctx.llm`` — the app remains runnable with zero external services.
-
-Budget enforcement: ``check_budget`` raises ``QuotaExceededError`` when an
-authenticated DB user reaches their tier's daily token budget. Anonymous
-and dev-store users (no DB id) are deliberately NOT metered — they get the
-gratuit-by-default catalog and are already rate-limited by IP.
+Offline mock processes keep ``ctx.llm`` so tests and zero-credential local
+development remain runnable. ``check_budget`` enforces the same daily token
+and request budgets for every metered account. Anonymous callers without a
+user id are not metered and remain rate-limited by IP.
 """
 
 from __future__ import annotations
@@ -27,7 +18,7 @@ from typing import Any, Optional
 
 from backend.core import catalog
 from backend.core.config import Settings
-from backend.core.exceptions import AuthorizationError, QuotaExceededError
+from backend.core.exceptions import QuotaExceededError
 from backend.core.llm import FailoverLLMClient, LLMClient
 
 logger = logging.getLogger(__name__)
@@ -113,28 +104,18 @@ def resolve_model_entry(
     requested_model: Optional[str] = None,
     query: Optional[str] = None,
 ) -> Optional[catalog.ModelEntry]:
-    """Resolve the gated catalog entry for one request.
-
-    A requested model that exists in the catalog but exceeds the caller's
-    tier is a 403 (paywall). A model removed from the catalog entirely
-    (e.g. a stale selection stored on an old client) falls back to the
-    tier default instead of bricking the request.
-    """
+    """Resolve any configured model; stale unknown ids fall back to the default."""
     settings: Settings = ctx.settings
     tier = _tier_of(user)
     if requested_model:
-        entry = catalog.find_model(tier, requested_model, settings=settings)
+        entry = catalog.find_model(None, requested_model, settings=settings)
         if entry is not None:
             return entry
-        if catalog.find_model("cabinet", requested_model, settings=settings) is not None:
-            raise AuthorizationError(
-                f"model '{requested_model}' requires a higher subscription tier"
-            )
         logger.warning(
-            "requested model %r is no longer in the catalog; falling back to the tier default",
+            "requested model %r is no longer in the catalog; falling back to the default",
             requested_model,
         )
-    return catalog.find_model(tier, _auto_model_id(tier, query, settings), settings=settings)
+    return catalog.find_model(None, _auto_model_id(tier, query, settings), settings=settings)
 
 
 def resolve_llm(
@@ -143,20 +124,14 @@ def resolve_llm(
     requested_model: Optional[str] = None,
     query: Optional[str] = None,
 ) -> LLMClient:
-    """Resolve the LLMClient for one request, enforcing tier gating.
-
-    - No requested model -> tier default (mid option); trivially simple
-      queries route to the tier's cheapest model when enabled.
-    - Requested model not allowed for the tier -> AuthorizationError (403).
-    - Mock-provider processes keep ``ctx.llm`` (offline mode, see module doc).
-    """
+    """Build the selected LLM client without subscription-based restrictions."""
     settings: Settings = ctx.settings
     entry = resolve_model_entry(ctx, user, requested_model, query=query)
 
     if settings.llm_provider == "mock":
-        return ctx.llm  # offline mode: gating enforced above, client stays mock
+        return ctx.llm
     if entry is None:
-        return ctx.llm  # empty catalog for this tier: keep the default client
+        return ctx.llm
     resolved = LLMClient(
         settings,
         provider=entry.provider,
@@ -178,8 +153,7 @@ async def check_budget(user_store: Any, user: Any, settings: Settings) -> None:
     # Pick up admin budget changes made on another uvicorn worker (TTL-bound,
     # never raises — see catalog.refresh_budget_overrides).
     await catalog.refresh_budget_overrides(user_store)
-    tier = _tier_of(user)
-    tier_cfg = catalog.get_tier(tier, settings=settings)
+    tier_cfg = catalog.get_tier(None, settings=settings)
     token_budget = tier_cfg.get("daily_token_budget")
     request_budget = tier_cfg.get("daily_request_budget")
     try:
@@ -189,12 +163,6 @@ async def check_budget(user_store: Any, user: Any, settings: Settings) -> None:
     tokens = today.get("tokens_in", 0) + today.get("tokens_out", 0)
     requests = today.get("requests", 0)
     if token_budget and tokens >= token_budget:
-        raise QuotaExceededError(
-            f"Quota journalier de tokens atteint pour votre offre ({tier}). "
-            "Passez à l'offre supérieure ou réessayez demain."
-        )
+        raise QuotaExceededError("Quota journalier de tokens atteint. Réessayez demain.")
     if request_budget and requests >= request_budget:
-        raise QuotaExceededError(
-            f"Quota journalier de requêtes atteint pour votre offre ({tier}). "
-            "Passez à l'offre supérieure ou réessayez demain."
-        )
+        raise QuotaExceededError("Quota journalier de requêtes atteint. Réessayez demain.")

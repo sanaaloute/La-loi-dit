@@ -33,6 +33,19 @@ def test_full_coverage_no_retry():
     assert not report.needs_more_retrieval
 
 
+def test_sarl_question_generic_phrasing_does_not_hide_matching_source():
+    query = "Quelles sont les règles OHADA applicables à la création d'une SARL ?"
+    source = _chunk(
+        "Article 311 — La société à responsabilité limitée (SARL) est celle "
+        "dans laquelle les associés ne supportent les pertes qu'à concurrence "
+        "de leurs apports. Le capital social est fixé librement par les associés."
+    )
+    report = audit_coverage([query], [source], query=query)
+    assert report.coverage == 1.0
+    assert not report.missing_issues
+    assert not report.needs_more_retrieval
+
+
 def test_partial_coverage_flags_missing_and_retry():
     missing_q = "partage des biens après divorce"
     report = audit_coverage(

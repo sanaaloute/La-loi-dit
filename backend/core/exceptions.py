@@ -50,4 +50,4 @@ class RateLimitError(LegalAIError):
 
 
 class QuotaExceededError(LegalAIError):
-    """Daily token budget exhausted for the caller's subscription tier."""
+    """A shared daily token or request budget is exhausted."""

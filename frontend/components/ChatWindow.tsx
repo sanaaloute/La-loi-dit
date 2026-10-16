@@ -1023,9 +1023,6 @@ export default function ChatWindow() {
                               Quota journalier atteint
                             </p>
                             <p className="text-warn-text">{msg.text}</p>
-                            <p className="mt-1 text-xs text-warn-text/80">
-                              Passez à l&apos;offre supérieure pour continuer.
-                            </p>
                           </div>
                         ) : msg.response ? (
                           <AnswerView answer={msg.response.answer} />

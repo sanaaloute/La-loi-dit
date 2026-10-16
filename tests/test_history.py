@@ -280,13 +280,13 @@ def test_run_status_endpoint_reflects_in_flight_runs(client):
 
     response = client.get(url, headers=_headers(token))
     assert response.status_code == 200
-    assert response.json() == {"running": False}
+    assert response.json() == {"running": False, "node": None}
 
     _RUNNING[sid] = _FakeTask(done=False)
     try:
-        assert client.get(url, headers=_headers(token)).json() == {"running": True}
+        assert client.get(url, headers=_headers(token)).json() == {"running": True, "node": None}
         _RUNNING[sid] = _FakeTask(done=True)
-        assert client.get(url, headers=_headers(token)).json() == {"running": False}
+        assert client.get(url, headers=_headers(token)).json() == {"running": False, "node": None}
     finally:
         _RUNNING.pop(sid, None)
 

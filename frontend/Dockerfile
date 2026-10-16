@@ -1,14 +1,11 @@
 # syntax=docker/dockerfile:1
 
 # --- deps ---
-# Base image overridable at build time for slow/filtered networks:
-#   docker compose build --build-arg NODE_IMAGE=docker.m.daocloud.io/library/node:22-bookworm-slim frontend
-ARG NODE_IMAGE=node:22-bookworm-slim
+# Base image and npm registry default to China-friendly mirrors; both remain
+# overridable at build time for other networks.
+ARG NODE_IMAGE=docker.m.daocloud.io/library/node:22-bookworm-slim
 FROM ${NODE_IMAGE} AS deps
-# npm registry is overridable at build time (slow/filtered networks can point
-# to a mirror, e.g. https://registry.npmmirror.com) — compose passes
-# NPM_REGISTRY from .env; default is the official registry.
-ARG NPM_REGISTRY=https://registry.npmjs.org
+ARG NPM_REGISTRY=https://registry.npmmirror.com
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN --mount=type=cache,target=/root/.npm \

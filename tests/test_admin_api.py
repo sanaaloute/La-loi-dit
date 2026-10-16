@@ -447,8 +447,8 @@ NEW_ADMIN_ROUTES = [
     ("get", "/api/v1/admin/users"),
     ("get", "/api/v1/admin/usage"),
     ("get", "/api/v1/admin/providers"),
-    ("get", "/api/v1/admin/settings/tier-budgets"),
-    ("patch", "/api/v1/admin/settings/tier-budgets"),
+    ("get", "/api/v1/admin/settings/daily-budgets"),
+    ("patch", "/api/v1/admin/settings/daily-budgets"),
     ("get", "/api/v1/admin/documents/folders"),
     ("post", "/api/v1/admin/documents/folders"),
     ("post", "/api/v1/admin/documents/metadata-suggestion"),
@@ -464,10 +464,10 @@ def _route_kwargs(method: str, path: str) -> dict:
         return {"files": {"file": ("note.txt", b"bonjour le monde", "text/plain")}}
     if method == "post" and path.endswith("/folders"):
         return {"json": {"name": "travail"}}
-    if method == "patch" and path.endswith("tier-budgets"):
-        return {"json": {"gratuit": {"daily_token_budget": 2_000_000}}}
+    if method == "patch" and path.endswith("daily-budgets"):
+        return {"json": {"daily_token_budget": 2_000_000}}
     if method == "patch":
-        return {"json": {"tier": "pro"}}
+        return {"json": {"role": "viewer"}}
     return {}
 
 
@@ -506,15 +506,15 @@ def test_admin_users_list_includes_db_users(client):
     assert entry["today_requests"] == 0
 
 
-def test_admin_users_patch_updates_tier_and_role(client):
+def test_admin_users_patch_updates_role_only(client):
     record = _create_db_user(client)
     response = client.patch(
         f"/api/v1/admin/users/{record.id}",
-        json={"tier": "pro", "role": "legal_expert"},
+        json={"role": "legal_expert"},
         headers=_headers(Role.ADMIN),
     )
     assert response.status_code == 200, response.text
-    assert response.json()["tier"] == "pro"
+    assert response.json()["tier"] == "gratuit"  # legacy metadata is not an entitlement
     assert response.json()["role"] == "legal_expert"
 
 
@@ -522,16 +522,16 @@ def test_admin_users_patch_rejects_invalid_values(client):
     record = _create_db_user(client)
     headers = _headers(Role.ADMIN)
     assert client.patch(
-        f"/api/v1/admin/users/{record.id}", json={"tier": "gold"}, headers=headers
-    ).status_code == 400
-    assert client.patch(
         f"/api/v1/admin/users/{record.id}", json={"role": "superadmin"}, headers=headers
     ).status_code == 400
+    assert client.patch(
+        f"/api/v1/admin/users/{record.id}", json={"tier": "pro"}, headers=headers
+    ).status_code == 400  # tier management is no longer part of the admin contract
     assert client.patch(
         f"/api/v1/admin/users/{record.id}", json={}, headers=headers
     ).status_code == 400
     assert client.patch(
-        "/api/v1/admin/users/unknown-id", json={"tier": "pro"}, headers=headers
+        "/api/v1/admin/users/unknown-id", json={"role": "viewer"}, headers=headers
     ).status_code == 404
 
 
@@ -570,7 +570,7 @@ def test_admin_usage_aggregates_window(client):
 
 
 # ---------------------------------------------------------------------------
-# GET/PATCH /api/v1/admin/settings/tier-budgets
+# GET/PATCH /api/v1/admin/settings/daily-budgets
 # ---------------------------------------------------------------------------
 
 
@@ -583,46 +583,35 @@ def clean_budget_overrides():
     catalog.set_budget_overrides({})
 
 
-def test_admin_tier_budgets_returns_defaults(client, clean_budget_overrides):
-    response = client.get("/api/v1/admin/settings/tier-budgets", headers=_headers(Role.ADMIN))
+def test_admin_daily_budgets_returns_shared_defaults(client, clean_budget_overrides):
+    response = client.get("/api/v1/admin/settings/daily-budgets", headers=_headers(Role.ADMIN))
     assert response.status_code == 200, response.text
     data = response.json()
-    assert data["defaults"]["gratuit"] == {
-        "daily_token_budget": 0,
-        "daily_request_budget": 0,
-    }
-    assert data["defaults"]["pro"]["daily_token_budget"] == 10_000_000
-    assert data["defaults"]["cabinet"]["daily_token_budget"] == 100_000_000
-    # No overrides persisted yet: effective == defaults.
+    assert data["defaults"] == {"daily_token_budget": 5_000_000, "daily_request_budget": 30}
     assert data["effective"] == data["defaults"]
 
 
-def test_admin_tier_budgets_patch_updates_effective_budget(client, clean_budget_overrides):
+def test_admin_daily_budgets_patch_updates_global_budget(client, clean_budget_overrides):
     from backend.core import catalog
 
     headers = _headers(Role.ADMIN)
     response = client.patch(
-        "/api/v1/admin/settings/tier-budgets",
-        json={"gratuit": {"daily_token_budget": 2_000_000}},
+        "/api/v1/admin/settings/daily-budgets",
+        json={"daily_token_budget": 2_000_000},
         headers=headers,
     )
     assert response.status_code == 200, response.text
     data = response.json()
-    assert data["effective"]["gratuit"]["daily_token_budget"] == 2_000_000
-    # Untouched fields and tiers keep their defaults.
-    assert data["effective"]["gratuit"]["daily_request_budget"] == 0
-    assert data["effective"]["pro"]["daily_token_budget"] == 10_000_000
-    assert data["defaults"]["gratuit"]["daily_token_budget"] == 0
+    assert data["effective"] == {"daily_token_budget": 2_000_000, "daily_request_budget": 30}
+    assert data["defaults"] == {"daily_token_budget": 5_000_000, "daily_request_budget": 30}
+    for tier in catalog.TIER_ORDER:
+        assert catalog.get_tier(tier)["daily_token_budget"] == 2_000_000
+        assert catalog.get_tier(tier)["daily_request_budget"] == 30
 
-    # The hot path (catalog.get_tier) sees the override without a restart.
-    assert catalog.get_tier("gratuit")["daily_token_budget"] == 2_000_000
-
-    # Persisted in app_settings.
     store = client.app.state.ctx.user_store
-    stored = asyncio.run(store.get_setting(catalog.TIER_BUDGETS_SETTING_KEY))
-    assert json.loads(stored) == {"gratuit": {"daily_token_budget": 2_000_000}}
+    stored = asyncio.run(store.get_setting(catalog.DAILY_BUDGETS_SETTING_KEY))
+    assert json.loads(stored) == {"daily_token_budget": 2_000_000}
 
-    # /usage/me reports the overridden budget for a gratuit user.
     record = _create_db_user(client)
     token = create_access_token(
         record.email, Role.USER, get_settings(), user_id=record.id, tier="gratuit"
@@ -630,45 +619,46 @@ def test_admin_tier_budgets_patch_updates_effective_budget(client, clean_budget_
     usage = client.get("/api/v1/usage/me", headers={"Authorization": f"Bearer {token}"})
     assert usage.status_code == 200, usage.text
     assert usage.json()["daily_budget"] == 2_000_000
+    assert usage.json()["daily_request_budget"] == 30
 
-    # A second PATCH merges instead of replacing.
     response = client.patch(
-        "/api/v1/admin/settings/tier-budgets",
-        json={"gratuit": {"daily_request_budget": 25}},
+        "/api/v1/admin/settings/daily-budgets",
+        json={"daily_request_budget": 25},
         headers=headers,
     )
     assert response.status_code == 200, response.text
-    effective = response.json()["effective"]["gratuit"]
-    assert effective == {"daily_token_budget": 2_000_000, "daily_request_budget": 25}
+    assert response.json()["effective"] == {"daily_token_budget": 2_000_000, "daily_request_budget": 25}
 
-    # 0 is accepted and lifts the budget (unlimited).
     response = client.patch(
-        "/api/v1/admin/settings/tier-budgets",
-        json={"gratuit": {"daily_request_budget": 0}},
+        "/api/v1/admin/settings/daily-budgets",
+        json={"daily_request_budget": 0},
         headers=headers,
     )
     assert response.status_code == 200, response.text
-    assert response.json()["effective"]["gratuit"]["daily_request_budget"] == 0
+    assert response.json()["effective"]["daily_request_budget"] == 0
 
 
-def test_admin_tier_budgets_rejects_invalid_payloads(client, clean_budget_overrides):
+def test_admin_daily_budgets_rejects_invalid_payloads(client, clean_budget_overrides):
     headers = _headers(Role.ADMIN)
-    path = "/api/v1/admin/settings/tier-budgets"
-    # Unknown tier.
-    assert client.patch(
-        path, json={"gold": {"daily_token_budget": 5}}, headers=headers
-    ).status_code == 400
-    # Negative values.
-    assert client.patch(
-        path, json={"pro": {"daily_request_budget": -10}}, headers=headers
-    ).status_code == 400
-    # Empty body.
+    path = "/api/v1/admin/settings/daily-budgets"
+    assert client.patch(path, json={"daily_token_budget": -5}, headers=headers).status_code == 400
+    assert client.patch(path, json={"daily_request_budget": -10}, headers=headers).status_code == 400
     assert client.patch(path, json={}, headers=headers).status_code == 400
-    # Nothing was persisted.
+    assert client.patch(
+        path, json={"gratuit": {"daily_token_budget": 5}}, headers=headers
+    ).status_code == 400  # legacy per-tier payload
     from backend.core import catalog
 
     store = client.app.state.ctx.user_store
-    assert asyncio.run(store.get_setting(catalog.TIER_BUDGETS_SETTING_KEY)) is None
+    assert asyncio.run(store.get_setting(catalog.DAILY_BUDGETS_SETTING_KEY)) is None
+
+
+def test_legacy_tier_budget_endpoint_is_removed(client):
+    headers = _headers(Role.ADMIN)
+    assert client.get("/api/v1/admin/settings/tier-budgets", headers=headers).status_code == 404
+    assert client.patch(
+        "/api/v1/admin/settings/tier-budgets", json={}, headers=headers
+    ).status_code == 404
 
 
 # ---------------------------------------------------------------------------

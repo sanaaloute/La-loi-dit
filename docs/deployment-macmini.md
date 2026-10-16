@@ -16,22 +16,25 @@ public → https://yawoto.neobytech.net (Cloudflare DNS + proxy)
 > (`com.yawoto.cloudflared`). Other projects on the same Mac (e.g.
 > ai-website) run their own tunnels — do not share ingress configs.
 
-## Phase 0 — arm64 wheels (critical)
+## Phase 0 — Architecture and build mirrors
 
-The image build installs from `docker/wheels` with `--no-index`, and
-`scripts/download_wheels.sh` fetches **x86_64** wheels only. On the Mac
-(arm64), re-fetch for aarch64 before building:
+`scripts/download_wheels.sh` now detects the host architecture automatically:
+Apple Silicon downloads `aarch64` wheels; Intel hosts download `x86_64`.
+Run it before the first build and whenever `requirements.txt` changes:
 
 ```bash
-python -m pip download -r requirements.txt -d docker/wheels \
-  --only-binary=:all: --implementation cp --abi cp312 --abi abi3 --abi none \
-  --platform manylinux_2_17_aarch64 --platform manylinux2014_aarch64 \
-  --python-version 3.12
+bash scripts/download_wheels.sh
 ```
 
-The one risk is **paddlepaddle** (OCR): if no manylinux aarch64 wheel is
-found, the build cannot succeed — check before going further. All other
-services (postgres, redis, milvus, etcd, minio) ship arm64 images.
+The backend uses `uv pip install`: local wheels are tried offline first, and an
+incomplete or wrong-architecture wheelhouse falls back to the configured
+package mirror instead of failing. China-friendly defaults are provided for
+`PYTHON_IMAGE` / `NODE_IMAGE` (DaoCloud), `PIP_INDEX_URL` (Aliyun), and
+`NPM_REGISTRY` (npmmirror); all can be overridden in `.env`.
+
+The remaining risk is **paddlepaddle** (OCR): verify that a manylinux aarch64
+wheel exists for your target version. Other services (postgres, redis,
+milvus, etcd, minio) ship arm64 images.
 
 ## Phase 1 — Mac Mini base setup
 
