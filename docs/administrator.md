@@ -13,8 +13,15 @@ Operational tasks for users with the `admin` (and where noted,
   development and accepts `LEGAL_AI_DEV_USERS` (`user:pass:role,...`);
   production bootstraps its single admin through that variable. These roles
   remain access controls even though subscription tiers no longer exist.
-- Deactivate rather than delete users — audit logs and sessions reference
-  `user_id`.
+- Prefer **suspension** over deletion for audit retention. Admins can suspend,
+  reactivate, or permanently delete accounts in the Users tab. Suspension and
+  deletion revoke all active sessions immediately; deletion also removes the
+  account's user-owned database rows and chat/memory history.
+- Safeguards: an admin cannot suspend or delete themselves, and the last
+  active admin cannot be suspended or deleted. Reactivation has no such
+  restriction. API routes: `POST /api/v1/admin/users/{id}/suspend`,
+  `POST /api/v1/admin/users/{id}/reactivate`, and
+  `DELETE /api/v1/admin/users/{id}`.
 - Rotate `LEGAL_AI_SECRET_KEY` only with a planned token-invalidation
   window (all JWTs become invalid).
 

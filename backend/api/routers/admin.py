@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel
 
 from backend.api.deps import get_ctx
@@ -48,6 +48,7 @@ from backend.core.models import (
 )
 from backend.security.jwt import TokenPayload
 from backend.security.rbac import require_role
+from backend.security.sessions import revoke_all_sessions
 
 logger = logging.getLogger(__name__)
 
@@ -284,6 +285,7 @@ class AdminUserEntry(BaseModel):
     name: str = ""
     role: str = ""
     tier: str = ""
+    is_active: bool = True
     created_at: str = ""
     today_tokens_in: int = 0
     today_tokens_out: int = 0
@@ -353,6 +355,7 @@ async def _user_entry(store: Any, record: Any) -> AdminUserEntry:
         name=record.name,
         role=record.role.value if isinstance(record.role, Role) else str(record.role),
         tier=record.tier,
+        is_active=record.is_active,
         created_at=record.created_at,
         today_tokens_in=int(today.get("tokens_in", 0)),
         today_tokens_out=int(today.get("tokens_out", 0)),
@@ -399,6 +402,72 @@ async def patch_user(
         raise HTTPException(status_code=400, detail=f"unknown role: {payload.role}")
     updated = await store.get_by_id(user_id)
     return await _user_entry(store, updated)
+
+
+async def _lifecycle_target(store: Any, user_id: str, user: TokenPayload) -> Any:
+    if user_id in {user.user_id, user.sub}:
+        raise HTTPException(status_code=400, detail="an admin cannot suspend or delete themselves")
+    record = await store.get_by_id(user_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"unknown user: {user_id}")
+    if record.role == Role.ADMIN and await store.count_admins() <= 1:
+        raise HTTPException(status_code=400, detail="the last active admin cannot be suspended or deleted")
+    return record
+
+
+@router.post("/users/{user_id}/suspend", response_model=AdminUserEntry)
+async def suspend_user(
+    user_id: str,
+    request: Request,
+    user: TokenPayload = Depends(require_role(Role.ADMIN)),
+) -> AdminUserEntry:
+    store = _user_store(request)
+    record = await _lifecycle_target(store, user_id, user)
+    if not await store.set_active(record.id, False):
+        raise HTTPException(status_code=500, detail="account suspension failed")
+    await revoke_all_sessions(record.id, getattr(get_ctx(request), "cache", None))
+    updated = await store.get_by_id(record.id)
+    return await _user_entry(store, updated)
+
+
+@router.post("/users/{user_id}/reactivate", response_model=AdminUserEntry)
+async def reactivate_user(
+    user_id: str,
+    request: Request,
+    user: TokenPayload = Depends(require_role(Role.ADMIN)),
+) -> AdminUserEntry:
+    store = _user_store(request)
+    record = await store.get_by_id(user_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"unknown user: {user_id}")
+    if not await store.set_active(record.id, True):
+        raise HTTPException(status_code=500, detail="account reactivation failed")
+    updated = await store.get_by_id(record.id)
+    return await _user_entry(store, updated)
+
+
+@router.delete("/users/{user_id}", status_code=204, response_class=Response)
+async def delete_user(
+    user_id: str,
+    request: Request,
+    user: TokenPayload = Depends(require_role(Role.ADMIN)),
+) -> Response:
+    store = _user_store(request)
+    record = await _lifecycle_target(store, user_id, user)
+    if not await store.delete_user(record.id):
+        raise HTTPException(status_code=500, detail="account deletion failed")
+    ctx = get_ctx(request)
+    await revoke_all_sessions(record.id, getattr(ctx, "cache", None))
+    memory = getattr(ctx, "memory", None)
+    if memory is not None:
+        try:
+            for entry in await memory.list_sessions(record.id):
+                await memory.delete_session(record.id, entry["session_id"])
+            memories = await memory.list_memories(record.id)
+            await memory.delete_memories([m.id for m in memories])
+        except Exception:
+            logger.warning("memory purge failed for deleted account", extra={"user_id": record.id})
+    return Response(status_code=204)
 
 
 @router.get("/usage", response_model=AdminUsageResponse)

@@ -66,6 +66,38 @@ export default function UsersTab() {
     }
   }
 
+  async function toggleActive(user: AdminUserEntry) {
+    setSavingId(user.id);
+    setActionError(null);
+    try {
+      const updated = user.is_active
+        ? await adminApi.suspendUser(user.id)
+        : await adminApi.reactivateUser(user.id);
+      setUsers((prev) => prev?.map((u) => (u.id === user.id ? updated : u)) ?? null);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Échec de la modification du statut du compte.");
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function deleteUser(user: AdminUserEntry) {
+    const confirmed = window.confirm(
+      `Supprimer définitivement ${user.email} et toutes les données associées ? Cette action est irréversible.`,
+    );
+    if (!confirmed) return;
+    setSavingId(user.id);
+    setActionError(null);
+    try {
+      await adminApi.deleteUser(user.id);
+      setUsers((prev) => prev?.filter((u) => u.id !== user.id) ?? null);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Échec de la suppression du compte.");
+    } finally {
+      setSavingId(null);
+    }
+  }
+
   if (loading) return <LoadingState label="Chargement des utilisateurs…" />;
   if (error) {
     return (
@@ -100,6 +132,8 @@ export default function UsersTab() {
                 <Th>E-mail</Th>
                 <Th>Nom</Th>
                 <Th>Rôle</Th>
+                <Th>Statut</Th>
+                <Th>Actions</Th>
                 <Th>Créé le</Th>
                 <Th>Tokens (jour)</Th>
                 <Th>Requêtes (jour)</Th>
@@ -127,6 +161,37 @@ export default function UsersTab() {
                         <option value={u.role}>{u.role}</option>
                       )}
                     </select>
+                  </Td>
+                  <Td>
+                    <span
+                      className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                        u.is_active
+                          ? "border-accent/40 bg-accent/10 text-accent"
+                          : "border-warn-border/60 bg-warn-bg text-warn-text"
+                      }`}
+                    >
+                      {u.is_active ? "Actif" : "Suspendu"}
+                    </span>
+                  </Td>
+                  <Td>
+                    <div className="flex flex-col gap-1.5 sm:flex-row">
+                      <button
+                        type="button"
+                        onClick={() => void toggleActive(u)}
+                        disabled={savingId === u.id}
+                        className="rounded-lg border border-gray-300 bg-gray-50 px-2 py-1 text-[11px] font-medium text-gray-700 transition-colors hover:bg-gray-100 disabled:opacity-50"
+                      >
+                        {u.is_active ? "Suspendre" : "Réactiver"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void deleteUser(u)}
+                        disabled={savingId === u.id}
+                        className="rounded-lg border border-red-700/30 bg-red-700/10 px-2 py-1 text-[11px] font-medium text-red-700 transition-colors hover:bg-red-700/20 disabled:opacity-50"
+                      >
+                        Supprimer
+                      </button>
+                    </div>
                   </Td>
                   <Td className="whitespace-nowrap text-xs">{formatDate(u.created_at)}</Td>
                   <Td className="whitespace-nowrap text-xs">

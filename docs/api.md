@@ -387,6 +387,16 @@ All endpoints require the ADMIN role. `GET/PATCH
 all users; the PATCH body is a flat object such as
 `{"daily_request_budget": 30, "daily_token_budget": 5000000}`.
 
+### User lifecycle
+
+`GET /api/v1/admin/users` lists accounts with `is_active`, roles and daily usage.
+`PATCH /api/v1/admin/users/{id}` changes a role. `POST
+/api/v1/admin/users/{id}/suspend` suspends an account and revokes its sessions;
+`POST /api/v1/admin/users/{id}/reactivate` restores access. `DELETE
+/api/v1/admin/users/{id}` permanently removes the account and associated data.
+Self suspend/delete and removing the last active admin return `400`; unknown
+accounts return `404`.
+
 ### GET /api/v1/admin/audit-log?limit=100
 
 Most recent entries of the in-memory audit ring buffer (newest first), filled

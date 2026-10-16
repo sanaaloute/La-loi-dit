@@ -76,6 +76,7 @@ class UserRecord(BaseModel):
     name: str = ""
     role: Role = Role.USER
     tier: str = "gratuit"
+    is_active: bool = True
     workspace_id: str = ""
     created_at: str = ""
 
@@ -182,6 +183,7 @@ class UserStore:
             name=row.name or "",
             role=Role(row.role or Role.USER.value),
             tier=row.tier or "gratuit",
+            is_active=bool(getattr(row, "is_active", True)),
             workspace_id=row.workspace_id or "",
             created_at=row.created_at or "",
         )
@@ -247,6 +249,7 @@ class UserStore:
                     "password_hash": hash_password(password),
                     "role": Role.USER.value,
                     "tier": "gratuit",
+                    "is_active": 1,
                     "workspace_id": workspace_id,
                     "created_at": now,
                 },
@@ -281,7 +284,9 @@ class UserStore:
         t = TABLES["users"]
         async with self._session_factory() as session:
             row = (await session.execute(select(t).where(or_(*conditions)))).first()
-        if row is None or not verify_password(password, row.password_hash or ""):
+        if row is None or not bool(getattr(row, "is_active", True)):
+            return None
+        if not verify_password(password, row.password_hash or ""):
             return None
         return self._row_to_record(row)
 
@@ -354,7 +359,11 @@ class UserStore:
 
         t = TABLES["users"]
         async with self._session_factory() as session:
-            row = (await session.execute(select(func.count()).where(t.c.role == Role.ADMIN.value))).first()
+            row = (
+                await session.execute(
+                    select(func.count()).where(t.c.role == Role.ADMIN.value, t.c.is_active == 1)
+                )
+            ).first()
         return int(row[0]) if row else 0
 
     async def has_admin(self) -> bool:
@@ -385,6 +394,20 @@ class UserStore:
         t = TABLES["users"]
         async with self._session_factory() as session:
             result = await session.execute(update(t).where(t.c.id == user_id).values(role=role_value))
+            await session.commit()
+        return bool(result.rowcount)
+
+    async def set_active(self, user_id: str, active: bool) -> bool:
+        """Set the account's active flag; False on missing user or DB down."""
+        if not await self._ensure_db():
+            return False
+        from sqlalchemy import update
+
+        t = TABLES["users"]
+        async with self._session_factory() as session:
+            result = await session.execute(
+                update(t).where(t.c.id == user_id).values(is_active=1 if active else 0)
+            )
             await session.commit()
         return bool(result.rowcount)
 

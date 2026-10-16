@@ -46,7 +46,8 @@ async def _refresh_tier(request: Request, payload: TokenPayload) -> TokenPayload
     """Load the fresh tier from the DB for DB-backed users.
 
     Falls back to the token claims when the user store is unreachable or the
-    account is gone, so a DB outage never breaks authentication.
+    account is gone, so a DB outage never breaks authentication. Suspended
+    accounts are rejected immediately, including already-issued tokens.
     """
     if not payload.user_id:
         return payload
@@ -57,6 +58,8 @@ async def _refresh_tier(request: Request, payload: TokenPayload) -> TokenPayload
         record = await user_store.get_by_id(payload.user_id)
     except Exception:
         record = None
+    if record is not None and not record.is_active:
+        raise AuthenticationError("account suspended")
     if record is not None:
         payload.tier = record.tier
     return payload

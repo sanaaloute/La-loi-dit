@@ -1219,6 +1219,7 @@ export interface AdminUserEntry {
   name: string;
   role: string;
   tier: string;
+  is_active: boolean;
   created_at: string;
   today_tokens_in: number;
   today_tokens_out: number;
@@ -1464,6 +1465,12 @@ export const adminApi = {
       method: "PATCH",
       json: body,
     }),
+  suspendUser: (id: string) =>
+    adminRequest<AdminUserEntry>(`/users/${encodeURIComponent(id)}/suspend`, { method: "POST" }),
+  reactivateUser: (id: string) =>
+    adminRequest<AdminUserEntry>(`/users/${encodeURIComponent(id)}/reactivate`, { method: "POST" }),
+  deleteUser: (id: string) =>
+    adminRequest<void>(`/users/${encodeURIComponent(id)}`, { method: "DELETE" }),
   usage: (days = 30) => adminRequest<AdminUsageResponse>(`/usage?days=${days}`),
   dailyBudgets: () => adminRequest<DailyBudgetsResponse>("/settings/daily-budgets"),
   patchDailyBudgets: (body: DailyBudgetPatch) =>

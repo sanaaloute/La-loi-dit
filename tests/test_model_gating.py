@@ -433,11 +433,16 @@ async def test_user_store_crud(tmp_path):
     assert record.email == "test@example.com"
     assert record.role == Role.USER
     assert record.tier == "gratuit"
+    assert record.is_active is True
     assert record.workspace_id
 
     assert await store.authenticate("test@example.com", PASSWORD) is not None
     assert await store.authenticate("test@example.com", "wrong-password") is None
     assert await store.authenticate("nobody@example.com", PASSWORD) is None
+    assert await store.set_active(record.id, False)
+    assert await store.authenticate("test@example.com", PASSWORD) is None
+    assert await store.set_active(record.id, True)
+    assert await store.authenticate("test@example.com", PASSWORD) is not None
 
     with pytest.raises(UserAlreadyExistsError):
         await store.create_user("test@example.com", PASSWORD)

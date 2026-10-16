@@ -26,6 +26,7 @@ users = Table(
     # Legacy subscription value retained for backward-compatible rows/tokens;
     # it no longer controls access. Existing billing columns are not dropped.
     Column("tier", String(32), default="gratuit"),
+    Column("is_active", Integer, default=1),
     Column("workspace_id", String(64), default=""),
     Column("created_at", String(64)),
 )
@@ -33,6 +34,7 @@ users = Table(
 # create_all never ALTERs: bootstrap applies these idempotently (duplicate
 # column errors are swallowed) so existing databases gain the new columns.
 USER_MIGRATIONS = [
+    "ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1",
     "ALTER TABLE users ADD COLUMN phone VARCHAR(32) DEFAULT ''",
     # Key-value store for admin-adjustable settings (e.g. the global daily budget).
     "CREATE TABLE IF NOT EXISTS app_settings (key VARCHAR(128) PRIMARY KEY, value TEXT DEFAULT '')",

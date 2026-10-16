@@ -298,10 +298,10 @@ async def refresh_token(request: Request) -> TokenResponse:
 
 @router.get("/me", response_model=MeResponse)
 async def whoami(request: Request) -> MeResponse:
-    """Return the current account profile (anonymous in development)."""
-    from backend.api.deps import get_current_user, get_ctx
+    """Return the authenticated account profile, rejecting suspended accounts."""
+    from backend.api.deps import get_ctx, require_user
 
-    user: TokenPayload = await get_current_user(request)
+    user: TokenPayload = await require_user(request)
     settings = get_ctx(request).settings
     if user.user_id:
         user_store = _db_user_store(request)

@@ -454,6 +454,9 @@ NEW_ADMIN_ROUTES = [
     ("post", "/api/v1/admin/documents/metadata-suggestion"),
     ("post", "/api/v1/admin/documents/upload"),
     ("patch", "/api/v1/admin/users/some-user-id"),
+    ("post", "/api/v1/admin/users/some-user-id/suspend"),
+    ("post", "/api/v1/admin/users/some-user-id/reactivate"),
+    ("delete", "/api/v1/admin/users/some-user-id"),
     ("delete", "/api/v1/admin/documents/some-doc-id"),
 ]
 
@@ -543,6 +546,50 @@ def test_admin_users_patch_rejects_self_change(client):
         headers=_headers(Role.ADMIN),
     )
     assert response.status_code == 400
+
+
+def test_admin_suspend_reactivate_and_delete_user(client):
+    record = _create_db_user(client)
+    credentials = {"username": record.email, "password": "password123"}
+    headers = _headers(Role.ADMIN)
+    token = client.post("/api/v1/auth/token", json=credentials).json()["access_token"]
+
+    response = client.post(f"/api/v1/admin/users/{record.id}/suspend", headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["is_active"] is False
+    assert client.post("/api/v1/auth/token", json=credentials).status_code == 401
+    assert client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}).status_code == 401
+
+    response = client.post(f"/api/v1/admin/users/{record.id}/reactivate", headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["is_active"] is True
+    assert client.post("/api/v1/auth/token", json=credentials).status_code == 200
+
+    response = client.delete(f"/api/v1/admin/users/{record.id}", headers=headers)
+    assert response.status_code == 204
+    assert asyncio.run(client.app.state.ctx.user_store.get_by_id(record.id)) is None
+
+
+def test_admin_cannot_suspend_or_delete_self(client):
+    headers = _headers(Role.ADMIN)
+    assert client.post("/api/v1/admin/users/test-admin/suspend", headers=headers).status_code == 400
+    assert client.delete("/api/v1/admin/users/test-admin", headers=headers).status_code == 400
+
+
+def test_admin_cannot_suspend_or_delete_last_active_admin(client):
+    ctx = client.app.state.ctx
+    record = _create_db_user(client, "last-admin@example.com")
+    asyncio.run(ctx.user_store.set_role(record.id, "admin"))
+    headers = _headers(Role.ADMIN)
+    assert client.post(f"/api/v1/admin/users/{record.id}/suspend", headers=headers).status_code == 400
+    assert client.delete(f"/api/v1/admin/users/{record.id}", headers=headers).status_code == 400
+
+
+def test_admin_lifecycle_unknown_user_returns_404(client):
+    headers = _headers(Role.ADMIN)
+    assert client.post("/api/v1/admin/users/missing/suspend", headers=headers).status_code == 404
+    assert client.post("/api/v1/admin/users/missing/reactivate", headers=headers).status_code == 404
+    assert client.delete("/api/v1/admin/users/missing", headers=headers).status_code == 404
 
 
 # ---------------------------------------------------------------------------
