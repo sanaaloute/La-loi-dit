@@ -10,20 +10,12 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import {
-  eraseMemories,
-  getPreferences,
-  listMemories,
-  usageMe,
-  type MemoryRecord,
-  type UsageResponse,
-} from "../../src/lib/api";
+import { usageMe, type UsageResponse } from "../../src/lib/api";
 import { useAuth } from "../../src/lib/auth";
 import { shortDay } from "../../src/lib/format";
 import { GOVERNMENT_DISCLAIMER, OFFICIAL_SOURCES } from "../../src/lib/legal-sources";
-import { personaLabel, personaOption } from "../../src/lib/persona";
 import type { ThemeColors } from "../../src/theme";
 import { useTheme } from "../../src/theme-context";
 
@@ -35,13 +27,9 @@ function formatTokens(n: number): string {
 
 export default function AccountScreen() {
   const { profile, token, refreshProfile, signOut, deleteAccount } = useAuth();
-  const router = useRouter();
   const { colors, isDark, toggleTheme } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [usage, setUsage] = useState<UsageResponse | null>(null);
-  const [persona, setPersona] = useState<string | null>(null);
-  const [memories, setMemories] = useState<MemoryRecord[] | null>(null);
-  const [memoriesBusy, setMemoriesBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState(false);
 
@@ -49,15 +37,8 @@ export default function AccountScreen() {
     if (!token) return;
     setLoading(true);
     void refreshProfile();
-    Promise.allSettled([usageMe(), getPreferences(), listMemories()]).then((results) => {
-      const [u, p, mem] = results;
+    Promise.allSettled([usageMe()]).then(([u]) => {
       setUsage(u.status === "fulfilled" ? u.value : null);
-      setPersona(
-        p.status === "fulfilled" && typeof p.value.persona === "string"
-          ? p.value.persona
-          : null,
-      );
-      setMemories(mem.status === "fulfilled" ? mem.value : null);
       setLoading(false);
     });
   }, [token, refreshProfile]);
@@ -100,32 +81,6 @@ export default function AccountScreen() {
         },
       },
     ]);
-  }
-
-  function handleEraseMemories() {
-    Alert.alert(
-      "Effacer la mémoire",
-      "L'assistant oubliera tout ce qu'il a mémorisé sur vous. Cette action est irréversible.",
-      [
-        { text: "Annuler", style: "cancel" },
-        {
-          text: "Tout effacer",
-          style: "destructive",
-          onPress: () => {
-            setMemoriesBusy(true);
-            eraseMemories()
-              .then(() => setMemories([]))
-              .catch((err) => {
-                Alert.alert(
-                  "Échec de l'effacement",
-                  err instanceof Error ? err.message : "Une erreur est survenue.",
-                );
-              })
-              .finally(() => setMemoriesBusy(false));
-          },
-        },
-      ],
-    );
   }
 
   function handleDeleteAccount() {
@@ -237,58 +192,6 @@ export default function AccountScreen() {
             </>
           ) : (
             <Text style={styles.mutedText}>Utilisation indisponible.</Text>
-          )}
-        </View>
-
-        {/* Persona (choisi lors de l'accueil, modifiable ici) */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Profil d'utilisation</Text>
-          <Pressable style={styles.modelButton} onPress={() => router.push("/onboarding")}>
-            <Ionicons
-              name={personaOption(persona)?.icon ?? "person-outline"}
-              size={16}
-              color={colors.accent}
-            />
-            <Text style={styles.modelButtonText}>{personaLabel(persona)}</Text>
-            <Ionicons name="chevron-forward" size={14} color={colors.muted} />
-          </Pressable>
-          <Text style={styles.cardHint}>Adapte les suggestions de questions du chat.</Text>
-        </View>
-
-        {/* Mémoire de l'assistant */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Mémoire de l'assistant</Text>
-          {memories === null ? (
-            <Text style={styles.mutedText}>{loading ? "Chargement…" : "Mémoire indisponible."}</Text>
-          ) : memories.length === 0 ? (
-            <Text style={styles.mutedText}>Aucune mémoire enregistrée.</Text>
-          ) : (
-            <>
-              {memories.map((memory) => (
-                <View key={memory.id} style={styles.memoryRow}>
-                  <View style={styles.memoryBadge}>
-                    <Text style={styles.memoryBadgeText}>{memory.kind}</Text>
-                  </View>
-                  <Text style={styles.memoryContent} numberOfLines={3}>
-                    {memory.content.length > 140
-                      ? `${memory.content.slice(0, 140).trimEnd()}…`
-                      : memory.content}
-                  </Text>
-                </View>
-              ))}
-              <Pressable
-                style={styles.eraseButton}
-                onPress={handleEraseMemories}
-                disabled={memoriesBusy}
-              >
-                {memoriesBusy ? (
-                  <ActivityIndicator size={14} color={colors.danger} />
-                ) : (
-                  <Ionicons name="trash-outline" size={14} color={colors.danger} />
-                )}
-                <Text style={styles.eraseText}>Tout effacer</Text>
-              </Pressable>
-            </>
           )}
         </View>
 
@@ -444,37 +347,6 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
     borderTopColor: colors.border,
   },
   sourceLabel: { flex: 1, fontSize: 13, color: colors.ink },
-  memoryRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 8,
-    paddingVertical: 6,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  memoryBadge: {
-    borderWidth: 1,
-    borderColor: colors.accent,
-    backgroundColor: colors.accentLight,
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  memoryBadgeText: { fontSize: 10, fontWeight: "500", color: colors.accent },
-  memoryContent: { flex: 1, fontSize: 12, lineHeight: 17, color: colors.inkSoft },
-  eraseButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    borderWidth: 1,
-    borderColor: colors.dangerBorder,
-    backgroundColor: colors.dangerBg,
-    borderRadius: 10,
-    paddingVertical: 8,
-    marginTop: 4,
-  },
-  eraseText: { fontSize: 13, fontWeight: "500", color: colors.danger },
   logoutButton: {
     flexDirection: "row",
     alignItems: "center",

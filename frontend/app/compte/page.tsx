@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Brain, Building2, Loader2, LogOut, Trash2, UserCircle } from "lucide-react";
+import { AlertTriangle, Building2, Loader2, LogOut, Trash2, UserCircle } from "lucide-react";
 import AppHeader from "@/components/AppHeader";
 import ErrorCard from "@/components/ui/ErrorCard";
 import GatePanel from "@/components/ui/GatePanel";
@@ -10,24 +10,12 @@ import PageShell from "@/components/ui/PageShell";
 import { useAuthToken } from "@/lib/useAuth";
 import {
   deleteAccount,
-  eraseMemories,
-  getPreferences,
-  listMemories,
   logout,
   me,
-  putPreferences,
   usageMe,
-  type MemoryEntry,
   type UsageResponse,
   type UserProfile,
 } from "@/lib/api";
-import { relativeDate } from "@/lib/dates";
-import {
-  notifyPersonaChanged,
-  readPersona,
-  PERSONA_LABELS,
-  type PersonaKey,
-} from "@/lib/persona";
 
 function formatNumber(n: number): string {
   return n.toLocaleString("fr-FR");
@@ -40,13 +28,6 @@ export default function ComptePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // "Confidentialité & mémoire" section, loaded independently: a memory-store
-  // failure must not break the rest of the account page.
-  const [persona, setPersona] = useState<PersonaKey | null>(null);
-  const [personaSaving, setPersonaSaving] = useState(false);
-  const [memories, setMemories] = useState<MemoryEntry[] | null>(null);
-  const [privacyError, setPrivacyError] = useState<string | null>(null);
-  const [erasingMemories, setErasingMemories] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
 
   useEffect(() => {
@@ -72,61 +53,6 @@ export default function ComptePage() {
       cancelled = true;
     };
   }, [token]);
-
-  // Preferences (persona) + memories, for the "Confidentialité & mémoire" section.
-  useEffect(() => {
-    if (!token) return;
-    let cancelled = false;
-    getPreferences(token)
-      .then((res) => {
-        if (!cancelled) setPersona(readPersona(res.preferences));
-      })
-      .catch(() => {
-        // Préférences indisponibles : le sélecteur de profil reste sans choix.
-      });
-    listMemories(token)
-      .then((res) => {
-        if (!cancelled) setMemories(res.memories);
-      })
-      .catch(() => {
-        if (!cancelled) setMemories([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [token]);
-
-  async function changePersona(next: PersonaKey) {
-    if (!token || personaSaving || next === persona) return;
-    setPersonaSaving(true);
-    setPrivacyError(null);
-    try {
-      await putPreferences({ persona: next }, token);
-      setPersona(next);
-      notifyPersonaChanged(next);
-    } catch (err) {
-      setPrivacyError(err instanceof Error ? err.message : "Échec de l'enregistrement du profil.");
-    } finally {
-      setPersonaSaving(false);
-    }
-  }
-
-  async function handleEraseMemories() {
-    if (!token || erasingMemories) return;
-    if (!window.confirm("Effacer tout ce que l'assistant retient de vous ? Cette action est irréversible.")) {
-      return;
-    }
-    setErasingMemories(true);
-    setPrivacyError(null);
-    try {
-      await eraseMemories(token);
-      setMemories([]);
-    } catch (err) {
-      setPrivacyError(err instanceof Error ? err.message : "Échec de l'effacement de la mémoire.");
-    } finally {
-      setErasingMemories(false);
-    }
-  }
 
   async function handleDeleteAccount() {
     if (!token || deletingAccount) return;
@@ -299,89 +225,6 @@ export default function ComptePage() {
                   </div>
                 </div>
               )}
-            </section>
-
-            {/* Privacy & memory */}
-            <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-2xl backdrop-blur-xl sm:p-6">
-              <h2 className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-                Confidentialité & mémoire
-              </h2>
-
-              <p className="mb-2 text-xs font-medium text-gray-600">Votre profil</p>
-              <div className="flex flex-wrap gap-2">
-                {(Object.keys(PERSONA_LABELS) as PersonaKey[]).map((key) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => void changePersona(key)}
-                    disabled={personaSaving}
-                    className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${
-                      persona === key
-                        ? "border-accent/40 bg-accent/10 text-accent"
-                        : "border-gray-300 bg-gray-50 text-gray-600 hover:bg-gray-100"
-                    }`}
-                  >
-                    {PERSONA_LABELS[key]}
-                  </button>
-                ))}
-              </div>
-
-              <div className="mb-2 mt-5 flex items-center justify-between gap-3">
-                <p className="flex items-center gap-1.5 text-xs font-medium text-gray-600">
-                  <Brain className="h-3.5 w-3.5 text-gray-500" />
-                  Ce que l&apos;assistant retient de vous
-                </p>
-                {memories && memories.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => void handleEraseMemories()}
-                    disabled={erasingMemories}
-                    className="flex items-center gap-1.5 rounded-lg border border-red-700/30 bg-red-700/10 px-2.5 py-1 text-[11px] font-medium text-red-700 transition-colors hover:bg-red-700/20 disabled:opacity-50"
-                  >
-                    {erasingMemories ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-3 w-3" />
-                    )}
-                    Tout effacer
-                  </button>
-                )}
-              </div>
-              {memories === null ? (
-                <p className="flex items-center gap-2 text-xs text-gray-500">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
-                  Chargement…
-                </p>
-              ) : memories.length === 0 ? (
-                <p className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-xs text-gray-500">
-                  L&apos;assistant ne retient rien de vous pour le moment.
-                </p>
-              ) : (
-                <ul className="space-y-2">
-                  {memories.map((memory) => (
-                    <li
-                      key={memory.id}
-                      className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="rounded-full border border-gray-300 bg-white px-2 py-0.5 text-[10px] font-medium text-gray-600">
-                          {memory.kind}
-                        </span>
-                        <span className="text-[10px] text-gray-400">
-                          {relativeDate(memory.created_at)}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs leading-relaxed text-gray-700">
-                        {memory.content.length > 140
-                          ? `${memory.content.slice(0, 140)}…`
-                          : memory.content}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {privacyError && <p className="mt-3 text-xs text-red-700">{privacyError}</p>}
             </section>
 
             {/* Danger zone */}
