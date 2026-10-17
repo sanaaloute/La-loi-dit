@@ -2,7 +2,7 @@
   "expo": {
     "name": "Yawoto",
     "slug": "yawoto",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "scheme": "yawoto",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -15,7 +15,6 @@
     },
     "android": {
       "package": "net.neobytech.yawoto",
-      "versionCode": 3,
       "softwareKeyboardLayoutMode": "pan",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
