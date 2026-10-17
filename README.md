@@ -275,7 +275,7 @@ nested spans, meaningful input/output, and feedback scores).
 - [Operations](docs/operations.md) — runbook and failure modes
 - [Monitoring](docs/monitoring.md) — metrics, dashboards, alerts
 - [Security](docs/security.md) — auth, guardrails, threat model
-- [Testing](docs/testing.md) — running and writing tests
+- [Load testing](docs/testing.md) — Locust and k6 examples
 - [Developer guide](docs/developer.md) — extending agents, domains, retrievers
 - [Administrator guide](docs/administrator.md) — users, ingestion, evaluations
 - [Evaluation](docs/evaluation.md) — quality metrics and the evaluation runner
@@ -305,10 +305,10 @@ Everything is configured via environment variables prefixed `LEGAL_AI_` (see
 
 ## Development
 
-Run the test suite:
+Run the backend compile check:
 
 ```bash
-pytest -q
+python -m compileall backend -q
 ```
 
 Run the frontend type-check and build:

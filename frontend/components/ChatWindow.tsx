@@ -472,13 +472,11 @@ export default function ChatWindow() {
 
   // Mobile connections die mid-run while the backend keeps working and
   // persists the completed answer in the session history. Poll that history
-  // (backend runs are capped at ~10 min) instead of failing outright. The
-  // run-status endpoint tells us a server thread is still working on the
-  // prompt: while it runs we keep waiting; three consecutive "not running"
-  // readings with no answer landed mean the turn is dead — stop early with
-  // an honest failure instead of polling the full window in vain.
+  // (backend runs are capped at ~10 min) instead of failing outright. Three
+  // consecutive "not running" readings normally mean the turn is dead, but
+  // not when the run is known active: another API worker cannot see its task.
   const recoverAnswer = useCallback(
-    async (sid: string, sendStart: number, query: string): Promise<boolean> => {
+    async (sid: string, sendStart: number, query: string, runKnownActive = false): Promise<boolean> => {
       let deadStreak = 0;
       // 5 s cadence × 130 attempts ≈ 11 min: fast answer pickup on phones,
       // still covering the backend run cap (~10 min). Polls are cheap GETs,
@@ -514,10 +512,12 @@ export default function ChatWindow() {
         } catch {
           // History not readable yet — keep polling.
         }
-        // Null = status unreadable (network blip): never counts as dead.
-        const runStatus = await getRunStatus(sid, token);
-        deadStreak = runStatus?.running === false ? deadStreak + 1 : 0;
-        if (deadStreak >= 3) return false;
+        if (!runKnownActive) {
+          // Null = status unreadable (network blip): never counts as dead.
+          const runStatus = await getRunStatus(sid, token);
+          deadStreak = runStatus?.running === false ? deadStreak + 1 : 0;
+          if (deadStreak >= 3) return false;
+        }
       }
       return false;
     },
@@ -528,8 +528,8 @@ export default function ChatWindow() {
    * the "Traitement en cours…" indicator keeps running, no error bubble —
    * until the backend finishes and the persisted answer appears. */
   const attemptRecovery = useCallback(
-    async (sid: string, sendStart: number, query: string): Promise<boolean> => {
-      return recoverAnswer(sid, sendStart, query);
+    async (sid: string, sendStart: number, query: string, runKnownActive = false): Promise<boolean> => {
+      return recoverAnswer(sid, sendStart, query, runKnownActive);
     },
     [recoverAnswer],
   );
@@ -671,6 +671,7 @@ export default function ChatWindow() {
     const sendStart = Date.now();
     inFlightRef.current = { sid, sendStart, query };
     let streamed = false;
+    let streamAccepted = false;
     let cancelled = false;
     // Distinguishes a backend-reported failure (nothing to recover) from a
     // dropped connection (the backend may still complete and persist).
@@ -710,6 +711,9 @@ export default function ChatWindow() {
         },
         token,
         controller.signal,
+        () => {
+          streamAccepted = true;
+        },
       );
       if (cancelled) interrupted();
     } catch (err) {
@@ -719,7 +723,7 @@ export default function ChatWindow() {
           // the page was suspended, but the backend drains and persists the
           // run — recover the answer from the session history.
           resumeRecoveryRef.current = false;
-          const recovered = await attemptRecovery(sid, sendStart, query);
+          const recovered = await attemptRecovery(sid, sendStart, query, streamAccepted);
           if (!recovered) {
             discardStreamingMessage();
             failWith("La connexion s'est interrompue. Réessayez.");
@@ -731,14 +735,14 @@ export default function ChatWindow() {
         interrupted();
       } else if (err instanceof ApiError && err.status === 429) {
         quotaReached(err.message);
+      } else if (serverFailed) {
+        failWith(err instanceof Error ? `Erreur : ${err.message}` : "Une erreur est survenue.");
       } else if (!streamed) {
-        // The stream never delivered a frame. When the run still reached the
-        // backend it is draining there — poll for the persisted answer rather
-        // than starting a duplicate run. An unreadable status (null) keeps
-        // the historical behavior: one POST /chat attempt.
-        const runStatus = sid ? await getRunStatus(sid, token) : null;
-        if (runStatus?.running) {
-          const recovered = await attemptRecovery(sid, sendStart, query);
+        // An accepted stream already has a backend run that will persist its
+        // answer or failure marker. Recover it instead of starting a duplicate.
+        const runStatus = streamAccepted ? null : await getRunStatus(sid, token);
+        if (streamAccepted || runStatus?.running) {
+          const recovered = await attemptRecovery(sid, sendStart, query, true);
           if (!recovered) {
             failWith(err instanceof Error ? `Erreur : ${err.message}` : "Une erreur est survenue.");
           }
@@ -771,7 +775,7 @@ export default function ChatWindow() {
       } else {
         // Dropped connection mid-stream: poll the session history for the
         // answer the backend may still be computing before declaring failure.
-        const recovered = !serverFailed && (await attemptRecovery(sid, sendStart, query));
+        const recovered = !serverFailed && (await attemptRecovery(sid, sendStart, query, true));
         if (!recovered) {
           discardStreamingMessage();
           failWith(err instanceof Error ? `Erreur : ${err.message}` : "Une erreur est survenue.");

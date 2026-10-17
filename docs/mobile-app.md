@@ -6,7 +6,7 @@ Assessment of how native mobile apps can connect to this codebase, what already 
 
 The backend **is already an API gateway in every meaningful sense**: a standalone FastAPI app exposing the entire product under a versioned `/api/v1` prefix, with stateless JWT Bearer auth (no cookies, no CSRF), JSON contracts, and mobile-viable streaming. A mobile app can talk to it **without any backend rewrite**. What is missing is (1) a stable public route that reaches the API directly instead of through the Next.js proxy and (2) fixes for two mobile-hostile auth behaviors.
 
-> **Implementation status (September 2026) — Phase 0 backend: DONE.** `X-Device-Id` mobile session binding + per-device-class sessions, `POST /auth/logout`, `DELETE /auth/me`, token-based password reset with optional SMTP, production-hiding of `/docs`, and auth on `/export/*` are implemented and tested (`tests/test_mobile_sessions.py`). The Expo app lives in `mobile/`. Remaining: the deploy-time `api.` subdomain ingress (see [deployment-macmini.md](deployment-macmini.md#public-api-endpoint-for-mobile-apps)) and push notifications. All features are free; no in-app purchase flow is needed.
+> **Implementation status (September 2026) — Phase 0 backend: DONE.** `X-Device-Id` mobile session binding + per-device-class sessions, `POST /auth/logout`, `DELETE /auth/me`, token-based password reset with optional SMTP, production-hiding of `/docs`, and auth on `/export/*` are implemented. The Expo app lives in `mobile/`. Remaining: the deploy-time `api.` subdomain ingress (see [deployment-macmini.md](deployment-macmini.md#public-api-endpoint-for-mobile-apps)) and push notifications. All features are free; no in-app purchase flow is needed.
 
 ## 1. Current state
 

@@ -5,8 +5,8 @@ import type { NextConfig } from "next";
 // Next.js rewrites to the API. Set NEXT_PUBLIC_API_URL (e.g.
 // http://localhost:8000) to call the API directly from the browser — the
 // backend's CORS middleware (LEGAL_AI_CORS_ORIGINS) must then allow this
-// origin. Direct streaming is REQUIRED for real-time SSE: this rewrite
-// buffers the stream and delivers frames in bursts.
+// origin. Chat SSE uses the dedicated streaming route handler in
+// app/backend-api/api/v1/chat/stream because this rewrite buffers streams.
 // NOTE: native mobile apps should NOT use this proxy — they call the API
 // directly via its own hostname (see docs/deployment-macmini.md, "Public
 // API endpoint for mobile apps").

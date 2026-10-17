@@ -70,11 +70,7 @@ class LLMClient:
         self.api_base = api_base if api_base is not None else settings.llm_api_base
         if not self.api_base and self.provider == "ollama":
             self.api_base = default_ollama_api_base()
-        self.timeout_seconds = (
-            max(settings.llm_timeout_seconds, 180.0)
-            if self.provider == "ollama"
-            else settings.llm_timeout_seconds
-        )
+        self.timeout_seconds = settings.llm_timeout_seconds
         # Cumulative token metering across calls on this instance. Read as a
         # delta around one request when the client is shared (mock mode).
         self.usage_totals: dict[str, int] = {"tokens_in": 0, "tokens_out": 0}
@@ -84,6 +80,17 @@ class LLMClient:
     def _estimate_tokens(text: str) -> int:
         """Offline heuristic (~4 chars/token) used for mock/usage-less calls."""
         return max(1, len(text) // 4) if text else 0
+
+    @staticmethod
+    def _clean_channel_content(content: str) -> str:
+        lowered = content.lower()
+        final_marker = "<|channel>final"
+        final_index = lowered.find(final_marker)
+        if final_index >= 0:
+            return content[final_index + len(final_marker):].strip()
+        if lowered.lstrip().startswith("<|channel>thought"):
+            return ""
+        return content
 
     def _record_usage(self, system: str, user: str, completion: str, usage: Any) -> None:
         """Accumulate one call's tokens (provider usage when available)."""
@@ -104,6 +111,53 @@ class LLMClient:
             self.usage_totals["tokens_in"] += self._estimate_tokens(system) + self._estimate_tokens(user)
             self.usage_totals["tokens_out"] += self._estimate_tokens(completion)
 
+    async def _ollama_complete(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: Optional[float],
+        max_tokens: Optional[int],
+        timeout_seconds: float,
+    ) -> str:
+        from ollama import AsyncClient
+
+        host = self.api_base or PROVIDER_DEFAULT_API_BASES["ollama"]
+        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        client = AsyncClient(host=host, headers=headers)
+        model = self.model
+        if model.startswith("ollama/"):
+            model = model[len("ollama/"):]
+        try:
+            response = await asyncio.wait_for(
+                client.chat(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    stream=False,
+                    keep_alive=self.settings.ollama_keep_alive,
+                    think=self.settings.ollama_think_enabled,
+                    options={
+                        "temperature": self.settings.llm_temperature if temperature is None else temperature,
+                        "num_predict": max_tokens or self.settings.llm_max_tokens,
+                    },
+                ),
+                timeout=timeout_seconds,
+            )
+        except asyncio.TimeoutError as exc:
+            raise LLMError(f"Ollama call timed out after {timeout_seconds}s ({self.model})") from exc
+        except Exception as exc:
+            raise LLMError(f"Ollama call failed ({self.model}): {exc}") from exc
+        content = self._clean_channel_content(response.message.content or "")
+        usage = {
+            "prompt_tokens": getattr(response, "prompt_eval_count", None),
+            "completion_tokens": getattr(response, "eval_count", None),
+        }
+        self._record_usage(system, user, content, usage)
+        return content
+
     # ------------------------------------------------------------------
     async def complete(
         self,
@@ -112,11 +166,21 @@ class LLMClient:
         *,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        timeout_seconds: Optional[float] = None,
     ) -> str:
         if self.provider == "mock":
             result = self._mock_complete(system, user)
             self._record_usage(system, user, result, None)
             return result
+        request_timeout = self.timeout_seconds if timeout_seconds is None else timeout_seconds
+        if self.provider == "ollama":
+            return await self._ollama_complete(
+                system,
+                user,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout_seconds=request_timeout,
+            )
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": [
@@ -125,7 +189,8 @@ class LLMClient:
             ],
             "temperature": self.settings.llm_temperature if temperature is None else temperature,
             "max_tokens": max_tokens or self.settings.llm_max_tokens,
-            "timeout": self.timeout_seconds,
+            "timeout": request_timeout,
+            "num_retries": 0,
             "metadata": litellm_trace_metadata(),
         }
         if self.api_key:
@@ -141,8 +206,10 @@ class LLMClient:
         if extra_headers:
             kwargs["extra_headers"] = extra_headers
         try:
-            resp = await litellm.acompletion(**kwargs)
-            content = resp.choices[0].message.content or ""
+            resp = await asyncio.wait_for(
+                litellm.acompletion(**kwargs), timeout=request_timeout
+            )
+            content = self._clean_channel_content(resp.choices[0].message.content or "")
             self._record_usage(system, user, content, getattr(resp, "usage", None))
             return content
         except Exception as exc:  # provider/network errors

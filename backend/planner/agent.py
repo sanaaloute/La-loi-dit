@@ -37,6 +37,7 @@ class PlannerAgent(CompletionAgent):
     """Turns the user question into a structured retrieval plan."""
 
     name = "planner"
+    completion_timeout_seconds = 10.0
     # Resolved through the prompt registry (backend.core.prompts.PLANNER_SYSTEM)
     # at every access, so Settings.prompts_dir overrides apply.
     system_prompt = PromptRef("PLANNER_SYSTEM")

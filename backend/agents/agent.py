@@ -11,6 +11,7 @@ No agent here executes generated code or uses the sandbox.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from abc import ABC, abstractmethod
 from typing import Any, Optional
@@ -140,6 +141,8 @@ class ToolCallingAgent(Agent):
 class CompletionAgent(Agent):
     """Agent whose LLM produces a single text output (no tool loop)."""
 
+    completion_timeout_seconds: Optional[float] = None
+
     @abstractmethod
     def _build_user_message(self, state: GraphState, ctx: Optional[AppContext] = None) -> str:
         """Return the user message for this agent."""
@@ -157,11 +160,15 @@ class CompletionAgent(Agent):
 
     async def run(self, state: GraphState, ctx: AppContext) -> dict[str, Any]:
         try:
-            text = await ctx.llm.complete(
+            completion = ctx.llm.complete(
                 self.system_prompt,
                 self._build_user_message(state, ctx),
                 temperature=ctx.settings.llm_temperature,
             )
+            if self.completion_timeout_seconds is None:
+                text = await completion
+            else:
+                text = await asyncio.wait_for(completion, timeout=self.completion_timeout_seconds)
         except Exception as exc:
             return self._fallback(state, f"LLM completion failed: {exc!r}")
         return self._parse_final(text, state, ctx)

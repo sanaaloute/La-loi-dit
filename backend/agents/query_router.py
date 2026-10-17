@@ -13,6 +13,7 @@ the guardrail result — it cannot unblock a blocked query.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import unicodedata
 from typing import Any
@@ -113,6 +114,7 @@ class QueryRouterAgent(Agent):
     """Routes guardrail-approved queries to direct, general, or retrieval."""
 
     name = "query_router"
+    llm_timeout_seconds = 10.0
     # Resolved through the prompt registry (backend.core.prompts.QUERY_ROUTER_SYSTEM)
     # at every access, so Settings.prompts_dir overrides apply.
     system_prompt = PromptRef("QUERY_ROUTER_SYSTEM")
@@ -131,10 +133,13 @@ class QueryRouterAgent(Agent):
     async def _classify(self, state: GraphState, ctx: AppContext) -> str:
         """LLM classification; every failure mode falls back to retrieval."""
         try:
-            text = await ctx.llm.complete(
-                self.system_prompt,
-                f"Question: {state.get('query', '')}",
-                temperature=0.0,
+            text = await asyncio.wait_for(
+                ctx.llm.complete(
+                    self.system_prompt,
+                    f"Question: {state.get('query', '')}",
+                    temperature=0.0,
+                ),
+                timeout=self.llm_timeout_seconds,
             )
         except Exception:
             return "retrieval"

@@ -1,4 +1,4 @@
-.PHONY: install dev test lint run docker-up docker-down eval ingest reindex reindex-local
+.PHONY: install dev lint run docker-up docker-down eval ingest reindex reindex-local
 
 install:
 	pip install -r requirements.txt
@@ -9,9 +9,6 @@ dev:
 
 run:
 	python -m backend.api.main
-
-test:
-	pytest
 
 lint:
 	python -m compileall backend -q

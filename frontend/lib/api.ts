@@ -579,13 +579,14 @@ export async function chat(request: ChatRequest, token?: string | null): Promise
  * Stream a chat query over SSE using fetch + ReadableStream (EventSource
  * cannot send Authorization headers). Calls `onEvent` for each parsed
  * `data:` frame. Throws on HTTP-level failures so the caller can fall back
- * to POST /chat.
+ * to POST /chat. `onAccepted` fires once the backend has opened the stream.
  */
 export async function streamChat(
   request: ChatRequest,
   onEvent: (event: StreamEvent) => void,
   token?: string | null,
   signal?: AbortSignal,
+  onAccepted?: () => void,
 ): Promise<void> {
   const params = new URLSearchParams({ query: request.query });
   if (request.session_id) params.set("session_id", request.session_id);
@@ -604,6 +605,7 @@ export async function streamChat(
   if (!res.body) {
     throw new Error("Flux indisponible (pas de corps de réponse)");
   }
+  onAccepted?.();
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();

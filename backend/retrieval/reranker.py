@@ -11,6 +11,7 @@ computed for the relevance floor and for breaking ties.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import math
@@ -65,7 +66,7 @@ def _cosine(a: list[float], b: list[float]) -> float:
 
 
 async def _llm_refine(
-    query: str, chunks: list[EvidenceChunk], llm: Any, excerpt_chars: int
+    query: str, chunks: list[EvidenceChunk], llm: Any, excerpt_chars: int, timeout_seconds: float
 ) -> Optional[list[float]]:
     """Ask an LLM for 0-1 relevance scores; None on any failure."""
     if llm is None or not hasattr(llm, "complete"):
@@ -74,9 +75,12 @@ async def _llm_refine(
         numbered = "\n".join(
             f"[{i}] {chunk.content[:excerpt_chars]}" for i, chunk in enumerate(chunks)
         )
-        raw = await llm.complete(
-            system=get_prompt("RERANK_RESCORE"),
-            user=f"Query: {query}\n\n{numbered}",
+        raw = await asyncio.wait_for(
+            llm.complete(
+                system=get_prompt("RERANK_RESCORE"),
+                user=f"Query: {query}\n\n{numbered}",
+            ),
+            timeout=timeout_seconds,
         )
         match = re.search(r"\[[^\]]*\]", raw, re.DOTALL)
         scores = json.loads(match.group(0)) if match else None
@@ -171,6 +175,7 @@ async def rerank(
             [chunks[i] for i in llm_idx],
             llm,
             excerpt_chars=settings.rerank_llm_excerpt_chars,
+            timeout_seconds=settings.rerank_llm_timeout_seconds,
         )
         if subset is not None:
             llm_scores = [None] * len(chunks)

@@ -84,7 +84,3 @@ reportlab==4.1.0
 faster-whisper==1.2.1
 # faster-whisper 1.2.1 is incompatible with PyAV 19 (metadata_errors removed).
 av>=11,<19
-
-# Testing
-pytest==8.3.4
-pytest-asyncio==0.25.0

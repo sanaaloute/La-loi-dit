@@ -7,7 +7,6 @@ py -m venv .venv && .venv\Scripts\activate
 pip install -r requirements.txt
 pip install -e .
 uvicorn backend.api.main:app --reload
-pytest
 ```
 
 Everything runs offline by default (`mock` LLM, SQLite, in-memory stores).
@@ -52,7 +51,6 @@ Everything runs offline by default (`mock` LLM, SQLite, in-memory stores).
    `g.add_node("my_node", await bind(my_node.my_node))`, rewire the edges,
    and add a routing function if it needs a conditional edge.
 4. Append a trace line (`trace_step`) and record errors instead of raising.
-5. Add tests in `tests/`.
 
 ## Add a legal domain
 

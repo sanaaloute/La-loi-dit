@@ -195,6 +195,7 @@ class Settings(BaseSettings):
     # heuristic score. 0 disables the rescore without touching
     # rerank_llm_enabled semantics.
     rerank_llm_top_k: int = 8
+    rerank_llm_timeout_seconds: float = 10.0
     rerank_llm_blend_weight: float = 0.5  # weight of the LLM rescore in the final rerank blend
     reranker_max_retries: int = 1  # extra attempts after the first API rerank failure
     graph_expansion_score: float = 0.01  # retrieval score stamped on graph-expansion candidates
@@ -418,6 +419,8 @@ class Settings(BaseSettings):
     planner_max_expansion_tasks: int = 3  # cap on terminology-expansion keyword tasks per plan
     planner_max_sub_question_tasks: int = 6  # cap on sub-question keyword tasks added to the plan
     # response generator / confidence
+    answer_llm_timeout_seconds: float = 300.0
+    answer_max_tokens: int = 2000
     answer_max_excerpt_chars: int = 4000  # per-excerpt char cap in the evidence block sent to the LLM
     answer_child_preview_chars: int = 200  # child-chunk preview length inside a parent excerpt
     confidence_citation_weight: float = 0.6  # weight of citation accuracy in the aggregate confidence

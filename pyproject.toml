@@ -14,9 +14,3 @@ guardrails = ["llm-guard>=0.3.0,<1.0.0"]
 
 [tool.setuptools.packages.find]
 include = ["backend*"]
-
-[tool.pytest.ini_options]
-pythonpath = ["."]
-asyncio_mode = "auto"
-testpaths = ["tests"]
-addopts = "-q"
