@@ -151,8 +151,10 @@ either.
 
 ### GET /api/v1/chat/stream (SSE)
 
-Query parameters: `query` (required), `session_id`, `language`, `model`.
-Emits one `data:` frame per pipeline node (including one per parallel
+Query parameters: `query` (required), `session_id`, `language`, `scenario_date`.
+The legacy `model` parameter is accepted for compatibility but ignored; users
+cannot select a chat model. Emits one `data:` frame per pipeline node
+(including one per parallel
 `retrieval_branch`), then a final frame with the whole `ChatResponse`:
 
 ```
@@ -221,7 +223,10 @@ Errors: `400` unsupported format or empty file, `413` audio larger than
 `LEGAL_AI_STT_MAX_AUDIO_BYTES` (25 MB default), `503` STT not available on
 this server, `502` transcription provider failure.
 
-Configuration (`backend/core/config.py`):
+Configuration (`backend/core/config.py`). The approved deployment explicitly
+sets `LEGAL_AI_STT_PROVIDER=faster-whisper`; STT is a separate capability and
+does not use either fixed chat role model. The table lists built-in defaults,
+including the optional separate LiteLLM transcription adapter:
 
 | Setting | Default | Purpose |
 |---|---|---|
@@ -372,13 +377,17 @@ sender: `backend/core/push.py`; dead tokens pruned on DeviceNotRegistered).
 
 ## Models and usage (`backend/api/routers/models.py`, `usage.py`)
 
-`GET /api/v1/models` returns the full configured model catalog. Every model is
-allowed for every caller; legacy tier claims no longer lock models.
+`GET /api/v1/models` is a read-only compatibility/status endpoint for the two
+fixed local Ollama role models: `ollama/nemotron-3-nano:4b` and
+`ollama/gemma4:12b`. Its response includes `"selectable": false`. Users cannot
+select models, and legacy `model` request fields or query parameters are
+ignored; the server always applies its fixed role assignments.
 
 `GET /api/v1/usage/me` returns today's usage, 30-day history, and the shared
 budgets: `daily_token_budget` (also exposed as `daily_budget` for compatibility),
 `daily_request_budget`, `remaining_tokens`, and `remaining_requests`. Defaults
-are 5 000 000 tokens and 30 requests per account per day.
+are 5 000 000 tokens and 30 requests per account per day. Daily quotas and
+anti-abuse rate limits remain active regardless of the fixed model assignments.
 
 ## Admin (`backend/api/routers/admin.py`)
 

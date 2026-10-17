@@ -49,7 +49,6 @@ def _chunk(content: str, **kwargs) -> EvidenceChunk:
 
 def test_agent_tuning_defaults_match_legacy_constants():
     s = Settings()
-    assert s.planner_max_tool_iterations == 3
     assert s.planner_max_expansion_tasks == 3
     assert s.planner_max_sub_question_tasks == 6
     assert s.answer_max_excerpt_chars == 4000

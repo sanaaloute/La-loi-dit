@@ -558,8 +558,7 @@ async def patch_daily_budgets(
 @router.get("/providers", response_model=ProvidersResponse)
 async def providers_overview(request: Request) -> ProvidersResponse:
     """Provider configuration status; API keys are NEVER exposed in full."""
-    from backend.core.llm import PROVIDER_DEFAULT_API_BASES
-    from backend.core.model_router import _provider_api_key
+    from backend.core.llm import default_ollama_api_base
 
     ctx = get_ctx(request)
     settings = ctx.settings
@@ -582,26 +581,22 @@ async def providers_overview(request: Request) -> ProvidersResponse:
 
     providers: list[ProviderInfo] = []
     for provider in catalog._ALL_PROVIDERS:
-        # Dedicated key only — no cross-provider fallback inheritance, so
-        # "configured" means THIS provider's models are genuinely usable.
-        key = _provider_api_key(provider, settings)
         providers.append(
             ProviderInfo(
                 provider=provider,
-                configured=bool(key),
-                api_base=PROVIDER_DEFAULT_API_BASES.get(provider, ""),
-                key_suffix=f"…{key[-4:]}" if key else None,
+                configured=True,
+                api_base=settings.llm_api_base or default_ollama_api_base(),
+                key_suffix=None,
                 models=models_by_provider.get(provider, []),
             )
         )
-    # Active embedding configuration as a separate entry. No "llm" row: the
-    # default chat model already appears per provider above and would only
-    # duplicate the catalog information here.
+    # Active embedding configuration as a separate entry. Local keyless
+    # endpoints are valid configuration and must not appear unconfigured.
     providers.append(
         ProviderInfo(
             provider="embedding",
-            configured=bool(settings.embedding_api_key or settings.llm_api_key),
-            api_base=settings.embedding_api_base,
+            configured=bool(settings.embedding_model),
+            api_base=settings.embedding_api_base or settings.llm_api_base,
             model=settings.embedding_model,
         )
     )

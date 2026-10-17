@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,18 +16,14 @@ import {
   eraseMemories,
   getPreferences,
   listMemories,
-  listModels,
   usageMe,
   type MemoryRecord,
-  type ModelInfo,
-  type ModelList,
   type UsageResponse,
 } from "../../src/lib/api";
 import { useAuth } from "../../src/lib/auth";
 import { shortDay } from "../../src/lib/format";
 import { GOVERNMENT_DISCLAIMER, OFFICIAL_SOURCES } from "../../src/lib/legal-sources";
 import { personaLabel, personaOption } from "../../src/lib/persona";
-import { getModel, setModel } from "../../src/lib/storage";
 import type { ThemeColors } from "../../src/theme";
 import { useTheme } from "../../src/theme-context";
 
@@ -44,33 +39,27 @@ export default function AccountScreen() {
   const { colors, isDark, toggleTheme } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [usage, setUsage] = useState<UsageResponse | null>(null);
-  const [modelList, setModelList] = useState<ModelList | null>(null);
   const [persona, setPersona] = useState<string | null>(null);
   const [memories, setMemories] = useState<MemoryRecord[] | null>(null);
   const [memoriesBusy, setMemoriesBusy] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [modelPickerOpen, setModelPickerOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<string | null>(getModel());
   const [busyAction, setBusyAction] = useState(false);
 
   const reload = useCallback(() => {
     if (!token) return;
     setLoading(true);
     void refreshProfile();
-    Promise.allSettled([usageMe(), listModels(), getPreferences(), listMemories()]).then(
-      (results) => {
-        const [u, m, p, mem] = results;
-        setUsage(u.status === "fulfilled" ? u.value : null);
-        setModelList(m.status === "fulfilled" ? m.value : null);
-        setPersona(
-          p.status === "fulfilled" && typeof p.value.persona === "string"
-            ? p.value.persona
-            : null,
-        );
-        setMemories(mem.status === "fulfilled" ? mem.value : null);
-        setLoading(false);
-      },
-    );
+    Promise.allSettled([usageMe(), getPreferences(), listMemories()]).then((results) => {
+      const [u, p, mem] = results;
+      setUsage(u.status === "fulfilled" ? u.value : null);
+      setPersona(
+        p.status === "fulfilled" && typeof p.value.persona === "string"
+          ? p.value.persona
+          : null,
+      );
+      setMemories(mem.status === "fulfilled" ? mem.value : null);
+      setLoading(false);
+    });
   }, [token, refreshProfile]);
 
   useFocusEffect(
@@ -99,17 +88,6 @@ export default function AccountScreen() {
   const maxDayTokens = Math.max(1, ...chartDays.map((d) => d.tokens));
   const todayTotal = (usage?.today.tokens_in ?? 0) + (usage?.today.tokens_out ?? 0);
   const usageRatio = usage && usage.daily_budget > 0 ? Math.min(1, todayTotal / usage.daily_budget) : 0;
-
-  const effectiveModel = selectedModel ?? modelList?.default_model ?? null;
-  const effectiveModelLabel =
-    modelList?.models.find((m) => m.id === effectiveModel)?.label ?? "Modèle par défaut";
-
-  function pickModel(model: ModelInfo | null) {
-    const id = model?.id ?? null;
-    setModel(id);
-    setSelectedModel(id);
-    setModelPickerOpen(false);
-  }
 
   function handleLogout() {
     Alert.alert("Se déconnecter", "Vous pourrez vous reconnecter à tout moment.", [
@@ -262,18 +240,6 @@ export default function AccountScreen() {
           )}
         </View>
 
-        {/* Modèle */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Modèle d'IA</Text>
-          <Pressable style={styles.modelButton} onPress={() => setModelPickerOpen(true)}>
-            <Ionicons name="hardware-chip-outline" size={16} color={colors.accent} />
-            <Text style={styles.modelButtonText} numberOfLines={1}>
-              {effectiveModelLabel}
-            </Text>
-            <Ionicons name="chevron-down" size={14} color={colors.muted} />
-          </Pressable>
-        </View>
-
         {/* Persona (choisi lors de l'accueil, modifiable ici) */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Profil d'utilisation</Text>
@@ -373,50 +339,6 @@ export default function AccountScreen() {
         <Text style={styles.versionText}>Yawoto pour Burkina Faso — version 1.0.1</Text>
       </ScrollView>
 
-      {/* Sélecteur de modèle */}
-      <Modal
-        visible={modelPickerOpen}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setModelPickerOpen(false)}
-      >
-        <View style={styles.modalContainer}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setModelPickerOpen(false)} />
-          <View style={styles.modelSheet}>
-            <Text style={styles.modelSheetTitle}>Choisir le modèle</Text>
-            <ScrollView>
-              <Pressable style={styles.modelRow} onPress={() => pickModel(null)}>
-                <View style={styles.modelRowText}>
-                  <Text style={styles.modelLabel}>Par défaut</Text>
-                  <Text style={styles.modelProvider}>
-                    {modelList?.models.find((m) => m.id === modelList.default_model)?.label ??
-                      "Choisi par le serveur"}
-                  </Text>
-                </View>
-                {selectedModel === null && (
-                  <Ionicons name="checkmark-circle" size={18} color={colors.accent} />
-                )}
-              </Pressable>
-              {(modelList?.models ?? []).map((model) => {
-                const selected = selectedModel === model.id;
-                return (
-                  <Pressable
-                    key={model.id}
-                    style={styles.modelRow}
-                    onPress={() => pickModel(model)}
-                  >
-                    <View style={styles.modelRowText}>
-                      <Text style={styles.modelLabel}>{model.label}</Text>
-                      <Text style={styles.modelProvider}>{model.provider}</Text>
-                    </View>
-                    {selected && <Ionicons name="checkmark-circle" size={18} color={colors.accent} />}
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -578,41 +500,4 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   },
   deleteText: { fontSize: 14, fontWeight: "500", color: colors.danger },
   versionText: { fontSize: 11, color: colors.faint, textAlign: "center", marginTop: 4 },
-  modalContainer: { flex: 1, justifyContent: "flex-end" },
-  modalBackdrop: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "rgba(0,0,0,0.5)",
-  },
-  modelSheet: {
-    maxHeight: "60%",
-    backgroundColor: colors.surfaceElevated,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 16,
-  },
-  modelSheetTitle: { fontSize: 15, fontWeight: "600", color: colors.ink, marginBottom: 10 },
-  modelRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  modelRowText: { flex: 1 },
-  modelLabel: { fontSize: 14, fontWeight: "500", color: colors.ink },
-  modelProvider: { fontSize: 11, color: colors.muted, marginTop: 1 },
-  modelBadge: {
-    borderWidth: 1,
-    borderColor: colors.accent,
-    backgroundColor: colors.accentLight,
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  modelBadgeText: { fontSize: 10, fontWeight: "500", color: colors.accent },
 });

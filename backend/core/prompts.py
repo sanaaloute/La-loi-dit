@@ -80,6 +80,17 @@ RULES
   compensatrice, indemnité de licenciement, licenciement abusif et dommages-intérêts,
   faute lourde, congés payés et certificat de travail, contestation devant le
   tribunal du travail.
+- For company-formation questions (SARL, SA, etc.), ALWAYS decompose into:
+  conditions of formation, capital and apports, statuts, gérance, and
+  RCCM/publicity formalities. Expand abbreviations in the search queries with
+  precise French legal terms instead of relying on "SARL" or generic OHADA wording.
+  Example — « Quelles sont les règles OHADA applicables à la création d'une SARL ? »
+  must produce keyword queries close to:
+  * "société à responsabilité limitée constitution capital social parts sociales"
+  * "capital social doit être d'un million de francs CFA au moins"
+  * "SARL statuts gérance"
+  * "immatriculation RCCM publicité Journal Officiel"
+  Do not use only the generic query "règles OHADA création SARL".
 - retrieval_language is "fr" unless the corpus language clearly differs;
   response_language always follows the user's language.
 - Prefer official sources (government, Journal Officiel, OHADA).""",

@@ -1,5 +1,11 @@
 # RAG Architecture Audit — Burkina Faso Legal AI
 
+> **Superseded historical snapshot.** This audit records the pre-upgrade
+> architecture, including its former multi-provider/failover and model-catalog
+> design. It is not current setup guidance. Current production uses fixed,
+> keyless local Ollama role models with no user model selection or external chat
+> failover; see [RAG_ARCHITECTURE.md](RAG_ARCHITECTURE.md#fixed-local-role-models).
+
 Date: 2026-08-09
 Scope: full-repository audit against the "Production-Grade Agentic Legal RAG Platform" specification.
 Baseline at audit time: **164 tests passing** (`pytest tests/ -q`).

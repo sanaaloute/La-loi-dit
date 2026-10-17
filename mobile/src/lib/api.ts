@@ -98,7 +98,6 @@ export interface ChatRequest {
   user_id?: string | null;
   language?: string | null;
   scenario_date?: string | null; // YYYY-MM-DD
-  model?: string | null; // selected model id; omitted = tier default
 }
 
 export interface ChatResponse {
@@ -134,19 +133,6 @@ export interface UserProfile {
   workspace_id?: string | null;
   workspace_name: string;
   features: UserFeatures;
-}
-
-export interface ModelInfo {
-  id: string;
-  provider: string;
-  label: string;
-  tier_required: Tier;
-  allowed: boolean;
-}
-
-export interface ModelList {
-  default_model: string;
-  models: ModelInfo[];
 }
 
 export interface ChatSessionSummary {
@@ -204,7 +190,6 @@ export interface DraftRequest {
   template_id: string;
   fields: Record<string, string>;
   instructions?: string;
-  model?: string;
 }
 
 export interface DraftResponse {
@@ -546,7 +531,7 @@ export async function confirmPasswordReset(token: string, newPassword: string): 
 }
 
 // ---------------------------------------------------------------------------
-// Account usage / models
+// Account usage
 // ---------------------------------------------------------------------------
 
 export async function usageMe(token?: string | null): Promise<UsageResponse> {
@@ -556,15 +541,6 @@ export async function usageMe(token?: string | null): Promise<UsageResponse> {
     throw new ApiError(detail ?? `Échec du chargement de l'usage (${res.status})`, res.status);
   }
   return (await res.json()) as UsageResponse;
-}
-
-export async function listModels(token?: string | null): Promise<ModelList> {
-  const res = await apiFetch("/models", { token });
-  if (!res.ok) {
-    const detail = await safeDetail(res);
-    throw new Error(detail ?? `Échec du chargement des modèles (${res.status})`);
-  }
-  return (await res.json()) as ModelList;
 }
 
 // ---------------------------------------------------------------------------

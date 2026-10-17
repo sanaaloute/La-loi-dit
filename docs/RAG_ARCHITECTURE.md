@@ -97,45 +97,41 @@ strips an unverifiable marker, the claim keeps its recorded support level. Both
 nodes sync their verdicts back into the `FinalAnswer` (warnings, confidence,
 `requires_human_review`).
 
-### Per-request LLM override
+### Fixed local role models
 
-Every node is wrapped by `bind()`, which swaps `ctx.llm` for a per-request
-client when the API layer set `state["llm"]` (tier-gated model router). No node
-reads provider configuration directly.
+Every node is wrapped by `bind()`; nodes with an LLM role resolve a fixed local
+Ollama client through `resolve_role_llm` (`backend/core/model_roles.py`). Legacy
+request `model` inputs are ignored, so callers cannot select a model or provider.
+The assignments are fixed in `backend/core/llm.py`:
 
-### Task-based model tiering (spec §46)
+- **Nemotron 3 Nano 4B** (`nemotron-3-nano:4b`): language routing, query
+  routing, planning, claim refinement, ingestion classification, and optional
+  LLM rerank scoring (`classification` / `planner` roles).
+- **Gemma 4 12B** (`gemma4:12b`): reasoning/reflection (`analysis`), direct,
+  general and grounded synthesis (`synthesis`), drafting enrichment, and memory
+  summaries.
 
-The strongest model is **not** called at every node. `bind(fn, role=...)`
-additionally routes a node's LLM calls through `resolve_role_llm`
-(`backend/core/model_roles.py`) when `model_role_routing_enabled` is on
-(default **off** — zero behavior change): a role with a configured override
-(`planner_model`, `classification_model`, `analysis_model`, `synthesis_model`)
-gets a client bound to that model on the *same* provider as the request's
-resolved model; every other node keeps the request's client untouched. Role
-mapping in `build_graph`: `classification` → `context_agent` / `memory_agent`
-(cheap), `planner` → `planner` (cheap), `analysis` → `reasoning_agent` /
-`reflection_agent`, `synthesis` → `response_generator` (strongest, final
-answer). A `FailoverLLMClient` base keeps its fallback chain with the
-role-model client as the new primary. Role clients **share the base client's
-`usage_totals` accumulator**, so the API layer's per-request delta metering
-covers every role's tokens with no aggregation change. With the `mock`
-provider model names are inert, so role routing is a strict no-op offline.
+No environment role override or runtime catalog replacement can change this
+mapping, and there is no external chat failover or query-dependent cheap-model
+route. Role clients **share the base client's `usage_totals` accumulator**, so
+per-request token metering, daily quotas, and anti-abuse rate limits cover every
+role. The deterministic `mock` provider remains available for tests/development;
+it is not a production failover.
 
 ## Provider abstractions
 
 Agents depend on ports, never on SDKs (`backend/core/ports.py`); `AppContext`
 (`backend/core/context.py`) wires the concrete adapters once per process.
 
-- **LLM** — `backend/core/llm.py`: `LLMClient` over LiteLLM (OpenAI, Anthropic,
-  Gemini, DeepSeek, Qwen, Kimi, Ollama/Ollama Cloud, OpenRouter, TokenFree,
-  `mock`). JSON mode with one corrective retry (`complete_json`), tool calling
-  with native/manual fallback (`complete_tools`), cumulative token metering.
-  `FailoverLLMClient` chains credentialed providers (`llm_fallback_providers`)
-  so one broken provider never degrades the answer path.
-- **Embeddings** — `backend/core/embeddings.py`: `LiteLLMEmbeddings`
-  (OpenAI-compatible, batched at 200) when credentials exist, otherwise
-  deterministic `HashEmbeddings` (bag-of-hashed-tokens) so vector search,
-  memory and tests run fully offline.
+- **LLM** — `backend/core/llm.py`: `LLMClient` over LiteLLM for keyless local
+  Ollama, plus the deterministic `mock` test/development provider. JSON mode has
+  one corrective retry (`complete_json`), tool calling has native/manual
+  fallback (`complete_tools`), and token metering is cumulative. Production chat
+  uses only the two fixed local role models described above.
+- **Embeddings** — `backend/core/embeddings.py`: separately configured
+  `LiteLLMEmbeddings` (batched at 200), using keyless local Ollama in the
+  approved setup, otherwise deterministic `HashEmbeddings`
+  (bag-of-hashed-tokens) so vector search, memory and tests run fully offline.
 - **Vector store** — `backend/vectorstore/`: `MilvusVectorStore` (HNSW/COSINE,
   native scalar filters on `document_id`/`article`/`status`/`document_type`,
   schema self-heal on connect) with `InMemoryVectorStore` fallback via
@@ -147,6 +143,8 @@ Agents depend on ports, never on SDKs (`backend/core/ports.py`); `AppContext`
   credentials) or `ApiCrossEncoderReranker` (Cohere-style `/rerank` endpoint,
   batched, one retry, falls back to heuristic on any failure). Selected by
   `reranker_provider`; `api` without full credentials degrades to heuristic.
+  This cross-encoder capability is separate from the optional Nemotron LLM
+  rescoring pass.
 - **Legal knowledge graph** — `backend/knowledge/` (`LegalGraphStore`,
   spec §19/§34): a relational store (SQLAlchemy Core, `database_url` with a
   SQLite fallback under `data_dir`) holding `documents`, `legal_articles` and
@@ -179,14 +177,17 @@ categories/brackets raise `RuleNotFound` — the engine never guesses. The modul
 is library code; wiring it into the planner/tool loop for
 `QuestionType.CALCULATION` plans is a deliberate follow-up.
 
-## Offline-first fallbacks
+## Offline development and infrastructure fallbacks
 
-Every external dependency degrades to a working in-process substitute; node
-functions record incidents in `state["errors"]` instead of raising:
+External infrastructure degrades to a working in-process substitute where
+supported; node functions record incidents in `state["errors"]` instead of
+raising. Production chat does not fail over to another provider when local
+Ollama is unavailable: deterministic node fallbacks run where implemented, and
+LLM-only steps can fail the run.
 
 | Dependency | Fallback |
 |---|---|
-| LLM provider | `mock` provider (deterministic, restates only provided evidence) + heuristic planner |
+| Chat in tests/development | Deterministic `mock` provider + heuristic planner; not a production failover |
 | Embeddings | `HashEmbeddings` |
 | Milvus | `InMemoryVectorStore` (`LEGAL_AI_MILVUS_ENABLED=false` or unreachable) |
 | Redis | `InMemoryCache` |
@@ -196,8 +197,8 @@ functions record incidents in `state["errors"]` instead of raising:
 | Graph store database | SQLite fallback `data/legal_graph_fallback.db`; when unreachable the graph degrades to no-op writes / empty reads |
 
 The whole pipeline — planner, retrieval, reasoning, synthesis, verification —
-runs end-to-end with zero API keys, which is what the offline evaluation runner
-and the test suite rely on.
+runs end-to-end with zero API keys. Production uses keyless local Ollama; the
+offline evaluation runner and test suite can use the deterministic mock.
 
 ## Request lifecycle
 

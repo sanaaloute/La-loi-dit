@@ -50,7 +50,7 @@ Ordered by severity:
 1. **Device fingerprint bound to client IP** (`backend/security/sessions.py:35-46`). The fingerprint `sha256(user-agent|accept-language|client IP)` is checked on every authenticated request (`backend/api/middleware.py:131-141`). Mobile networks change IPs constantly (CGNAT, Wi-Fi↔cellular handover) → the app would get randomly logged out with 401 "session invalidated by another login". **This must be relaxed before launch** (e.g. skip the IP component for tokens issued with a `client=mobile` claim, or fingerprint on a stable device ID instead).
 2. **Single session per user** (`LEGAL_AI_SINGLE_SESSION_PER_USER=true` default, `backend/core/config.py:133`; enforced via Redis `active_session:{user_id}`). Logging in on the phone kills the web session and vice versa. Either allow N concurrent sessions, or scope the single-session rule per device class.
 3. **No direct API route.** Depending on the Next.js rewrite means mobile streaming inherits the buffering problem and an unnecessary hop. Expose `api-yawoto.neobytech.net` (cloudflared ingress rule; first-level subdomain because Universal SSL covers `*.neobytech.net` only) so the app hits the API container directly.
-4. **Shared daily quotas.** Every feature and model is free for every user; there is no purchase or entitlement flow. Accounts share 30 requests and 5 000 000 tokens per day (admin-adjustable), so mobile screens must handle HTTP 429 with a retry-tomorrow message.
+4. **Shared daily quotas.** Every feature is free for every user; there is no purchase or entitlement flow. The server assigns fixed local role models and users cannot select models. Accounts share 30 requests and 5 000 000 tokens per day (admin-adjustable), so mobile screens must handle HTTP 429 with a retry-tomorrow message. Anti-abuse rate limits also remain active.
 5. **Cloudflare 100 s TTFB limit.** Runs capped at 280 s die with error 524 on non-streaming endpoints (`docs/deployment-macmini.md:153-160`). Mobile must use SSE (heartbeat keeps it safe) or POST + `/run` polling. Never rely on long synchronous responses.
 6. **App Store account requirements.** Apple 5.1.1(v) requires **in-app account deletion** if the app offers account creation. The backend has no delete-account, password-reset, email/phone-verification, or logout/revoke endpoints. Minimum to add: `DELETE /auth/me` (or equivalent) and password reset. (No social login exists, so Sign-in-with-Apple is not triggered.)
 7. **Minor hardening before opening the API to the public internet directly:** `/docs`, `/redoc`, `/openapi.json` are exposed in production (FastAPI defaults — disable via env), and `POST /export/{pdf|word|csv|md}` currently has **no auth dependency** (`backend/api/routers/export.py:464-469`).
@@ -60,7 +60,7 @@ Ordered by severity:
 
 - Register / login / refresh / `GET /auth/me`.
 - Full chat: SSE stream with heartbeats, cancel (`POST /chat/cancel`), feedback, voice transcription (`POST /chat/transcribe`, multipart audio, 30 s client-side cap), sessions list/get/delete, run-status recovery polling.
-- `GET /models` (full catalog, all models allowed) and `GET /usage/me` (shared token/request budgets + 30-day history).
+- `GET /models` (read-only status for the fixed local role models, with `selectable: false`) and `GET /usage/me` (shared token/request budgets + 30-day history). Do not build a model picker; legacy model request values are ignored.
 - Drafting (`/draft/templates`, `POST /draft`) and export (`/export/*`) — mobile replaces the browser download with a share-sheet/save-file.
 - Search/citation endpoints the web UI doesn't even use yet (`/search`, `/articles`, `/citations/{chunk_id}`, `/sources`) — free features for the app.
 - Rate limiting is per-user once authenticated; fine for mobile.
@@ -100,7 +100,7 @@ The backend does not provide these; today they live in `frontend/lib/api.ts` (12
 4. Harden: hide `/docs`/`/openapi.json` in production; add auth to `/export/*`.
 5. Add `DELETE /auth/me` and password-reset endpoints (store compliance + baseline product gap).
 
-**Phase 1 — MVP app:** auth screens, chat with SSE streaming + full recovery state machine, history, model picker, usage/account screens, voice input. Hardcode French. Every signed-in user has the full feature set, subject only to the shared daily quota and anti-abuse limits.
+**Phase 1 — MVP app:** auth screens, chat with SSE streaming + full recovery state machine, history, usage/account screens, voice input. Hardcode French. Do not add a model picker: the server assigns fixed local role models. Every signed-in user has the full feature set, subject only to the shared daily quota and anti-abuse limits.
 
 **Phase 2 — parity:** drafting + export (share sheet), push notifications if desired, possibly document search/viewer using the unused endpoints. No billing/IAP work is required.
 

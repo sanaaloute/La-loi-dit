@@ -86,7 +86,6 @@ export interface ChatRequest {
   user_id?: string | null;
   language?: string | null;
   scenario_date?: string | null; // YYYY-MM-DD
-  model?: string | null; // selected model id; omitted = tier default
 }
 
 export interface ChatResponse {
@@ -122,19 +121,6 @@ export interface UserProfile {
   workspace_id?: string | null;
   workspace_name: string;
   features: UserFeatures;
-}
-
-export interface ModelInfo {
-  id: string;
-  provider: string;
-  label: string;
-  tier_required: Tier;
-  allowed: boolean;
-}
-
-export interface ModelList {
-  default_model: string;
-  models: ModelInfo[];
 }
 
 export interface ChatSessionSummary {
@@ -192,7 +178,6 @@ export interface DraftRequest {
   template_id: string;
   fields: Record<string, string>;
   instructions?: string;
-  model?: string;
 }
 
 export interface DraftResponse {
@@ -294,7 +279,6 @@ function apiUrl(path: string): string {
 
 const TOKEN_KEY = "legal_ai_token";
 const SESSION_KEY = "legal_ai_session_id";
-const MODEL_KEY = "legal_ai_model";
 
 export const AUTH_CHANGE_EVENT = "legal-ai-auth-change";
 
@@ -354,17 +338,6 @@ export function setSessionId(sessionId: string | null): void {
   if (typeof window === "undefined") return;
   if (sessionId) window.localStorage.setItem(SESSION_KEY, sessionId);
   else window.localStorage.removeItem(SESSION_KEY);
-}
-
-export function getModel(): string | null {
-  if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(MODEL_KEY);
-}
-
-export function setModel(model: string | null): void {
-  if (typeof window === "undefined") return;
-  if (model) window.localStorage.setItem(MODEL_KEY, model);
-  else window.localStorage.removeItem(MODEL_KEY);
 }
 
 function authHeaders(token?: string | null): Record<string, string> {
@@ -514,15 +487,6 @@ export async function usageMe(token?: string | null): Promise<UsageResponse> {
   return (await res.json()) as UsageResponse;
 }
 
-export async function listModels(token?: string | null): Promise<ModelList> {
-  const res = await apiFetch("/models", { token });
-  if (!res.ok) {
-    const detail = await safeDetail(res);
-    throw new Error(detail ?? `Échec du chargement des modèles (${res.status})`);
-  }
-  return (await res.json()) as ModelList;
-}
-
 export async function listSessions(token?: string | null): Promise<ChatSessionList> {
   const res = await apiFetch("/chat/sessions", { token });
   if (!res.ok) {
@@ -626,7 +590,6 @@ export async function streamChat(
   const params = new URLSearchParams({ query: request.query });
   if (request.session_id) params.set("session_id", request.session_id);
   if (request.language) params.set("language", request.language);
-  if (request.model) params.set("model", request.model);
   if (request.scenario_date) params.set("scenario_date", request.scenario_date);
 
   const res = await apiFetch(`/chat/stream?${params.toString()}`, {
@@ -1259,24 +1222,7 @@ export interface DailyBudgetsResponse {
 
 export type DailyBudgetPatch = Partial<DailyBudgets>;
 
-export interface ProviderModelInfo {
-  id: string;
-  label: string;
-  tier_required: Tier; // lowest tier unlocking this model
-}
-
-export interface ProviderInfo {
-  provider: string;
-  configured: boolean;
-  api_base: string; // per-provider base URL
-  key_suffix: string | null; // "…" + last 4 chars, never the full key
-  model: string;
-  models: ProviderModelInfo[]; // this provider's catalog models
-}
-
 export interface ProvidersResponse {
-  providers: ProviderInfo[];
-  defaults: Record<string, string>; // tier -> default catalog model id
   infra: Record<string, unknown>;
 }
 
@@ -1454,6 +1400,9 @@ async function adminRequest<T>(
   if (!res.ok) {
     const detail = await safeDetail(res);
     throw new ApiError(detail ?? `Requête admin échouée (${res.status})`, res.status);
+  }
+  if (res.status === 204) {
+    return undefined as T;
   }
   return (await res.json()) as T;
 }

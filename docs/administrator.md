@@ -27,8 +27,9 @@ Operational tasks for users with the `admin` (and where noted,
 
 ## Daily quotas
 
-- All features and models are free for every user. Legacy `gratuit` / `pro` /
-  `cabinet` values remain in old rows and tokens but no longer change access.
+- All features are free for every user. Legacy `gratuit` / `pro` / `cabinet`
+  values remain in old rows and tokens but no longer change access. The two
+  local Ollama role models are fixed by the server; users cannot select models.
 - Every account shares the same default daily budget: **30 requests and
   5 000 000 tokens** (`backend/core/catalog.py`). Per-minute/per-second
   anti-abuse limits still apply.
@@ -39,6 +40,9 @@ Operational tasks for users with the `admin` (and where noted,
   Omitted fields keep their current value; negative values are rejected, and
   `0` lifts that budget (unlimited). Overrides use the `daily_budgets` app
   setting and survive restarts.
+- Legacy `LEGAL_AI_TIER_CATALOG_JSON` accepts only per-tier quota and
+  rate-limit overrides. Provider/model entries are ignored and cannot replace
+  the fixed runtime catalog.
 
 ## Ingestion operations
 
@@ -100,8 +104,8 @@ spot-check search (`GET /api/v1/search?q=…`).
 
 ## Evaluation runs
 
-Run the golden dataset after every ingestion batch, model change or prompt
-change:
+Run the golden dataset after every ingestion batch, prompt change, or
+code-level update to either fixed role model:
 
 ```bash
 make eval    # python -m backend.evaluation.runner --dataset backend/evaluation/golden_dataset.json

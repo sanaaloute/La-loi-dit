@@ -80,3 +80,37 @@ def test_tool_transcript_falls_back_to_heuristic_plan():
     assert plan.sub_questions[0] == query
     assert all("tool results" not in question.lower() for question in plan.sub_questions)
     assert all("tool results" not in task.query.lower() for task in plan.tasks)
+
+
+def test_fenced_json_plan_is_parsed():
+    query = "Quelles sont les règles OHADA applicables à la création d'une SARL ?"
+    raw = '''```json
+{
+  "sub_questions": ["capital social", "statuts"],
+  "tasks": [
+    {"kind": "vector", "query": "société à responsabilité limitée", "top_k": 8, "filters": {}},
+    {"kind": "keyword", "query": "capital social doit être d'un million de francs CFA au moins", "top_k": 8, "filters": {}}
+  ],
+  "legal_domains": ["ohada_law"],
+  "retrieval_language": "fr",
+  "response_language": "fr",
+  "scenario_date": null,
+  "rationale": "plan de test"
+}
+```'''
+    result = PlannerAgent()._parse_final(
+        raw,
+        {"query": query},
+        SimpleNamespace(settings=Settings()),
+        [],
+    )
+    plan = result["plan"]
+    assert plan.sub_questions[:2] == ["capital social", "statuts"]
+    assert "capital social doit être d'un million de francs CFA au moins" in plan.sub_questions
+    assert "société à responsabilité limitée constitution capital social parts sociales" in plan.sub_questions
+    assert "immatriculation RCCM publicité Journal Officiel" in plan.sub_questions
+    queries = {task.query for task in plan.tasks}
+    assert "capital social doit être d'un million de francs CFA au moins" in queries
+    assert "société à responsabilité limitée constitution capital social parts sociales" in queries
+    assert "immatriculation RCCM publicité Journal Officiel" in queries
+    assert any(task.query == "capital social doit être d'un million de francs CFA au moins" and task.kind == SearchKind.VECTOR for task in plan.tasks)

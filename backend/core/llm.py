@@ -1,10 +1,8 @@
-"""Multi-provider LLM client built on LiteLLM.
+"""Local Ollama and deterministic mock chat clients built on LiteLLM.
 
-Providers (OpenAI, Claude, Gemini, DeepSeek, Qwen, Kimi, local Ollama,
-Ollama Cloud) are selected purely through settings — agents never touch
-provider SDKs. The `mock` provider is deterministic and offline: it powers
-tests and local dev, and it makes the whole pipeline runnable with zero
-external credentials.
+Production chat uses only keyless local Ollama models. The mock provider stays
+available for offline tests and development. Embeddings and transcription use
+separate adapters; their configuration is intentionally outside this module.
 """
 
 from __future__ import annotations
@@ -12,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from pathlib import Path
 from typing import Any, Optional, Type, TypeVar
 
 import litellm
@@ -25,48 +24,28 @@ T = TypeVar("T", bound=BaseModel)
 
 litellm.drop_params = True
 
-# Map a logical provider to a LiteLLM model prefix.
 PROVIDER_PREFIXES = {
-    "openai": "",
-    "anthropic": "anthropic/",
-    "gemini": "gemini/",
-    "deepseek": "deepseek/",
-    "qwen": "openai/",  # OpenAI-compatible endpoint
-    "kimi": "openai/",  # OpenAI-compatible endpoint
     "ollama": "ollama/",
-    "ollama_cloud": "",  # native ollama client, model name passed through
-    "openrouter": "openrouter/",
-    "tokenfree": "openai/",  # OpenAI-compatible endpoint
     "mock": "mock/",
 }
 
-OPENROUTER_DEFAULT_API_BASE = "https://openrouter.ai/api/v1"
-# TokenFree is an OpenAI-compatible API (Bearer key + /v1/chat/completions,
-# see https://www.tokenfree.com). Override with LEGAL_AI_LLM_API_BASE if needed.
-TOKENFREE_DEFAULT_API_BASE = "https://www.tokenfree.com/v1"
-OLLAMA_CLOUD_DEFAULT_API_BASE = "https://ollama.com"
-
-# Default API base per provider — the "LLM provider config". The .env only
-# needs to hold API keys: the base URL of each provider lives here, and the
-# model actually used comes from the user's UI selection (per-request override
-# via the model router), not from a hardcoded env model.
 PROVIDER_DEFAULT_API_BASES = {
-    "openrouter": OPENROUTER_DEFAULT_API_BASE,
-    "tokenfree": TOKENFREE_DEFAULT_API_BASE,
-    "ollama": OLLAMA_CLOUD_DEFAULT_API_BASE,
+    "ollama": "http://localhost:11434",
 }
+
+CLASSIFICATION_MODEL = "nemotron-3-nano:4b"
+SYNTHESIS_MODEL = "gemma4:12b"
+
+
+def default_ollama_api_base() -> str:
+    """Use the Mac host's Ollama from Docker, localhost otherwise."""
+    if Path("/.dockerenv").exists():
+        return "http://host.docker.internal:11434"
+    return PROVIDER_DEFAULT_API_BASES["ollama"]
 
 
 class LLMClient:
-    """Thin async wrapper with JSON-mode parsing and one corrective retry.
-
-    Defaults are fully settings-driven (unchanged behavior). The optional
-    `provider`/`model`/`api_key`/`api_base` overrides let the model router
-    build a per-request client for one catalog model; `model` may then be a
-    namespaced catalog id (``"openrouter/deepseek/deepseek-chat"``) — the
-    leading provider namespace is stripped before the LiteLLM prefix is
-    applied.
-    """
+    """Thin async wrapper with JSON-mode parsing and one corrective retry."""
 
     def __init__(
         self,
@@ -79,99 +58,26 @@ class LLMClient:
     ):
         self.settings = settings
         self.provider = (provider or settings.llm_provider).lower()
-        raw_model = model if model is not None else settings.llm_model
+        if self.provider not in PROVIDER_PREFIXES:
+            raise ValueError(f"unsupported chat provider: {self.provider}")
+        default_model = settings.llm_model if self.provider == "mock" else SYNTHESIS_MODEL
+        raw_model = model if model is not None else default_model
         namespace = f"{self.provider}/"
         if raw_model.startswith(namespace):
             raw_model = raw_model[len(namespace):]
-        prefix = PROVIDER_PREFIXES.get(self.provider, "")
-        self.model = f"{prefix}{raw_model}"
+        self.model = f"{PROVIDER_PREFIXES[self.provider]}{raw_model}"
         self.api_key = settings.llm_api_key if api_key is None else api_key
-        if api_base is not None:
-            self.api_base = api_base
-        elif self.provider == settings.llm_provider.lower():
-            self.api_base = settings.llm_api_base
-        else:
-            # The global base belongs to the default provider; it must not
-            # leak into per-request clients for other providers.
-            self.api_base = ""
-        if not self.api_base:
-            # Provider-config default base (see PROVIDER_DEFAULT_API_BASES).
-            self.api_base = PROVIDER_DEFAULT_API_BASES.get(self.provider, "")
-        if self.provider == "ollama" and not self.api_base and self.api_key:
-            # An API key with no configured base means Ollama Cloud (a local
-            # Ollama has no key and keeps the litellm localhost default).
-            self.api_base = OLLAMA_CLOUD_DEFAULT_API_BASE
+        self.api_base = api_base if api_base is not None else settings.llm_api_base
+        if not self.api_base and self.provider == "ollama":
+            self.api_base = default_ollama_api_base()
+        self.timeout_seconds = (
+            max(settings.llm_timeout_seconds, 180.0)
+            if self.provider == "ollama"
+            else settings.llm_timeout_seconds
+        )
         # Cumulative token metering across calls on this instance. Read as a
         # delta around one request when the client is shared (mock mode).
         self.usage_totals: dict[str, int] = {"tokens_in": 0, "tokens_out": 0}
-
-    @property
-    def _use_ollama_cloud_native(self) -> bool:
-        """Use the native ollama SDK for Ollama Cloud or authenticated ollama.com.
-
-        LiteLLM's ollama provider targets the native /api/generate endpoint but
-        does not handle Ollama Cloud authentication correctly; the official
-        `ollama` client does.
-        """
-        return self.provider in ("ollama_cloud",) or (
-            self.provider == "ollama"
-            and self.api_base
-            and "ollama.com" in self.api_base
-        )
-
-    async def _ollama_cloud_complete(
-        self,
-        system: str,
-        user: str,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-    ) -> str:
-        """Native async ollama client path for Ollama Cloud."""
-        try:
-            from ollama import AsyncClient
-        except ImportError as exc:
-            raise LLMError(
-                "Ollama Cloud requested but the 'ollama' package is not installed. "
-                "Run: pip install ollama"
-            ) from exc
-
-        host = self.api_base or "https://ollama.com"
-        headers = {}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-        client = AsyncClient(host=host, headers=headers)
-        # The native ollama client expects a bare model name (e.g. gpt-oss:120b),
-        # not the LiteLLM-prefixed name (ollama/...).
-        model = self.model
-        if model.startswith("ollama/"):
-            model = model[len("ollama/"):]
-        messages = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ]
-        try:
-            response = await asyncio.wait_for(
-                client.chat(
-                    model=model,
-                    messages=messages,
-                    stream=False,
-                    keep_alive=self.settings.ollama_keep_alive,
-                    options={
-                        "temperature": self.settings.llm_temperature if temperature is None else temperature,
-                        "num_predict": max_tokens or self.settings.llm_max_tokens,
-                    },
-                ),
-                timeout=self.settings.llm_timeout_seconds,
-            )
-        except asyncio.TimeoutError as exc:
-            raise LLMError(
-                f"Ollama Cloud call timed out after {self.settings.llm_timeout_seconds}s ({self.model})"
-            ) from exc
-        except Exception as exc:
-            raise LLMError(f"Ollama Cloud call failed ({self.model}): {exc}") from exc
-        content = response.message.content or ""
-        self._record_usage(system, user, content, None)
-        return content
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -211,8 +117,6 @@ class LLMClient:
             result = self._mock_complete(system, user)
             self._record_usage(system, user, result, None)
             return result
-        if self._use_ollama_cloud_native:
-            return await self._ollama_cloud_complete(system, user, temperature, max_tokens)
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": [
@@ -221,7 +125,7 @@ class LLMClient:
             ],
             "temperature": self.settings.llm_temperature if temperature is None else temperature,
             "max_tokens": max_tokens or self.settings.llm_max_tokens,
-            "timeout": self.settings.llm_timeout_seconds,
+            "timeout": self.timeout_seconds,
             "metadata": litellm_trace_metadata(),
         }
         if self.api_key:
@@ -229,27 +133,11 @@ class LLMClient:
         if self.api_base:
             kwargs["api_base"] = self.api_base
         extra_headers: dict[str, str] = {}
-        # Ollama Cloud (and any authenticated Ollama endpoint) expects the
-        # API key as a Bearer token. LiteLLM's ollama provider does not add
-        # this header automatically, so we inject it via extra_headers.
         if self.provider == "ollama":
-            # Ask Ollama to keep the model loaded between requests so we do not
-            # pay the reload cost (and risk timeout) on every chat call.
             kwargs["keep_alive"] = self.settings.ollama_keep_alive
-            # Thinking models (qwen3/qwen3.5): hidden reasoning burns the
-            # completion budget and times out structured tasks — disabled by
-            # default (settings.ollama_think_enabled). Ollama Cloud never
-            # reaches this path (native client, see above).
             kwargs["think"] = self.settings.ollama_think_enabled
             if self.api_key:
                 extra_headers["Authorization"] = f"Bearer {self.api_key}"
-        # OpenRouter rankings/attribution headers (app name as fallback).
-        # HTTP headers must be latin-1; strip any non-ASCII characters
-        # (e.g. an em-dash in the configured app name) or every call fails.
-        if self.provider == "openrouter":
-            ascii_title = self.settings.app_name.encode("ascii", "ignore").decode().strip() or "Legal AI"
-            extra_headers.setdefault("HTTP-Referer", ascii_title)
-            extra_headers.setdefault("X-Title", ascii_title)
         if extra_headers:
             kwargs["extra_headers"] = extra_headers
         try:
@@ -304,27 +192,17 @@ class LLMClient:
     ) -> "LLMClient.ToolCallResponse":
         """Ask the LLM to either use a tool or return final text.
 
-        The default implementation uses a manual JSON fallback that works with
-        any model/provider (including Ollama Cloud models that do not support
-        native tool-calling).  Native tool-calling is used when the provider
-        exposes it cleanly.
+        Local Ollama native tool calling is attempted first; manual JSON mode
+        remains the deterministic fallback for models without native support.
         """
         if self.provider == "mock":
             return self._mock_complete_tools(messages, tools)
 
-        # Try native Ollama tools when the model is served by Ollama/Ollama Cloud.
-        if self._use_ollama_cloud_native and tools:
+        if tools:
             try:
                 return await self._ollama_tools(messages, tools, temperature, max_tokens)
             except Exception:
-                pass  # fall back to manual JSON mode
-
-        # Try LiteLLM tool-calling for OpenAI-compatible providers.
-        if not self._use_ollama_cloud_native and tools:
-            try:
-                return await self._litellm_tools(messages, tools, temperature, max_tokens)
-            except Exception:
-                pass  # fall back to manual JSON mode
+                pass
 
         return await self._manual_tool_completion(messages, tools, temperature, max_tokens)
 
@@ -396,7 +274,7 @@ class LLMClient:
     ) -> "LLMClient.ToolCallResponse":
         from ollama import AsyncClient
 
-        host = self.api_base or "https://ollama.com"
+        host = self.api_base or PROVIDER_DEFAULT_API_BASES["ollama"]
         headers = {}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -411,71 +289,26 @@ class LLMClient:
                     messages=messages,
                     tools=tools,
                     stream=False,
+                    keep_alive=self.settings.ollama_keep_alive,
+                    think=self.settings.ollama_think_enabled,
                     options={
                         "temperature": self.settings.llm_temperature if temperature is None else temperature,
                         "num_predict": max_tokens or self.settings.llm_max_tokens,
                     },
                 ),
-                timeout=self.settings.llm_timeout_seconds,
+                timeout=self.timeout_seconds,
             )
         except asyncio.TimeoutError as exc:
             raise LLMError(
-                f"Ollama Cloud tool call timed out after {self.settings.llm_timeout_seconds}s ({self.model})"
+                f"Ollama tool call timed out after {self.timeout_seconds}s ({self.model})"
             ) from exc
         except Exception as exc:
-            raise LLMError(f"Ollama Cloud tool call failed ({self.model}): {exc}") from exc
+            raise LLMError(f"Ollama tool call failed ({self.model}): {exc}") from exc
         message = response.message
         if getattr(message, "tool_calls", None):
             calls = []
             for tc in message.tool_calls:
                 calls.append({"name": tc.function.name, "arguments": tc.function.arguments})
-            return self.ToolCallResponse(tool_calls=calls, raw=str(message))
-        content = message.content or ""
-        return self.ToolCallResponse(final_text=content, raw=content)
-
-    async def _litellm_tools(
-        self,
-        messages: list[dict[str, str]],
-        tools: list[dict[str, Any]],
-        temperature: Optional[float],
-        max_tokens: Optional[int],
-    ) -> "LLMClient.ToolCallResponse":
-        kwargs: dict[str, Any] = {
-            "model": self.model,
-            "messages": messages,
-            "tools": tools,
-            "temperature": self.settings.llm_temperature if temperature is None else temperature,
-            "max_tokens": max_tokens or self.settings.llm_max_tokens,
-            "timeout": self.settings.llm_timeout_seconds,
-            "metadata": litellm_trace_metadata(),
-        }
-        if self.api_key:
-            kwargs["api_key"] = self.api_key
-        if self.api_base:
-            kwargs["api_base"] = self.api_base
-        extra_headers: dict[str, str] = {}
-        if self.provider == "ollama":
-            kwargs["keep_alive"] = self.settings.ollama_keep_alive
-            # Same thinking-model guard as complete() (Ollama Cloud uses the
-            # native client path and never reaches this block).
-            kwargs["think"] = self.settings.ollama_think_enabled
-            if self.api_key:
-                extra_headers["Authorization"] = f"Bearer {self.api_key}"
-        if self.provider == "openrouter":
-            extra_headers.setdefault("HTTP-Referer", self.settings.app_name)
-            extra_headers.setdefault("X-Title", self.settings.app_name)
-        if extra_headers:
-            kwargs["extra_headers"] = extra_headers
-        resp = await litellm.acompletion(**kwargs)
-        choice = resp.choices[0]
-        message = choice.message
-        if getattr(message, "tool_calls", None):
-            calls = []
-            for tc in message.tool_calls:
-                args = tc.function.arguments
-                if isinstance(args, str):
-                    args = json.loads(args)
-                calls.append({"name": tc.function.name, "arguments": args})
             return self.ToolCallResponse(tool_calls=calls, raw=str(message))
         content = message.content or ""
         return self.ToolCallResponse(final_text=content, raw=content)
@@ -659,106 +492,12 @@ class LLMClient:
 
 
 def get_llm(settings: Settings) -> LLMClient:
-    return LLMClient(settings)
-
-
-class FailoverLLMClient:
-    """Chain of provider clients: the first one that answers wins.
-
-    A completion that raises OR returns empty text fails over to the next
-    provider, so a single broken provider/model never degrades the answer to
-    a non-LLM fallback. Built only with providers that have credentials —
-    see ``backend.core.model_router.with_failover``.
-    """
-
-    def __init__(self, clients: list[LLMClient]):
-        if not clients:
-            raise ValueError("FailoverLLMClient needs at least one client")
-        self.clients = clients
-
-    # -- surface area expected by callers (metering, logging, tracing) ------
-    @property
-    def primary(self) -> LLMClient:
-        return self.clients[0]
-
-    @property
-    def provider(self) -> str:
-        return self.primary.provider
-
-    @property
-    def model(self) -> str:
-        return self.primary.model
-
-    @property
-    def api_key(self) -> str:
-        return self.primary.api_key
-
-    @property
-    def api_base(self) -> str:
-        return self.primary.api_base
-
-    @property
-    def usage_totals(self) -> dict[str, int]:
-        return {
-            "tokens_in": sum(c.usage_totals["tokens_in"] for c in self.clients),
-            "tokens_out": sum(c.usage_totals["tokens_out"] for c in self.clients),
-        }
-
-    # -- completions ---------------------------------------------------------
-    async def complete(
-        self,
-        system: str,
-        user: str,
-        *,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-    ) -> str:
-        last_exc: Optional[Exception] = None
-        for client in self.clients:
-            try:
-                text = await client.complete(system, user, temperature=temperature, max_tokens=max_tokens)
-            except Exception as exc:
-                last_exc = exc
-                continue
-            if text.strip():
-                return text
-        if last_exc is not None:
-            raise LLMError(
-                f"all LLM providers failed ({', '.join(c.model for c in self.clients)}): {last_exc}"
-            )
-        return ""  # every provider returned an empty completion
-
-    async def complete_tools(
-        self,
-        messages: list[dict[str, str]],
-        tools: list[dict[str, Any]],
-        *,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-    ) -> "LLMClient.ToolCallResponse":
-        last_exc: Optional[Exception] = None
-        for client in self.clients:
-            try:
-                return await client.complete_tools(messages, tools, temperature=temperature, max_tokens=max_tokens)
-            except Exception as exc:
-                last_exc = exc
-        raise LLMError(
-            f"all LLM providers failed tool calling ({', '.join(c.model for c in self.clients)}): {last_exc}"
-        )
-
-    async def complete_json(self, system: str, user: str, schema: Type[T]) -> T:
-        """JSON-mode with one corrective retry, over the failover chain."""
-        json_system = (
-            f"{system}\n\nYou MUST answer with a single valid JSON object matching this "
-            f"JSON Schema, no prose, no markdown fences:\n{json.dumps(schema.model_json_schema(), default=str)}"
-        )
-        raw = await self.complete(json_system, user)
-        try:
-            return schema.model_validate(LLMClient._extract_json(raw))
-        except Exception:
-            fix = f"Your previous answer was not valid JSON. Return ONLY the JSON object.\nPrevious answer:\n{raw}"
-            raw2 = await self.complete(json_system, fix)
-            try:
-                return schema.model_validate(LLMClient._extract_json(raw2))
-            except Exception as exc:
-                raise LLMError(f"LLM returned invalid JSON for {schema.__name__}: {exc}") from exc
+    if settings.llm_provider.lower() == "mock":
+        return LLMClient(settings)
+    return LLMClient(
+        settings,
+        provider="ollama",
+        model=SYNTHESIS_MODEL,
+        api_key="",
+        api_base=settings.llm_api_base,
+    )

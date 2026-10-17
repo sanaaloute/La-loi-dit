@@ -22,7 +22,7 @@ const SECTIONS: { title: string; body: string[] }[] = [
     body: [
       "Données de compte : adresse e-mail ou numéro de téléphone, nom affiché, mot de passe (stocké uniquement sous forme hachée).",
       "Identifiant d'appareil : un identifiant technique (X-Device-Id) généré à la première utilisation, utilisé pour sécuriser les sessions mobiles.",
-      "Contenus saisis : questions juridiques posées, conversations, documents générés, marque-pages et préférences (profil utilisateur, thème, modèle choisi).",
+      "Contenus saisis : questions juridiques posées, conversations, documents générés, marque-pages et préférences (profil utilisateur et thème).",
       "Enregistrements vocaux : lorsque vous utilisez la dictée vocale, l'extrait audio est transmis au serveur uniquement pour être transcrit en texte ; l'audio n'est ni conservé ni réutilisé après transcription.",
       "Données d'usage : volumes de requêtes et de tokens consommés (gestion des quotas journaliers), journaux techniques.",
     ],
@@ -38,7 +38,7 @@ const SECTIONS: { title: string; body: string[] }[] = [
   {
     title: "4. Hébergement et sous-traitants",
     body: [
-      "Les traitements sont réalisés sur les serveurs exploités par Neobytech. Lorsque des prestataires techniques sont sollicités (par exemple un fournisseur de modèle de langage ou de transcription), seules les données strictement nécessaires à la requête en cours leur sont transmises.",
+      "Les traitements sont réalisés sur les serveurs exploités par Neobytech. Les réponses et les documents sont générés par des modèles fixes exécutés localement avec Ollama, sans recours à un fournisseur externe d'intelligence artificielle.",
       "Les notifications push sont acheminées par le service Expo Push (Expo / Expo.dev) via un jeton d'appareil, uniquement si vous l'avez autorisé.",
     ],
   },
@@ -83,7 +83,7 @@ export default function ConfidentialitePage() {
           ← Retour à Yawoto
         </Link>
         <h1 className="mt-6 text-3xl font-bold text-gray-900">Politique de confidentialité</h1>
-        <p className="mt-2 text-sm text-gray-500">Dernière révision : 3 septembre 2026</p>
+        <p className="mt-2 text-sm text-gray-500">Dernière révision : 17 octobre 2026</p>
         <p className="mt-6 leading-relaxed">
           Yawoto est un assistant juridique qui répond à vos questions à partir des textes officiels
           du Burkina Faso et de l&apos;OHADA. La présente politique décrit les données que nous

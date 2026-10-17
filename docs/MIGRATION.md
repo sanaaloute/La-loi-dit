@@ -1,5 +1,13 @@
 # Migration Guide: Pre-Upgrade → Agentic Legal RAG Platform
 
+> **Historical model-routing sections are superseded.** The optional per-role
+> model overrides described below belonged to the original upgrade. Current
+> production uses only keyless local Ollama with fixed Nemotron 3 Nano 4B and
+> Gemma 4 12B assignments; users cannot select models, environment role
+> overrides are not supported, and there is no external chat failover. See
+> [RAG_ARCHITECTURE.md](RAG_ARCHITECTURE.md#fixed-local-role-models). The other
+> migration steps remain applicable.
+
 What changed when the baseline system (see
 [RAG_ARCHITECTURE_AUDIT.md](RAG_ARCHITECTURE_AUDIT.md) for the pre-upgrade
 snapshot) was upgraded per the "Production-Grade Agentic Legal RAG Platform"

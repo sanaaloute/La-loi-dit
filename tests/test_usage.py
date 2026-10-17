@@ -1,4 +1,4 @@
-"""Phase 4 tests: token metering, daily quotas, answer cache, cheap routing.
+"""Phase 4 tests: token metering, daily quotas, answer cache, fixed models.
 
 Fully offline (mock LLM, tmp SQLite). Each test builds a fresh app with a
 tmp database; cache tests additionally relax the confidence knobs so the
@@ -22,7 +22,7 @@ os.environ["LEGAL_AI_LANGFUSE_SECRET_KEY"] = ""
 
 from backend.core import catalog  # noqa: E402
 from backend.core.config import Settings, get_settings  # noqa: E402
-from backend.core.model_router import is_simple_query, resolve_llm  # noqa: E402
+from backend.core.model_router import resolve_llm  # noqa: E402
 from backend.core.models import Role  # noqa: E402
 from backend.security.jwt import TokenPayload  # noqa: E402
 
@@ -255,16 +255,15 @@ def test_low_confidence_is_not_cached(tmp_path, monkeypatch):
         assert second["answer"]["metadata"].get("cache_hit") is not True
 
 
-def test_different_model_separate_cache_entries(tmp_path, monkeypatch):
+def test_legacy_model_ids_share_the_fixed_cache_entry(tmp_path, monkeypatch):
     with _make_client(tmp_path, monkeypatch, _CACHE_ENV) as client:
         _seed_evidence(client)
         query = "Quel est le préavis de licenciement ?"
         _chat(client, query, model="ollama/gpt-oss:20b")
-        # A different model must not hit the first entry.
+        # Legacy model IDs cannot select another provider or fork the cache.
         other = _chat(client, query, model="ollama/gpt-oss:120b")
-        assert other["answer"]["metadata"].get("cache_hit") is not True
-        # Repeating the same model does hit.
-        repeat = _chat(client, query, model="ollama/gpt-oss:120b")
+        assert other["answer"]["metadata"].get("cache_hit") is True
+        repeat = _chat(client, query, model="tokenfree/qwen-max")
         assert repeat["answer"]["metadata"].get("cache_hit") is True
 
 
@@ -305,7 +304,7 @@ def test_usage_me_shape_and_remaining_math(client):
 
 
 # ---------------------------------------------------------------------------
-# Cheap-model routing
+# Fixed-model resolution
 # ---------------------------------------------------------------------------
 
 
@@ -317,30 +316,22 @@ def _user(tier: str) -> TokenPayload:
     return TokenPayload(sub="u1", role=Role.USER, exp=9_999_999_999, user_id="u1", tier=tier)
 
 
-def test_simple_query_routes_to_cheapest_model():
-    ctx = _ctx(Settings(llm_provider="openai"))
-    client = resolve_llm(ctx, _user("gratuit"), query="Préavis licenciement ?")
-    assert client.model == "ollama/gpt-oss:20b"  # first (cheapest) gratuit entry
+def test_simple_and_complex_queries_use_fixed_model():
+    ctx = _ctx(Settings(llm_provider="ollama"))
+    simple = resolve_llm(ctx, _user("gratuit"), query="Préavis licenciement ?")
+    complex_client = resolve_llm(
+        ctx,
+        _user("gratuit"),
+        query="Explique et analyse les clauses du contrat de travail en détail.",
+    )
+    assert simple.model == "ollama/gemma4:12b"
+    assert complex_client.model == "ollama/gemma4:12b"
 
 
-def test_complex_query_routes_to_tier_default():
-    ctx = _ctx(Settings(llm_provider="openai"))
-    complex_query = "Explique et analyse les clauses du contrat de travail en détail."
-    client = resolve_llm(ctx, _user("gratuit"), query=complex_query)
-    # Gratuit default is the Ollama Cloud catalog entry.
-    assert client.model == "ollama/gpt-oss:20b"
-
-
-def test_explicit_model_always_wins():
-    ctx = _ctx(Settings(llm_provider="openai"))
-    client = resolve_llm(ctx, _user("gratuit"), "ollama/gpt-oss:120b", query="Préavis ?")
-    assert client.model == "ollama/gpt-oss:120b"
-    tokenfree = resolve_llm(ctx, _user("gratuit"), "tokenfree/gemini-2.5-flash", query="Préavis ?")
-    assert tokenfree.provider == "tokenfree"
-
-
-def test_is_simple_query_heuristic():
-    assert is_simple_query("Préavis licenciement ?")
-    assert not is_simple_query("Explique le contrat de travail")
-    assert not is_simple_query("x" * 200)
-    assert not is_simple_query("ligne une\nligne deux")
+def test_explicit_model_is_ignored():
+    ctx = _ctx(Settings(llm_provider="ollama"))
+    legacy = resolve_llm(ctx, _user("gratuit"), "ollama/gpt-oss:120b", query="Préavis ?")
+    external = resolve_llm(ctx, _user("gratuit"), "tokenfree/gemini-2.5-flash", query="Préavis ?")
+    assert legacy.model == "ollama/gemma4:12b"
+    assert external.model == "ollama/gemma4:12b"
+    assert external.provider == "ollama"

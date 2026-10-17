@@ -23,6 +23,7 @@ from backend.core.embeddings import HashEmbeddings
 from backend.core.exceptions import IngestionError
 from backend.core.constants import AUTHORITY_WEIGHTS
 from backend.core.models import AuthorityLevel, DocumentIngestResult, DocumentType, EvidenceChunk
+from backend.core.model_roles import resolve_role_llm
 from backend.ingestion.chunking import legal_parent_child_chunk, looks_like_legal, parent_child_chunk, semantic_chunk
 from backend.ingestion.classification import (
     domain_slug,
@@ -515,6 +516,7 @@ class IngestionPipeline:
         llm = getattr(self.ctx, "llm", None)
         if llm is None or getattr(llm, "provider", "mock") == "mock" or not hasattr(llm, "complete"):
             return metadata
+        llm = resolve_role_llm("classification", llm, settings)
         try:
             from backend.core.prompts import get_prompt
 

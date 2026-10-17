@@ -69,10 +69,14 @@ overrides service addresses). Key groups:
 
 - **App**: `LEGAL_AI_ENV`, `LEGAL_AI_SECRET_KEY`, `LEGAL_AI_DATA_DIR`,
   `LEGAL_AI_LOG_LEVEL`
-- **LLM**: `LEGAL_AI_LLM_PROVIDER` (`mock` default; `openai`, `anthropic`,
-  `gemini`, `deepseek`, `qwen`, `kimi`, `ollama`), `LEGAL_AI_LLM_MODEL`,
-  `LEGAL_AI_LLM_API_KEY`, `LEGAL_AI_LLM_API_BASE`,
-  `LEGAL_AI_LLM_TEMPERATURE`, `LEGAL_AI_EMBEDDING_MODEL`
+- **Local LLM**: `LEGAL_AI_LLM_PROVIDER=ollama`, `LEGAL_AI_LLM_API_BASE`,
+  `LEGAL_AI_LLM_TEMPERATURE`, `LEGAL_AI_LLM_MAX_TOKENS`, and the local Ollama
+  keep-alive/think/warmup settings. Leave `LEGAL_AI_LLM_API_KEY` empty.
+- **Embeddings**: `LEGAL_AI_EMBEDDING_MODEL`, `LEGAL_AI_EMBEDDING_DIMENSION`,
+  and an explicit local `LEGAL_AI_EMBEDDING_API_BASE`; this is a separate
+  capability from the chat role models.
+- **STT**: `LEGAL_AI_STT_PROVIDER=faster-whisper` for the approved local setup;
+  transcription is independent of Ollama chat.
 - **Stores**: `LEGAL_AI_DATABASE_URL`, `LEGAL_AI_REDIS_URL` /
   `LEGAL_AI_REDIS_ENABLED`, `LEGAL_AI_MILVUS_HOST` /
   `LEGAL_AI_MILVUS_PORT` / `LEGAL_AI_MILVUS_ENABLED`
@@ -88,6 +92,24 @@ overrides service addresses). Key groups:
 - **Docker builds**: `PYTHON_IMAGE`, `NODE_IMAGE`, `PIP_INDEX_URL`, and
   `NPM_REGISTRY` select base-image/package mirrors. Backend Python packages
   are installed with uv, using local wheels offline-first when available.
+
+For containers, set both Ollama API base values to
+`http://host.docker.internal:11434`; for a host-run API, use
+`http://localhost:11434`. Pull `nemotron-3-nano:4b`, `gemma4:12b`, and the
+configured embedding model on that host before startup.
+
+### Fixed local role models
+
+The server assigns **Nemotron 3 Nano 4B** (`nemotron-3-nano:4b`) to language
+routing, query routing, planning, claim refinement, ingestion classification,
+and optional LLM rerank scoring. **Gemma 4 12B** (`gemma4:12b`) handles
+reasoning/reflection, direct/general/grounded synthesis, drafting enrichment,
+and memory summaries. These IDs are fixed in `backend/core/llm.py`.
+
+Users cannot select models. Environment role overrides and runtime catalog
+replacement are not supported, and chat never fails over to an external
+provider. Legacy `LEGAL_AI_TIER_CATALOG_JSON` entries can override only quota
+and rate-limit fields; provider/model entries are ignored.
 
 ## Strict infrastructure mode
 
@@ -124,11 +146,12 @@ changes the contract:
 
 ## Usage limits
 
-All users have access to every feature and configured model; legacy JWT/DB
-tier values no longer change entitlements. Anti-abuse per-minute/per-second
-limits from the shared catalog remain active, while
-`LEGAL_AI_RATE_LIMIT_PER_MINUTE` is the **anonymous/IP** default. Invalid or
-expired tokens also fall back to that anonymous IP bucket.
+All users have access to every feature; legacy JWT/DB tier values no longer
+change entitlements. The two local role models are fixed by the server and are
+not user-selectable. Anti-abuse per-minute/per-second limits from the shared
+catalog remain active, while `LEGAL_AI_RATE_LIMIT_PER_MINUTE` is the
+**anonymous/IP** default. Invalid or expired tokens also fall back to that
+anonymous IP bucket.
 
 Metered accounts share one daily budget: **30 requests and 5 000 000 tokens**.
 Admins can change both values globally in the Quotas tab or through

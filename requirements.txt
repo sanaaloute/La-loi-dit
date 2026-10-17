@@ -82,6 +82,8 @@ reportlab==4.1.0
 # cp312 manylinux wheels — verified with pip download (see
 # scripts/download_wheels.sh).
 faster-whisper==1.2.1
+# faster-whisper 1.2.1 is incompatible with PyAV 19 (metadata_errors removed).
+av>=11,<19
 
 # Testing
 pytest==8.3.4

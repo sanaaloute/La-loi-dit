@@ -713,69 +713,45 @@ def test_legacy_tier_budget_endpoint_is_removed(client):
 # ---------------------------------------------------------------------------
 
 
-def test_admin_providers_masks_api_keys(tmp_path, monkeypatch):
+def test_admin_providers_never_exposes_api_keys(tmp_path, monkeypatch):
     monkeypatch.setenv("LEGAL_AI_LLM_API_KEY", "sk-supersecretkey1234")
     with _make_client(tmp_path, monkeypatch) as client:
         response = client.get("/api/v1/admin/providers", headers=_headers(Role.ADMIN))
         assert response.status_code == 200, response.text
         assert "sk-supersecretkey1234" not in response.text
         data = response.json()
-        keyed = [p for p in data["providers"] if p["key_suffix"] is not None]
-        assert keyed, "a configured key should be reported masked"
-        for entry in keyed:
-            assert entry["configured"] is True
-            assert entry["key_suffix"] == "…1234"
+        assert all(p["key_suffix"] is None for p in data["providers"])
         assert set(data["defaults"]) == {"gratuit", "pro", "cabinet"}
         assert all(data["defaults"].values())
         assert "infra" in data
 
 
-def test_admin_providers_without_keys_report_unconfigured(client):
+def test_admin_providers_fixed_local_catalog(client):
     response = client.get("/api/v1/admin/providers", headers=_headers(Role.ADMIN))
     assert response.status_code == 200, response.text
     data = response.json()
-    names = [p["provider"] for p in data["providers"]]
-    assert {"ollama", "tokenfree", "openrouter"} <= set(names)
-    assert "openai" not in names
-    assert "anthropic" not in names
-    for entry in data["providers"]:
-        assert entry["key_suffix"] is None or entry["key_suffix"].startswith("…")
-        assert len(entry["key_suffix"] or "") <= 5
+    by_name = {p["provider"]: p for p in data["providers"]}
+    assert "ollama" in by_name
+    assert "embedding" in by_name
+    assert "openrouter" not in by_name
+    assert "tokenfree" not in by_name
+    assert by_name["ollama"]["configured"] is True
+    assert by_name["ollama"]["api_base"] == (get_settings().llm_api_base or "http://localhost:11434")
+    model_ids = {m["id"] for m in by_name["ollama"]["models"]}
+    assert model_ids == {"ollama/gemma4:12b", "ollama/nemotron-3-nano:4b"}
+    for model in by_name["ollama"]["models"]:
+        assert model["tier_required"] in {"gratuit", "pro", "cabinet"}
 
 
-def test_admin_providers_ollama_inherits_main_key(tmp_path, monkeypatch):
-    """ollama falls back to llm_api_key (documented single-key setup)."""
-    monkeypatch.setenv("LEGAL_AI_LLM_API_KEY", "sk-ollama-cloud-key-4321")
+def test_admin_providers_local_api_base_override(tmp_path, monkeypatch):
+    monkeypatch.setenv("LEGAL_AI_LLM_API_BASE", "http://host.docker.internal:11434")
     with _make_client(tmp_path, monkeypatch) as client:
         response = client.get("/api/v1/admin/providers", headers=_headers(Role.ADMIN))
         assert response.status_code == 200, response.text
-        assert "sk-ollama-cloud-key-4321" not in response.text
         by_name = {p["provider"]: p for p in response.json()["providers"]}
         assert by_name["ollama"]["configured"] is True
-        assert by_name["ollama"]["key_suffix"] == "…4321"
-        assert by_name["ollama"]["api_base"] == "https://ollama.com"
-        assert by_name["openrouter"]["configured"] is True
-        assert by_name["tokenfree"]["configured"] is True
-
-
-def test_admin_providers_models_grouped_per_provider(client):
-    response = client.get("/api/v1/admin/providers", headers=_headers(Role.ADMIN))
-    assert response.status_code == 200, response.text
-    by_name = {p["provider"]: p for p in response.json()["providers"]}
-    ollama_models = [m["id"] for m in by_name["ollama"]["models"]]
-    openrouter_models = [m["id"] for m in by_name["openrouter"]["models"]]
-    assert any(mid.startswith("ollama/") for mid in ollama_models)
-    assert any(mid.startswith("openrouter/") for mid in openrouter_models)
-    assert not any(mid.startswith("openrouter/") for mid in ollama_models)
-    assert not any(mid.startswith("ollama/") for mid in openrouter_models)
-    # Every grouped model carries its lowest unlocking tier.
-    for provider in by_name.values():
-        for model in provider["models"]:
-            assert model["tier_required"] in {"gratuit", "pro", "cabinet"}
-    # Per-provider default API bases, not one shared base.
-    assert by_name["openrouter"]["api_base"] == "https://openrouter.ai/api/v1"
-    assert by_name["tokenfree"]["api_base"] == "https://www.tokenfree.com/v1"
-    assert by_name["ollama"]["api_base"] == "https://ollama.com"
+        assert by_name["ollama"]["api_base"] == "http://host.docker.internal:11434"
+        assert by_name["ollama"]["key_suffix"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -904,9 +880,11 @@ _NEUTRAL_TEXT = (
 
 
 class _FakeLLM:
-    """Minimal async LLM stand-in with a non-mock provider."""
+    """Minimal async LLM stand-in with the fixed classification identity."""
 
-    provider = "openai"
+    provider = "ollama"
+    model = "ollama/nemotron-3-nano:4b"
+    api_base = ""
 
     def __init__(self, response: str = "", exc: Exception | None = None):
         self.response = response

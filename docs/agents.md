@@ -38,6 +38,21 @@ flowchart LR
     ref --> a
 ```
 
+## Fixed local role models
+
+Production LLM calls use keyless local Ollama with server-fixed assignments:
+**Nemotron 3 Nano 4B** (`nemotron-3-nano:4b`) for language routing, query
+routing, planning, claim refinement, ingestion classification, and optional LLM
+rerank scoring; **Gemma 4 12B** (`gemma4:12b`) for reasoning/reflection,
+direct/general/grounded synthesis, drafting enrichment, and memory summaries.
+Users cannot select models, and environment role overrides or runtime catalog
+changes cannot replace these assignments. There is no external chat failover;
+daily quotas and anti-abuse rate limits still cover all role calls. The
+`mock` provider is reserved for deterministic tests/development.
+
+Embeddings, faster-whisper STT, OCR, semantic guardrails, and cross-encoder
+reranking are separate capabilities, not alternative chat role models.
+
 ## input_guardrail (`backend/agents/input_guardrail.py`)
 
 First line of defense. Delegates to
@@ -64,12 +79,12 @@ original query untouched.
 Converts the raw question into a `RetrievalPlan`: sub-questions, typed
 `SearchTask`s (`vector`, `keyword`, `government`, `regulation`, `case_law`,
 `news`, …), matched legal domains, retrieval language (French) and response
-language. With a real LLM provider it calls `complete_json` (which itself
-allows one corrective retry); on any failure — and with the `mock` provider
-— it uses `heuristic_plan`, a keyword-driven deterministic planner that can
-never hallucinate. Tool-transcript output is also rejected and falls back to
-that deterministic plan. Also extracts an optional `scenario_date` for legal
-timeline reasoning.
+language. With a real LLM provider it uses one structured `complete` call and
+validates the returned JSON (including fenced JSON); on any failure — and with
+the `mock` provider — it uses `heuristic_plan`, a keyword-driven deterministic
+planner that can never hallucinate. Tool-transcript output is also rejected and
+falls back to that deterministic plan. Also extracts an optional `scenario_date`
+for legal timeline reasoning.
 
 ## context_agent (`backend/agents/context_agent.py`)
 

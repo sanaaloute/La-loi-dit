@@ -29,7 +29,7 @@ or escalated for human review.
 | Durable conversations | Temporal workflows survive restarts; memory buffer is persisted |
 | Security | JWT + RBAC, input/output guardrails, rate limiting, sandboxed tools, audit logging |
 | Observability | Prometheus metrics, Grafana dashboards, Langfuse traces, OpenTelemetry |
-| Offline-first | Every dependency (LLM, Milvus, Redis, Temporal) has an in-process fallback; the whole pipeline runs with zero credentials |
+| Offline-first | Production chat and embeddings use keyless local Ollama; deterministic mock chat and in-process infrastructure substitutes support tests/development without external credentials |
 
 ## Architecture
 
@@ -73,64 +73,72 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-### 2. Run offline (no credentials needed)
+### 2. Prepare keyless local Ollama
 
-The default configuration uses the deterministic `mock` LLM provider, an
-in-memory vector store, an in-process cache and SQLite — nothing external is
-required.
+Production chat uses only Ollama running locally, without an API key. Two role
+models are fixed by the server:
 
-Start the server — the defaults use the deterministic `mock` LLM provider, an
-in-memory vector store, an in-process cache and SQLite, so nothing external is
-required:
+- **Nemotron 3 Nano 4B** (`nemotron-3-nano:4b`) handles language routing,
+  query routing, planning, claim refinement, ingestion classification, and
+  optional LLM rerank scoring.
+- **Gemma 4 12B** (`gemma4:12b`) handles reasoning/reflection,
+  direct/general/grounded synthesis, drafting enrichment, and memory summaries.
+
+Users cannot select models, and environment role overrides or runtime catalog
+replacement do not change these assignments. Daily quotas and anti-abuse rate
+limits still apply.
+
+Install and start Ollama on the host, then pull the chat models and the separate
+embedding model:
 
 ```bash
+ollama pull nemotron-3-nano:4b
+ollama pull gemma4:12b
+ollama pull nomic-embed-text
+```
+
+For an API process running directly on the host, start it with local endpoints:
+
+```bash
+LEGAL_AI_LLM_PROVIDER=ollama \
+LEGAL_AI_LLM_API_BASE=http://localhost:11434 \
+LEGAL_AI_EMBEDDING_MODEL=ollama/nomic-embed-text \
+LEGAL_AI_EMBEDDING_DIMENSION=768 \
+LEGAL_AI_EMBEDDING_API_BASE=http://localhost:11434 \
+LEGAL_AI_STT_PROVIDER=faster-whisper \
 uvicorn backend.api.main:app --host 0.0.0.0 --port 8000
 ```
 
-To override configuration locally, copy `.env.example` to `.env` and edit it.
-`.env` is the single configuration file; it is gitignored and should never be
-committed.
+To persist configuration, copy `.env.example` to `.env` and edit it. `.env` is
+the single configuration file; it is gitignored and should never be committed.
+The deterministic `mock` chat provider is reserved for tests/development, not as
+a production failover.
 
-### 3. Full stack with Docker Compose on Ubuntu
+### 3. Full stack with Docker Compose
 
-This project is configured for a split Ollama setup:
-
-- **LLM**: [Ollama Cloud](https://ollama.com/cloud) — uses an Ollama API key.
-- **Embeddings**: local Ollama running on the Ubuntu Docker host.
-
-Copy the production template and fill in your secrets:
+The containers use the same keyless Ollama service on the Docker host for chat
+and embeddings. Copy the production template and fill in your secrets:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env`:
+The template already sets the required local AI configuration:
 
 ```ini
-# Ollama Cloud LLM
 LEGAL_AI_LLM_PROVIDER=ollama
-LEGAL_AI_LLM_MODEL=gpt-oss:120b
-LEGAL_AI_LLM_API_BASE=https://ollama.com
-LEGAL_AI_LLM_API_KEY=<your-ollama-cloud-api-key>
-
-# Embeddings — Ollama Cloud (same key as the chat models)
+LEGAL_AI_LLM_API_BASE=http://host.docker.internal:11434
+LEGAL_AI_LLM_API_KEY=
 LEGAL_AI_EMBEDDING_MODEL=ollama/nomic-embed-text
 LEGAL_AI_EMBEDDING_DIMENSION=768
-
-# Secrets — change every placeholder
-LEGAL_AI_SECRET_KEY=<random-secret>
-POSTGRES_PASSWORD=<strong-password>
-MINIO_ROOT_PASSWORD=<strong-password>
-GRAFANA_ADMIN_PASSWORD=<strong-password>
-LANGFUSE_NEXTAUTH_SECRET=<random-secret>
-LANGFUSE_SALT=<random-secret>
+LEGAL_AI_EMBEDDING_API_BASE=http://host.docker.internal:11434
+LEGAL_AI_EMBEDDING_API_KEY=
+LEGAL_AI_STT_PROVIDER=faster-whisper
 ```
 
-No local models are required: chat models and embeddings both run on
-**Ollama Cloud** (`https://ollama.com`) with the same API key — the compose
-file already points `LEGAL_AI_EMBEDDING_API_BASE` at it. Make sure the
-embedding model (`nomic-embed-text`) is available on your Ollama Cloud
-account.
+Keep both API base values on `host.docker.internal` for containers; use
+`localhost` only for host-run processes. Set strong application and database
+secrets in `.env`. There is no external chat failover.
 
 Start the core stack:
 

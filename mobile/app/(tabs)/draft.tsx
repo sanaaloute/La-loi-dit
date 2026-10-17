@@ -24,7 +24,6 @@ import {
   type DraftTemplate,
 } from "../../src/lib/api";
 import { shareDraftExport, type MenuFormat } from "../../src/lib/export";
-import { getModel } from "../../src/lib/storage";
 import type { ThemeColors } from "../../src/theme";
 import { useTheme } from "../../src/theme-context";
 
@@ -157,7 +156,6 @@ export default function DraftScreen() {
         template_id: template.id,
         fields: values,
         instructions: instructions.trim() || undefined,
-        model: getModel() ?? undefined,
       });
       setDraft(result);
       setStep("result");

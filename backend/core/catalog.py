@@ -1,19 +1,8 @@
-"""Shared model/feature catalog and daily usage budgets.
+"""Fixed local-model descriptors and shared daily usage budgets.
 
-Legacy tier names remain in tokens and database rows for backward
-compatibility, but they no longer unlock different capabilities: every user
-gets every configured provider, model and feature. Model ids are namespaced
-``"provider/..."`` so the frontend picker and the model router share one
-vocabulary.
-
-The catalog can be replaced at runtime with ``LEGAL_AI_TIER_CATALOG_JSON``
-(the legacy JSON shape). Invalid JSON or a structurally unusable document
-falls back to the built-in catalog with a logged warning.
-
-Admins can tune one global daily token/request budget at runtime (see the
-``/admin/settings/daily-budgets`` endpoints). The override is persisted in the
-users DB (app_settings key ``daily_budgets``) and merged through a module-level
-cache, so hot paths never touch the DB.
+Users cannot select models or replace this catalog at runtime. Legacy tier
+names remain only for old tokens and database rows; daily quotas and anti-abuse
+rate limits continue to apply to every account.
 """
 
 from __future__ import annotations
@@ -29,59 +18,28 @@ from backend.core.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
-# Legacy tier names are retained only to read old tokens, rows and catalog JSON.
 TIER_ORDER = ["gratuit", "pro", "cabinet"]
 DEFAULT_TIER = "gratuit"
 
 
 class ModelEntry(BaseModel):
-    """One selectable model in the catalog."""
+    """One fixed local role model exposed for read-only status."""
 
-    id: str  # namespaced, e.g. "openrouter/deepseek/deepseek-chat"
-    provider: str  # logical provider, e.g. "openrouter"
+    id: str
+    provider: str
     label: str = ""
 
 
-_ALL_PROVIDERS = ["ollama", "tokenfree", "openrouter"]
-
-# Full model catalog available to every user.
+_ALL_PROVIDERS = ["ollama"]
 _ALL_MODELS: list[dict[str, str]] = [
-    # Ollama Cloud models verified against the account's plan
-    # (https://ollama.com/cloud). nemotron-3-nano:30b and minimax-m3
-    # also work; glm/kimi/deepseek/mistral/qwen3.5 need a paid upgrade.
-    {"id": "ollama/gpt-oss:20b", "provider": "ollama", "label": "GPT-OSS 20B (Ollama Cloud)"},
-    {"id": "ollama/gpt-oss:120b", "provider": "ollama", "label": "GPT-OSS 120B (Ollama Cloud)"},
-    {"id": "ollama/gemma4:31b", "provider": "ollama", "label": "Gemma 4 31B (Ollama Cloud)"},
-    # TokenFree chat model ids verified against the account's /v1/models
-    # list (https://www.tokenfree.com); the claude-* ids currently return
-    # 500 from the TokenFree gateway.
-    {"id": "tokenfree/gemini-2.5-flash", "provider": "tokenfree", "label": "Gemini 2.5 Flash (TokenFree)"},
-    {"id": "tokenfree/gpt-5.4-mini", "provider": "tokenfree", "label": "GPT-5.4 Mini (TokenFree)"},
-    {"id": "tokenfree/qwen-max", "provider": "tokenfree", "label": "Qwen Max (TokenFree)"},
-    {"id": "tokenfree/kimi-k2.5", "provider": "tokenfree", "label": "Kimi K2.5 (TokenFree)"},
-    # OpenRouter models — the account's free-tier ids, probe-verified against
-    # the account (paid ids returned 402 Payment Required under load and are
-    # deliberately not offered). gpt-oss-20b first: it matches the Ollama
-    # Cloud primary, so failover answers stay coherent.
+    {"id": "ollama/gemma4:12b", "provider": "ollama", "label": "Gemma 4 12B (local, synthesis)"},
     {
-        "id": "openrouter/openai/gpt-oss-20b:free",
-        "provider": "openrouter",
-        "label": "GPT-OSS 20B (OpenRouter, gratuit)",
-    },
-    {
-        "id": "openrouter/google/gemma-4-26b-a4b-it:free",
-        "provider": "openrouter",
-        "label": "Gemma 4 26B (OpenRouter, gratuit)",
-    },
-    {
-        "id": "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
-        "provider": "openrouter",
-        "label": "Nemotron 3 Ultra (OpenRouter, gratuit)",
+        "id": "ollama/nemotron-3-nano:4b",
+        "provider": "ollama",
+        "label": "Nemotron 3 Nano 4B (local, structured roles)",
     },
 ]
 
-# Shared production entitlements and daily budgets. Legacy per-tier rate
-# limits remain only as anti-abuse controls, never as feature locks.
 _SHARED_CONFIG: dict[str, Any] = {
     "providers": _ALL_PROVIDERS,
     "models": _ALL_MODELS,
@@ -98,8 +56,6 @@ _TIER_CONFIG: dict[str, dict[str, Any]] = {
     tier: {**_SHARED_CONFIG, **_RATE_LIMITS[tier]} for tier in TIER_ORDER
 }
 
-# Dev rate limits (effectively unlimited) used when LEGAL_AI_TIER_CATALOG_JSON
-# is empty. The daily budgets above are the real production quotas.
 _DEV_RATE_LIMIT_PER_MINUTE = 10_000
 _DEV_RATE_LIMIT_PER_SECOND = 10_000
 
@@ -117,45 +73,34 @@ TIER_CATALOG: dict[str, dict[str, Any]] = {
 }
 
 
-def _validate_catalog(raw: Any) -> Optional[dict[str, dict[str, Any]]]:
-    """Minimal structural check: dict of tiers, each with a non-empty models
-    list of {id, provider} entries. Returns None when unusable."""
-    if not isinstance(raw, dict) or not raw:
-        return None
-    for tier, cfg in raw.items():
-        if not isinstance(tier, str) or not isinstance(cfg, dict):
-            return None
-        models = cfg.get("models")
-        if not isinstance(models, list) or not models:
-            return None
-        for entry in models:
-            if not isinstance(entry, dict) or not entry.get("id") or not entry.get("provider"):
-                return None
-    return raw
-
-
-# Cache keyed by the raw JSON string so an env change takes effect without
-# a restart of the helper functions (get_settings itself is lru_cached).
-_catalog_cache: dict[str, Any] = {"key": None, "catalog": None}
-
-
 def _catalog(settings: Optional[Settings] = None) -> dict[str, dict[str, Any]]:
+    """Return fixed providers/models with optional rate-limit overrides only."""
     settings = settings or get_settings()
     raw = settings.tier_catalog_json
-    if _catalog_cache["key"] == raw and _catalog_cache["catalog"] is not None:
-        return _catalog_cache["catalog"]
-    catalog: dict[str, dict[str, Any]] = TIER_CATALOG
-    if raw:
-        try:
-            parsed = _validate_catalog(json.loads(raw))
-        except Exception:
-            parsed = None
-        if parsed is not None:
-            catalog = parsed
-        else:
-            logger.warning("invalid LEGAL_AI_TIER_CATALOG_JSON; falling back to the built-in tier catalog")
-    _catalog_cache["key"] = raw
-    _catalog_cache["catalog"] = catalog
+    if not raw:
+        return TIER_CATALOG
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        parsed = None
+    if not isinstance(parsed, dict):
+        logger.warning("invalid LEGAL_AI_TIER_CATALOG_JSON; using built-in rate limits")
+        return TIER_CATALOG
+
+    catalog: dict[str, dict[str, Any]] = {}
+    for tier, cfg in TIER_CATALOG.items():
+        override = parsed.get(tier, {})
+        catalog[tier] = dict(cfg)
+        if not isinstance(override, dict):
+            continue
+        for field in ("rate_limit_per_minute", "rate_limit_per_second"):
+            value = override.get(field)
+            if isinstance(value, int) and value > 0:
+                catalog[tier][field] = value
+        for field in ("daily_token_budget", "daily_request_budget"):
+            value = override.get(field)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                catalog[tier][field] = value
     return catalog
 
 

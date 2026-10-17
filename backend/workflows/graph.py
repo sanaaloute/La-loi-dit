@@ -215,7 +215,7 @@ def build_graph(ctx: AppContext):
     g.add_node("reasoning_agent", bind(reasoning_agent.reasoning_agent_node, role="analysis"))
     g.add_node("reflection_agent", bind(reflection_agent.reflection_agent_node, role="analysis"))
     g.add_node("citation_verification", bind(citation_verification.citation_verification_node))
-    g.add_node("claim_verification", bind(claim_verification.claim_verification_node))
+    g.add_node("claim_verification", bind(claim_verification.claim_verification_node, role="classification"))
     g.add_node("response_generator", bind(response_generator.response_generator_node, role="synthesis"))
     g.add_node("output_guardrail", bind(output_guardrail.output_guardrail_node))
 

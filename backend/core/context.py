@@ -19,7 +19,7 @@ from backend.core.cache import CacheProtocol, InMemoryCache, RedisCache, get_cac
 from backend.core.config import Settings, get_settings
 from backend.core.embeddings import EmbeddingProvider, LiteLLMEmbeddings, get_embedder
 from backend.core.llm import LLMClient, get_llm
-from backend.core.model_router import with_failover
+from backend.core.model_roles import resolve_role_llm
 from backend.core.ports import MemoryStoreProtocol, RetrieverProtocol, VectorStoreProtocol
 from backend.observability.langfuse_client import register_litellm_callbacks
 
@@ -54,7 +54,7 @@ async def build_context(settings: Optional[Settings] = None) -> AppContext:
     embedder = get_embedder(settings)
     ctx = AppContext(
         settings=settings,
-        llm=with_failover(get_llm(settings), settings),
+        llm=get_llm(settings),
         cache=await get_cache(settings),
         embedder=embedder,
     )
@@ -68,10 +68,11 @@ async def build_context(settings: Optional[Settings] = None) -> AppContext:
     ):
         await _warmup_local_ollama_embedder(embedder, settings)
 
-    # Same idea for the default chat model: a 1-token call at boot absorbs the
-    # cold-start penalty (model load locally, connection/auth on cloud).
+    # Warm both fixed chat models so role changes do not trigger a cold load.
     if settings.ollama_warmup_on_startup:
         await _warmup_chat_model(ctx.llm, settings)
+        if ctx.llm.provider != "mock":
+            await _warmup_chat_model(resolve_role_llm("classification", ctx.llm, settings), settings)
 
     from backend.memory.store import MemoryStore
 

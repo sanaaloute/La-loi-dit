@@ -76,20 +76,20 @@ def test_catalog_full_access_for_legacy_tiers():
     pro = {m.id for m in catalog.allowed_models("pro")}
     cabinet = {m.id for m in catalog.allowed_models("cabinet")}
     assert gratuit == pro == cabinet
-    assert any(m.provider == "tokenfree" for m in catalog.allowed_models("gratuit"))
+    assert gratuit == {"ollama/gemma4:12b", "ollama/nemotron-3-nano:4b"}
 
 
 def test_is_model_allowed_for_every_legacy_tier():
     for tier in catalog.TIER_ORDER:
-        assert catalog.is_model_allowed(tier, "ollama/gpt-oss:20b")
-        assert catalog.is_model_allowed(tier, "openrouter/openai/gpt-oss-20b:free")
-        assert catalog.is_model_allowed(tier, "tokenfree/gemini-2.5-flash")
-    assert not catalog.is_model_allowed("cabinet", "openrouter/openai/gpt-99")
+        assert catalog.is_model_allowed(tier, "ollama/gemma4:12b")
+        assert catalog.is_model_allowed(tier, "ollama/nemotron-3-nano:4b")
+        assert not catalog.is_model_allowed(tier, "ollama/gpt-oss:20b")
+        assert not catalog.is_model_allowed(tier, "tokenfree/gemini-2.5-flash")
 
 
 def test_default_model_and_unknown_tier():
-    assert catalog.default_model("gratuit") == "ollama/gpt-oss:20b"
-    assert catalog.default_model("pro") == "ollama/gpt-oss:20b"
+    assert catalog.default_model("gratuit") == "ollama/gemma4:12b"
+    assert catalog.default_model("pro") == "ollama/gemma4:12b"
     assert catalog.get_tier("inconnu") == catalog.get_tier("gratuit")
 
 
@@ -98,10 +98,10 @@ def test_all_models_with_access_annotations():
     for model_id, model in annotated.items():
         assert model["allowed"] is True, model_id
         assert model["tier_required"] == "gratuit"
-    assert "tokenfree/gemini-2.5-flash" in annotated
+    assert "ollama/nemotron-3-nano:4b" in annotated
 
 
-def test_catalog_env_override(monkeypatch):
+def test_catalog_env_override_is_ignored(monkeypatch):
     override = {
         "gratuit": {
             "providers": ["mock"],
@@ -113,9 +113,8 @@ def test_catalog_env_override(monkeypatch):
     monkeypatch.setenv("LEGAL_AI_TIER_CATALOG_JSON", json.dumps(override))
     get_settings.cache_clear()
     try:
-        assert catalog.default_model("gratuit") == "mock/gratuit-model"
-        assert catalog.is_model_allowed("gratuit", "mock/gratuit-model")
-        assert not catalog.is_model_allowed("gratuit", "ollama/gpt-oss:20b")
+        assert catalog.default_model("gratuit") == "ollama/gemma4:12b"
+        assert not catalog.is_model_allowed("gratuit", "mock/gratuit-model")
     finally:
         get_settings.cache_clear()
 
@@ -124,7 +123,7 @@ def test_catalog_env_override_invalid_falls_back(monkeypatch):
     monkeypatch.setenv("LEGAL_AI_TIER_CATALOG_JSON", "{not valid json")
     get_settings.cache_clear()
     try:
-        assert catalog.default_model("gratuit") == "ollama/gpt-oss:20b"
+        assert catalog.default_model("gratuit") == "ollama/gemma4:12b"
     finally:
         get_settings.cache_clear()
 
@@ -221,7 +220,7 @@ async def test_budget_overrides_refresh_never_raises(monkeypatch):
         catalog.set_budget_overrides({})
 
 
-def test_default_daily_budgets_reflect_env_catalog(monkeypatch):
+def test_default_daily_budgets_allow_legacy_quota_override(monkeypatch):
     override = {
         "gratuit": {
             "providers": ["mock"],
@@ -256,121 +255,8 @@ def test_llm_client_default_behavior_unchanged():
 def test_llm_client_strips_provider_namespace():
     settings = Settings(llm_provider="mock")
     assert LLMClient(settings, provider="ollama", model="ollama/gpt-oss:20b").model == "ollama/gpt-oss:20b"
-    assert (
-        LLMClient(settings, provider="openrouter", model="openrouter/openai/gpt-oss-20b:free").model
-        == "openrouter/openai/gpt-oss-20b:free"
-    )
-
-
-async def test_openrouter_completion_kwargs(monkeypatch):
-    import backend.core.llm as llm_module
-
-    settings = Settings(llm_provider="mock", llm_api_base="", llm_api_key="")
-    client = LLMClient(
-        settings,
-        provider="openrouter",
-        model="openrouter/openai/gpt-oss-20b:free",
-        api_key="or-key",
-    )
-    captured: dict = {}
-
-    class _Message:
-        content = "ok"
-
-    class _Choice:
-        message = _Message()
-
-    class _Response:
-        choices = [_Choice()]
-
-    async def fake_acompletion(**kwargs):
-        captured.update(kwargs)
-        return _Response()
-
-    monkeypatch.setattr(llm_module.litellm, "acompletion", fake_acompletion)
-    assert await client.complete("system", "user") == "ok"
-    assert captured["model"] == "openrouter/openai/gpt-oss-20b:free"
-    assert captured["api_base"] == "https://openrouter.ai/api/v1"
-    assert captured["api_key"] == "or-key"
-    assert captured["extra_headers"]["HTTP-Referer"] == settings.app_name
-    assert captured["extra_headers"]["X-Title"] == settings.app_name
-
-
-async def test_openrouter_headers_are_ascii_safe(monkeypatch):
-    """A non-ASCII app name (e.g. with an em-dash) must not break the call."""
-    import backend.core.llm as llm_module
-
-    settings = Settings(llm_provider="mock", app_name="Yawoto — Assistant Juridique")
-    client = LLMClient(
-        settings,
-        provider="openrouter",
-        model="openrouter/openai/gpt-oss-20b:free",
-        api_key="or-key",
-    )
-    captured: dict = {}
-
-    class _Message:
-        content = "ok"
-
-    class _Choice:
-        message = _Message()
-
-    class _Response:
-        choices = [_Choice()]
-
-    async def fake_acompletion(**kwargs):
-        captured.update(kwargs)
-        return _Response()
-
-    monkeypatch.setattr(llm_module.litellm, "acompletion", fake_acompletion)
-    assert await client.complete("system", "user") == "ok"
-    title = captured["extra_headers"]["X-Title"]
-    title.encode("ascii")  # raises if any non-ASCII char survived
-    assert "Yawoto" in title
-
-
-async def test_tokenfree_completion_kwargs(monkeypatch):
-    import backend.core.llm as llm_module
-
-    settings = Settings(llm_provider="mock", llm_api_base="", llm_api_key="")
-    client = LLMClient(
-        settings,
-        provider="tokenfree",
-        model="tokenfree/gemini-2.5-flash",
-        api_key="tf-key",
-    )
-    captured: dict = {}
-
-    class _Message:
-        content = "ok"
-
-    class _Choice:
-        message = _Message()
-
-    class _Response:
-        choices = [_Choice()]
-
-    async def fake_acompletion(**kwargs):
-        captured.update(kwargs)
-        return _Response()
-
-    monkeypatch.setattr(llm_module.litellm, "acompletion", fake_acompletion)
-    assert await client.complete("system", "user") == "ok"
-    # OpenAI-compatible: "openai/" LiteLLM prefix + default TokenFree base URL.
-    assert captured["model"] == "openai/gemini-2.5-flash"
-    assert captured["api_base"] == "https://www.tokenfree.com/v1"
-    assert captured["api_key"] == "tf-key"
-
-
-def test_resolve_llm_tokenfree_uses_tokenfree_key_for_every_legacy_tier():
-    settings = Settings(llm_provider="openai", llm_api_key="sk-main", tokenfree_api_key="tf-test")
-    ctx = SimpleNamespace(settings=settings, llm=None)
-    for tier in catalog.TIER_ORDER:
-        client = resolve_llm(ctx, _user(tier), "tokenfree/gemini-2.5-flash")
-        assert client.provider == "tokenfree"
-        assert client.model == "openai/gemini-2.5-flash"
-        assert client.api_key == "tf-test"
-        assert client.api_base == "https://www.tokenfree.com/v1"
+    with pytest.raises(ValueError, match="unsupported chat provider"):
+        LLMClient(settings, provider="openrouter", model="openrouter/openai/gpt-oss-20b:free")
 
 
 # ---------------------------------------------------------------------------
@@ -382,36 +268,25 @@ def _user(tier: str, sub: str = "user-1") -> TokenPayload:
     return TokenPayload(sub=sub, role=Role.USER, exp=9_999_999_999, user_id=sub, tier=tier)
 
 
-def test_resolve_llm_allows_tier_model():
-    settings = Settings(llm_provider="openai", llm_api_key="sk-test", openrouter_api_key="or-test")
+def test_resolve_llm_ignores_legacy_model_selection():
+    settings = Settings(llm_provider="ollama")
     ctx = SimpleNamespace(settings=settings, llm=None)
-    client = resolve_llm(ctx, _user("pro"), "openrouter/openai/gpt-oss-20b:free")
-    assert client.provider == "openrouter"
-    assert client.model == "openrouter/openai/gpt-oss-20b:free"
-    assert client.api_key == "or-test"
+    for requested in (
+        "openrouter/openai/gpt-oss-20b:free",
+        "tokenfree/gemini-2.5-flash",
+        "openrouter/openai/gpt-99",
+    ):
+        client = resolve_llm(ctx, _user("pro"), requested)
+        assert client.provider == "ollama"
+        assert client.model == "ollama/gemma4:12b"
+        assert client.api_key == ""
 
 
-def test_resolve_llm_allows_formerly_tier_gated_model():
-    ctx = SimpleNamespace(settings=Settings(llm_provider="openai"), llm=None)
-    client = resolve_llm(ctx, _user("gratuit"), "tokenfree/gemini-2.5-flash")
-    assert client.provider == "tokenfree"
-
-
-def test_resolve_llm_removed_model_falls_back_to_default():
-    """A stale client selection (model removed from the catalog) must not
-    brick the request: fall back to the tier default."""
-    ctx = SimpleNamespace(settings=Settings(llm_provider="openai"), llm=None)
-    client = resolve_llm(ctx, _user("gratuit"), "openrouter/openai/gpt-99")
-    assert client.model == "ollama/gpt-oss:20b"
-
-
-def test_resolve_llm_defaults_to_tier_model():
-    ctx = SimpleNamespace(settings=Settings(llm_provider="openai"), llm=None)
-    # No query -> tier default (the Ollama Cloud catalog entry, every tier);
-    # cheap routing needs a query.
-    assert resolve_llm(ctx, _user("gratuit")).model == "ollama/gpt-oss:20b"
-    assert resolve_llm(ctx, None).model == "ollama/gpt-oss:20b"  # anonymous
-    assert resolve_llm(ctx, _user("pro")).model == "ollama/gpt-oss:20b"
+def test_resolve_llm_defaults_to_fixed_model():
+    ctx = SimpleNamespace(settings=Settings(llm_provider="ollama"), llm=None)
+    assert resolve_llm(ctx, _user("gratuit")).model == "ollama/gemma4:12b"
+    assert resolve_llm(ctx, None).model == "ollama/gemma4:12b"
+    assert resolve_llm(ctx, _user("pro")).model == "ollama/gemma4:12b"
 
 
 def test_resolve_llm_mock_mode_keeps_ctx_llm_for_all_models():
@@ -574,25 +449,29 @@ def test_db_tier_change_unlocks_models_without_new_token(client):
 # ---------------------------------------------------------------------------
 
 
-def test_models_endpoint_anonymous_gets_full_access(client):
+def test_models_endpoint_anonymous_gets_fixed_read_only_catalog(client):
     response = client.get("/api/v1/models")
     assert response.status_code == 200
     data = response.json()
-    assert data["default_model"] == "ollama/gpt-oss:20b"
+    assert data["default_model"] == "ollama/gemma4:12b"
+    assert data["selectable"] is False
     by_id = {m["id"]: m for m in data["models"]}
-    for model_id, model in by_id.items():
-        assert model["allowed"] is True, model_id
+    assert set(by_id) == {"ollama/gemma4:12b", "ollama/nemotron-3-nano:4b"}
+    for model in by_id.values():
+        assert model["allowed"] is True
         assert model["tier_required"] == "gratuit"
-    assert "tokenfree/gemini-2.5-flash" in by_id
 
 
-def test_models_endpoint_full_access_with_legacy_token_tier(client):
+def test_models_endpoint_fixed_with_legacy_token_tier(client):
     settings = get_settings()
     token = create_access_token("dev-pro", Role.USER, settings, tier="pro")
     response = client.get("/api/v1/models", headers=_headers(token))
-    by_id = {m["id"]: m for m in response.json()["models"]}
-    assert by_id["openrouter/openai/gpt-oss-20b:free"]["allowed"] is True
-    assert by_id["tokenfree/gemini-2.5-flash"]["allowed"] is True
+    data = response.json()
+    assert data["selectable"] is False
+    by_id = {m["id"]: m for m in data["models"]}
+    assert set(by_id) == {"ollama/gemma4:12b", "ollama/nemotron-3-nano:4b"}
+    assert "openrouter/openai/gpt-oss-20b:free" not in by_id
+    assert "tokenfree/gemini-2.5-flash" not in by_id
 
 
 # ---------------------------------------------------------------------------

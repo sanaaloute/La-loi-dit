@@ -19,6 +19,7 @@ from backend.core.config import get_settings
 from backend.core.context import AppContext
 from backend.core.embeddings import HashEmbeddings
 from backend.core.models import EvidenceChunk, SearchKind, SearchTask
+from backend.core.model_roles import resolve_role_llm
 from backend.core.ports import RerankerProvider
 from backend.retrieval.dedup import deduplicate
 from backend.retrieval.fusion import reciprocal_rank_fusion
@@ -85,7 +86,11 @@ class RetrievalCoordinator:
         # resolve to the offline heuristic provider (spec §17), preserving the
         # previous behavior exactly (including the gated LLM rescore hook).
         settings = ctx.settings
-        rerank_llm = ctx.llm if settings.rerank_llm_enabled else None
+        rerank_llm = (
+            resolve_role_llm("classification", ctx.llm, settings)
+            if settings.rerank_llm_enabled
+            else None
+        )
         self.reranker: RerankerProvider = reranker or get_reranker(
             settings, embedder=ctx.embedder, llm=rerank_llm
         )

@@ -37,8 +37,8 @@ class Settings(BaseSettings):
         env_file=[".env", ".env.dev"],
         env_file_encoding="utf-8",
         extra="ignore",
-        # Settings fields prefixed ``model_`` (e.g. ``model_role_routing_enabled``)
-        # would otherwise trip pydantic's protected-namespace warning.
+        # Settings fields prefixed ``model_`` would otherwise trip pydantic's
+        # protected-namespace warning.
         protected_namespaces=(),
     )
 
@@ -62,63 +62,32 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     audit_log_cap: int = 1000
 
-    # --- LLM via LiteLLM (OpenAI-compatible multi-provider) ---
-    # provider: openai | anthropic | gemini | deepseek | qwen | kimi | ollama | mock
+    # --- Local Ollama chat and test-only mock ---------------------------------
+    # provider: ollama | mock. Production role models are fixed in core.llm;
+    # llm_model is used only by the deterministic mock client.
     llm_provider: str = "mock"
     llm_model: str = "gpt-4o-mini"
     llm_api_key: str = ""
     llm_api_base: str = ""
     llm_temperature: float = 0.1
     llm_max_tokens: int = 4096
-    llm_timeout_seconds: float = 60.0
-    openrouter_api_key: str = ""  # falls back to llm_api_key when empty
-    tokenfree_api_key: str = ""  # falls back to llm_api_key when empty
-    # Dedicated Ollama Cloud key; falls back to llm_api_key (documented for
-    # single-key setups where the main key IS the ollama.com key).
-    ollama_api_key: str = ""
-    # How long Ollama keeps a model loaded after a request. "1h" = one hour,
-    # "24h" = one day, "0m" = unload immediately. Use a long value (or set the
-    # OLLAMA_KEEP_ALIVE env var on the Ollama server) to avoid model-reload
-    # latency/timeout on every embedding/chat request.
+    llm_timeout_seconds: float = 180.0
+    # Used only by embedding adapters that still support OpenRouter; chat never
+    # reads provider-specific credentials or falls back to an external model.
+    openrouter_api_key: str = ""
+    # Keep local Ollama models loaded between requests to avoid reload latency.
     ollama_keep_alive: str = "24h"
-    # Local Ollama only: pass think=False to /api/chat. Thinking models
-    # (qwen3, qwen3.5) otherwise burn the whole completion budget on hidden
-    # reasoning and time out on the pipeline's short structured tasks
-    # (routing, translation, planning). Ollama Cloud is unaffected: it goes
-    # through the native client path, which does not set think.
+    # Disable hidden reasoning on short structured tasks by default.
     ollama_think_enabled: bool = False
-    # Pre-load local Ollama embedding models at API startup so the first user
-    # request does not have to wait for the model to be loaded from disk.
+    # Pre-load local Ollama embedding and chat models at API startup.
     ollama_warmup_on_startup: bool = True
-    # Comma-separated providers tried (in order) when the primary LLM fails or
-    # returns an empty completion. Providers without a configured API key are
-    # skipped silently, so the chain is inert in key-less/offline setups.
-    llm_fallback_providers: str = "openrouter,tokenfree"
-    # JSON replacing the whole built-in tier catalog (see backend/core/catalog.py)
+    # Optional legacy JSON used only for per-tier rate-limit and daily-quota
+    # overrides. Provider and model entries in this document are ignored.
     tier_catalog_json: str = ""
-    # --- token metering / quotas / answer cache / cheap routing ---
+    # --- token metering / quotas / answer cache -------------------------------
     answer_cache_enabled: bool = True
     answer_cache_semantic_threshold: float = 0.98  # cosine floor for near-duplicate hits
     answer_cache_max_index: int = 50  # semantic index size (most recent entries)
-    cheap_routing_enabled: bool = True  # simple queries -> tier's cheapest model
-    # --- per-node-role model routing (spec §46: cheap models for simple nodes) ---
-    # OFF by default (zero behavior change). When ON, each graph node's LLM
-    # calls go to the role's override model (same provider as the request's
-    # resolved model); roles without an override keep the request's model.
-    # Intended mapping: classification_model -> context/memory (cheap),
-    # planner_model -> planner (cheap), analysis_model -> reasoning/reflection,
-    # synthesis_model -> response_generator (strongest, final answer).
-    model_role_routing_enabled: bool = False
-    planner_model: Optional[str] = None
-    classification_model: Optional[str] = None
-    analysis_model: Optional[str] = None
-    synthesis_model: Optional[str] = None
-    # When set, role-override clients (planner/classification/..._model) are
-    # served by THIS base instead of the request provider's base, and the
-    # provider API key is not forwarded — e.g. a local Ollama
-    # (http://host.docker.internal:11434) serving a small fast model while
-    # analysis/synthesis stay on the cloud model.
-    role_model_api_base: str = ""
     embedding_model: str = "text-embedding-3-small"
     embedding_dimension: int = 384
     embedding_api_base: str = ""  # separate from llm_api_base for split providers
@@ -446,7 +415,6 @@ class Settings(BaseSettings):
     # --- agent behavior knobs (planner / drafting / verification agents) ---
     # Defaults preserve the previous hardcoded behavior exactly.
     # planner agent
-    planner_max_tool_iterations: int = 3  # LLM tool-calling loop budget for the planner
     planner_max_expansion_tasks: int = 3  # cap on terminology-expansion keyword tasks per plan
     planner_max_sub_question_tasks: int = 6  # cap on sub-question keyword tasks added to the plan
     # response generator / confidence

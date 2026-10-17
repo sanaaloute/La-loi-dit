@@ -18,7 +18,7 @@ import {
   type StreamEvent,
 } from "./api";
 import { streamChat } from "./sse";
-import { getModel, getSessionId, getToken, setSessionId } from "./storage";
+import { getSessionId, getToken, setSessionId } from "./storage";
 import { uuid } from "./uuid";
 
 export type NodeStatus = "pending" | "running" | "done";
@@ -525,7 +525,6 @@ export class ChatEngine {
       query: text,
       session_id: sid,
       language: "fr",
-      model: getModel() ?? undefined,
       // "Loi en vigueur au …" scenario: answer as of this date (YYYY-MM-DD).
       scenario_date: scenarioDate ?? undefined,
     };

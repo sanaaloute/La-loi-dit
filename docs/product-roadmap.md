@@ -34,22 +34,24 @@ region has that. The audit below is ordered by what kills the vision if unfixed.
 
 ### 1. Latency: ~160 s/answer is consumer-fatal
 
-A typical run makes **6 + N LLM calls** (N = sub-questions), strictly sequential
-except retrieval branches, and everything serializes on one Ollama model. The
-SSE "streaming" only shows progress labels; the answer appears at the end as a
-cosmetic typewriter replay (`chat.py:462-488`).
+At the September audit, a typical run made **6 + N LLM calls** (N =
+sub-questions), strictly sequential except retrieval branches, and everything
+serialized on one Ollama model. The current implementation instead uses fixed
+local role models: Nemotron 3 Nano 4B for structured tasks and Gemma 4 12B for
+reasoning/synthesis. The SSE "streaming" showed progress labels; the answer
+appeared at the end as a cosmetic typewriter replay (`chat.py:462-488`).
 
 Env-only quick wins (no code change, deploy = restart api container):
 
 | Knob | Effect |
 |---|---|
-| `LEGAL_AI_RERANK_LLM_ENABLED=false` | −N LLM calls (one per branch) |
-| `LEGAL_AI_CLAIM_LLM_REFINEMENT_ENABLED=false` | −1 call (heuristic grading stays) |
-| `LEGAL_AI_MODEL_ROLE_ROUTING_ENABLED=true` + small model (e.g. qwen2.5:3b) for `PLANNER_MODEL`/`CLASSIFICATION_MODEL` | router/planner JSON calls off the 20B model |
+| `LEGAL_AI_RERANK_LLM_ENABLED=false` | −N optional Nemotron LLM rescore calls (one per branch); heuristic/cross-encoder reranking is separate |
+| `LEGAL_AI_CLAIM_LLM_REFINEMENT_ENABLED=false` | −1 Nemotron call (heuristic grading stays) |
+| `LEGAL_AI_OLLAMA_KEEP_ALIVE=24h` | keeps the fixed local role models loaded between requests |
 | `LEGAL_AI_ANSWER_MAX_EXCERPT_CHARS=2000`, `ANSWER_MAX_EVIDENCE_PER_SUBQUESTION=3`, `REASONING_MAX_EXCERPT_CHARS=1200` | ~2–3× smaller reasoning/synthesis prompts |
 | `LEGAL_AI_LLM_MAX_TOKENS=1500` | caps worst-case generation time |
 | `LEGAL_AI_RETRIEVAL_FETCH_K=10` | halves uncached rerank embedding batch |
-| Warm the chat model at startup (only embeddings are warmed, `context.py:62-69`) + `OLLAMA_NUM_PARALLEL=2+` on the Ollama server | first-user load penalty gone; concurrent users stop queueing |
+| `LEGAL_AI_OLLAMA_WARMUP_ON_STARTUP=true` + `OLLAMA_NUM_PARALLEL=2+` on the Ollama server | preloads both fixed chat models; concurrent users stop queueing |
 | FAQ warm-up script hitting `/api/v1/chat` at boot | populates the exact answer cache; zero code |
 
 Expected: 160 s → 30–60 s. Structural follow-ups (code): token-level streaming
@@ -98,13 +100,14 @@ Fix plan (this is the real "reference product" work):
 
 ### 3. Concurrency & single-point-of-failure
 
-One Mac Mini + one Ollama model: 10 simultaneous users ≈ 10 × 160 s of
-serialized GPU work — late users blow the 280 s run cap. Before any growth push:
-`OLLAMA_NUM_PARALLEL`, `web_workers=3` (docs suggest it), and consider Ollama
-Cloud / hosted models for the pro tier. Also: the Milvus fallback never
-reconnects without a restart (observed in production) — add a periodic
-reconnect probe. Backups + alerting (Prometheus `/metrics` exists; nothing
-watches it).
+One Mac Mini serving the two fixed local Ollama role models still has a
+concurrency ceiling: simultaneous users can queue behind GPU work and blow the
+280 s run cap. Before any growth push, tune `OLLAMA_NUM_PARALLEL` and
+`web_workers=3` (docs suggest it), account for both models' memory footprint,
+and measure latency. Do not rely on external chat failover or per-tier model
+selection. Also: the Milvus fallback never reconnects without a restart
+(observed in production) — add a periodic reconnect probe. Backups + alerting
+(Prometheus `/metrics` exists; nothing watches it).
 
 ## P1 — The habit loop (your "Facebook", translated to legal)
 
@@ -134,8 +137,9 @@ Ranked by impact/effort — most are "one step away" because the backend is buil
 
 - Removed pricing/subscription pages, billing routes, model locks, and paid
   feature gates on web and mobile. Legacy tier fields no longer affect access.
-- Every user can use every configured model, drafting template, and export
-  format; authentication, admin RBAC, and safety limits remain.
+- Every user can use every drafting template and export format. The server
+  assigns fixed local role models; users cannot select models. Authentication,
+  admin RBAC, and safety limits remain.
 - One shared daily budget (30 requests / 5 000 000 tokens by default) is
   enforced and editable globally in the admin Quotas tab.
 

@@ -28,14 +28,12 @@ import CopyButton from "@/components/CopyButton";
 import EvidenceViewer from "@/components/EvidenceViewer";
 import ExportMenu from "@/components/ExportMenu";
 import HistoryPanel from "@/components/HistoryPanel";
-import ModelPicker from "@/components/ModelPicker";
 import ShareAnswerButton from "@/components/ShareAnswerButton";
 import { useAuthToken } from "@/lib/useAuth";
 import {
   ApiError,
   cancelChat,
   chat,
-  getModel,
   getPreferences,
   getRunStatus,
   getSession,
@@ -185,7 +183,6 @@ export default function ChatWindow() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tab, setTab] = useState<PanelTab>("agents");
   const [panelOpen, setPanelOpen] = useState(false);
-  const [model, setModelState] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
   const [historyRefresh, setHistoryRefresh] = useState(0);
@@ -257,7 +254,6 @@ export default function ChatWindow() {
     // created later by the user (a new run must not be clobbered).
     mountSessionIdRef.current = stored;
     setSessionIdState(stored);
-    setModelState(getModel());
   }, []);
 
   // Persona for the starter questions: loaded once, then kept in sync with
@@ -670,7 +666,6 @@ export default function ChatWindow() {
       query,
       session_id: sid,
       language: "fr",
-      model: model ?? undefined,
       scenario_date: scenarioDate ?? undefined,
     };
     const sendStart = Date.now();
@@ -787,7 +782,7 @@ export default function ChatWindow() {
       inFlightRef.current = null;
       setBusy(false);
     }
-  }, [input, busy, sessionId, token, model, scenarioDate, markNodeDone, markNodeRunning, acceptResponse, appendDelta, discardStreamingMessage, attemptRecovery, failWith, quotaReached, interrupted]);
+  }, [input, busy, sessionId, token, scenarioDate, markNodeDone, markNodeRunning, acceptResponse, appendDelta, discardStreamingMessage, attemptRecovery, failWith, quotaReached, interrupted]);
 
   function newConversation() {
     setMessages([]);
@@ -908,7 +903,6 @@ export default function ChatWindow() {
           <MessageSquarePlus className="h-4 w-4" />
           Nouvelle conversation
         </button>
-        <ModelPicker token={token} value={model} onChange={setModelState} />
       </AppHeader>
 
       {/* Main area */}

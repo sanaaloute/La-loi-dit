@@ -1,11 +1,10 @@
-// Persistent client state: JWT, active chat session id, selected model.
+// Persistent client state: JWT and active chat session id.
 // SecureStore is async; values are mirrored in memory at startup so the API
 // layer can read them synchronously (like the web app's localStorage).
 import * as SecureStore from "expo-secure-store";
 
 const TOKEN_KEY = "yawoto.token";
 const SESSION_KEY = "yawoto.session_id";
-const MODEL_KEY = "yawoto.model";
 
 // ---------------------------------------------------------------------------
 // JWT helpers (no atob in Hermes: manual base64url decoding)
@@ -82,7 +81,6 @@ function notifyAuthChange(): void {
 
 let tokenCache: string | null = null;
 let sessionCache: string | null = null;
-let modelCache: string | null = null;
 
 async function safeGet(key: string): Promise<string | null> {
   try {
@@ -103,15 +101,10 @@ function safeSet(key: string, value: string | null): void {
 
 /** Load persisted values into memory. Call once at app startup. */
 export async function loadStoredAuth(): Promise<string | null> {
-  const [token, sessionId, model] = await Promise.all([
-    safeGet(TOKEN_KEY),
-    safeGet(SESSION_KEY),
-    safeGet(MODEL_KEY),
-  ]);
+  const [token, sessionId] = await Promise.all([safeGet(TOKEN_KEY), safeGet(SESSION_KEY)]);
   tokenCache = token && !isTokenExpired(token) ? token : null;
   if (token && !tokenCache) safeSet(TOKEN_KEY, null);
   sessionCache = sessionId;
-  modelCache = model;
   return tokenCache;
 }
 
@@ -150,18 +143,8 @@ export function setSessionId(sessionId: string | null): void {
   safeSet(SESSION_KEY, sessionId);
 }
 
-export function getModel(): string | null {
-  return modelCache;
-}
-
-export function setModel(model: string | null): void {
-  modelCache = model;
-  safeSet(MODEL_KEY, model);
-}
-
 /** Wipe all persisted auth state (logout / account deletion). */
 export function clearAll(): void {
   setToken(null);
   setSessionId(null);
-  setModel(null);
 }

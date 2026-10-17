@@ -1,4 +1,4 @@
-"""Benchmark candidate models on the two classification-role tasks.
+"""Benchmark local candidate models on classification and generation tasks.
 
 Measures accuracy and latency through the exact production code path
 (``LLMClient.complete`` + the real prompts from the registry):
@@ -6,16 +6,19 @@ Measures accuracy and latency through the exact production code path
 1. query routing (QUERY_ROUTER_SYSTEM -> parse_route): DIRECT vs RETRIEVAL
 2. language gate (QUERY_TRANSLATE_SYSTEM -> _parse_translation): language
    detection + French translation
+3. planning and grounded synthesis
 
-Local models are served by the host Ollama (http://localhost:11434); the
-cloud model (e.g. gpt-oss:20b) goes through the provider configured in
-``.env`` — its credentials are read by ``get_settings()`` and never printed.
-
-Run with the project venv:
+Candidate models are served only by the keyless host Ollama service
+(http://localhost:11434). Run with the project venv:
 
     .venv/bin/python scripts/benchmark_role_models.py \
-        --local qwen2.5:3b qwen3:1.7b qwen3:4b qwen3:8b \
-        --cloud gpt-oss:20b
+        --local nemotron-3-nano:4b gemma4:12b qwen3:4b
+
+For thinking models, retain the production-path comparison above and add a
+separate native Ollama run with hidden reasoning disabled:
+
+    .venv/bin/python scripts/benchmark_role_models.py \
+        --local qwen3:4b --no-think-local
 """
 
 from __future__ import annotations
@@ -250,8 +253,7 @@ async def bench_model(label: str, llm: LLMClient) -> None:
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--local", nargs="*", default=[], help="model names on the host Ollama")
-    parser.add_argument("--cloud", nargs="*", default=[], help="models via the .env-configured provider")
+    parser.add_argument("--local", nargs="*", default=[], help="candidate model names on the host Ollama")
     parser.add_argument(
         "--no-think-local",
         action="store_true",
@@ -260,15 +262,19 @@ async def main() -> None:
     args = parser.parse_args()
 
     settings = get_settings()
-    for model in args.cloud:
-        await bench_model(f"cloud:{model}", LLMClient(settings, model=model))
     for model in args.local:
         if args.no_think_local:
             await bench_model(f"local-nothink:{model}", OllamaNoThinkClient(model))
         else:
             await bench_model(
                 f"local:{model}",
-                LLMClient(settings, model=model, api_key="", api_base="http://localhost:11434"),
+                LLMClient(
+                    settings,
+                    provider="ollama",
+                    model=model,
+                    api_key="",
+                    api_base="http://localhost:11434",
+                ),
             )
 
 

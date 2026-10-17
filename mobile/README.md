@@ -28,6 +28,11 @@ puis scanner le QR code avec Expo Go, ou lancer sur un simulateur (`i` / `a`).
 
 ## Fonctionnement
 
+### Modèles d'IA
+
+Les modèles d'IA sont fixes et configurés localement côté serveur. Les utilisateurs
+ne peuvent pas les choisir ni transmettre d'identifiant de modèle dans les requêtes.
+
 ### Authentification et liaison d'appareil
 
 - JWT en `Authorization: Bearer <token>`, stocké dans `expo-secure-store`
@@ -80,10 +85,8 @@ Portage fidèle de la machine à états de résilience du web
   export PDF/Word/Markdown.
 - **Compte** : profil et espace de travail (`/auth/me`), jauge d'usage
   quotidien + mini-graphique 30 jours (`/usage/me`), abonnement en lecture
-  seule (`/billing/subscription`), choix du modèle (`/models`, badges
-  Pro/Cabinet, choix persisté dans le secure store), déconnexion
-  (`POST /auth/logout`), suppression du compte avec double confirmation
-  (`DELETE /auth/me`).
+  seule (`/billing/subscription`), déconnexion (`POST /auth/logout`),
+  suppression du compte avec double confirmation (`DELETE /auth/me`).
 
 ## Structure
 

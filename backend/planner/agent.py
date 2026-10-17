@@ -8,16 +8,14 @@ before producing the final JSON plan.
 
 from __future__ import annotations
 
-import json
 from datetime import date
-from typing import Any
+from typing import Any, Optional
 
-from backend.agents.agent import ToolCallingAgent
-from backend.agents.tools import get_tool_spec
+from backend.agents.agent import CompletionAgent
+from backend.core.llm import LLMClient
 # Canonical French markers / domain keywords live with the planning tools
 # (also used by the detect_language / classify_legal_domains tools).
 from backend.agents.tools.planning import _DOMAIN_KEYWORDS, _FR_MARKERS
-from backend.agents.tools.registry import list_tools
 from backend.core.context import AppContext
 from backend.core.models import RetrievalPlan, SearchKind, SearchTask
 from backend.core.prompts import PromptRef
@@ -35,21 +33,13 @@ def _is_tool_transcript(text: str) -> bool:
     return any(marker in lowered for marker in _TOOL_TRANSCRIPT_MARKERS)
 
 
-class PlannerAgent(ToolCallingAgent):
+class PlannerAgent(CompletionAgent):
     """Turns the user question into a structured retrieval plan."""
 
     name = "planner"
     # Resolved through the prompt registry (backend.core.prompts.PLANNER_SYSTEM)
     # at every access, so Settings.prompts_dir overrides apply.
     system_prompt = PromptRef("PLANNER_SYSTEM")
-
-    tools = [
-        t for t in list_tools()
-        if t.name in ("detect_language", "extract_scenario_date", "classify_legal_domains", "build_sub_questions", "build_search_tasks", "expand_legal_terms")
-    ]
-    def _tool_iteration_budget(self, ctx: AppContext) -> int:
-        """Tool-loop budget sourced from ``settings.planner_max_tool_iterations``."""
-        return ctx.settings.planner_max_tool_iterations
 
     def _build_user_message(self, state: GraphState, ctx: Any = None) -> str:
         return f"Question: {state['query']}\n\nBuild a focused retrieval plan."
@@ -72,13 +62,13 @@ class PlannerAgent(ToolCallingAgent):
         text: str,
         state: GraphState,
         ctx: Any,
-        tool_history: list[tuple[Any, Any]],
+        tool_history: Optional[list[tuple[Any, Any]]] = None,
     ) -> dict[str, Any]:
         if _is_tool_transcript(text):
             text = ""
         plan = _heuristic_plan(state["query"], state.get("language"), settings=ctx.settings)
         try:
-            parsed = json.loads(text.strip()) if text.strip() else {}
+            parsed = LLMClient._extract_json(text) if text.strip() else {}
             if isinstance(parsed, dict):
                 # Ensure required fields have sensible defaults.
                 parsed.setdefault("sub_questions", plan.sub_questions)
@@ -110,7 +100,21 @@ class PlannerAgent(ToolCallingAgent):
         # so broad "rights/procedure" questions are searched by legal issue,
         # not only by the query's own keywords.
         keyword_queries = {t.query for t in plan.tasks if t.kind == SearchKind.KEYWORD}
+        vector_queries = {t.query for t in plan.tasks if t.kind == SearchKind.VECTOR}
         aux_top_k = ctx.settings.planner_aux_top_k
+        if "sarl" in state["query"].lower():
+            # Company-formation answers depend on precise provisions (especially
+            # article 311); never leave those searches to model vocabulary alone.
+            for query in (
+                "société à responsabilité limitée constitution capital social parts sociales",
+                "capital social doit être d'un million de francs CFA au moins",
+                "immatriculation RCCM publicité Journal Officiel",
+            ):
+                if query not in plan.sub_questions:
+                    plan.sub_questions.append(query)
+                if query not in vector_queries:
+                    plan.tasks.append(SearchTask(kind=SearchKind.VECTOR, query=query, top_k=aux_top_k, filters=filters))
+                    vector_queries.add(query)
         for sub in plan.sub_questions[: ctx.settings.planner_max_sub_question_tasks]:
             if sub and sub != state["query"] and sub not in keyword_queries:
                 plan.tasks.append(SearchTask(kind=SearchKind.KEYWORD, query=sub, top_k=aux_top_k, filters=filters))

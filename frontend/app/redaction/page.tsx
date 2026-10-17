@@ -28,7 +28,6 @@ import {
   createDraft,
   downloadBlob,
   exportDraft,
-  getModel,
   listDraftTemplates,
   type DraftField,
   type DraftResponse,
@@ -176,7 +175,6 @@ export default function RedactionPage() {
           template_id: template.id,
           fields: values,
           instructions: instructions.trim() || undefined,
-          model: getModel() ?? undefined,
         },
         token,
       );
