@@ -29,6 +29,7 @@ from pydantic import ValidationError
 from backend.core.config import Settings
 from backend.core.exceptions import RetrievalError
 from backend.core.models import EvidenceChunk
+from backend.retrieval.scoring import cosine_to_unit
 from backend.vectorstore.memory_store import matches_filters
 
 logger = logging.getLogger(__name__)
@@ -344,9 +345,9 @@ class MilvusVectorStore:
                 continue
             if not matches_filters(chunk, remaining):
                 continue
-            # Milvus COSINE returns a similarity in [-1, 1]; map to [0, 1].
+            # Keep the same absolute cosine scale used by the heuristic reranker.
             distance = float(hit.get("distance", 0.0))
-            chunk.retrieval_score = max(0.0, min(1.0, (distance + 1.0) / 2.0))
+            chunk.retrieval_score = cosine_to_unit(distance)
             results.append(chunk)
             if len(results) >= top_k:
                 break

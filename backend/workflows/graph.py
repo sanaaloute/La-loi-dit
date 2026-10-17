@@ -126,9 +126,8 @@ def build_graph(ctx: AppContext):
         auditor's missing issues rather than the whole plan.
 
         Empty retry: when a retry pass only re-fetched cached duplicates
-        (``retrieval_retry_new == 0``), re-running reasoning+reflection would
-        analyze the exact same evidence twice for minutes of pure latency —
-        skip straight to synthesis instead.
+        (``retrieval_retry_new == 0``), avoid another full analysis only for
+        questions eligible for the normal fast lane.
 
         Fast lane: simple FACTUAL/DEFINITION questions with decent coverage
         and no unresolved conflict skip the two serial analysis LLM calls
@@ -138,8 +137,9 @@ def build_graph(ctx: AppContext):
             state.get("retrieval_retries", 0) > 0
             and state.get("retrieval_retry_new", 1) == 0
             and state.get("evidence")
+            and not _fast_lane_eligible(state)
         ):
-            return "response_generator"
+            return "reasoning_agent"
         report = state.get("coverage_report")
         if (
             report is not None
@@ -155,9 +155,8 @@ def build_graph(ctx: AppContext):
             return "response_generator"
         return "reasoning_agent"
 
-    # Broad RIGHTS/PROCEDURE questions are the most common user questions;
-    # when coverage is good and conflicts are resolved they take the fast lane
-    # too (reasoning+reflection cost ~2-4 min on the local model).
+    # High-impact RIGHTS/PROCEDURE questions may skip analysis only when every
+    # planned issue is covered; simple questions use the configurable floor.
     _FAST_LANE_TYPES = frozenset(
         {
             QuestionType.FACTUAL,
@@ -176,7 +175,11 @@ def build_graph(ctx: AppContext):
         if any(not c.resolved for c in state.get("conflicts", [])):
             return False
         report = state.get("coverage_report")
-        return report is not None and report.coverage >= settings.fast_lane_min_coverage
+        if report is None:
+            return False
+        if plan.question_type in {QuestionType.RIGHTS, QuestionType.PROCEDURE}:
+            return report.coverage >= 1.0
+        return report.coverage >= settings.fast_lane_min_coverage
 
     def _route_after_reasoning(state: GraphState):
         if state.get("needs_more_retrieval") and state.get("retrieval_retries", 0) < max_retrieval_retries:

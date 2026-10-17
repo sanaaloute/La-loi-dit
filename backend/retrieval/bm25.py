@@ -8,12 +8,16 @@ accent-stripped, split on non-alphanumerics.
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import math
 import re
 import unicodedata
+from pathlib import Path
 from typing import Any, Optional
 
 from backend.core.models import EvidenceChunk
+from backend.retrieval.scoring import bm25_to_unit
 from backend.vectorstore.memory_store import matches_filters
 
 _SPLIT_RE = re.compile(r"[^0-9a-z]+")
@@ -131,13 +135,59 @@ class BM25Retriever:
         scored = [
             (float(score), chunk)
             for score, chunk in zip(raw_scores, self._chunks)
-            if matches_filters(chunk, filters)
+            if score > 0 and matches_filters(chunk, filters)
         ]
         scored.sort(key=lambda pair: pair[0], reverse=True)
-        top = scored[:top_k]
-        max_score = top[0][0] if top and top[0][0] > 0 else 1.0
         results: list[EvidenceChunk] = []
-        for score, chunk in top:
-            chunk.retrieval_score = max(0.0, min(1.0, score / max_score))
+        for score, chunk in scored[:top_k]:
+            chunk.retrieval_score = bm25_to_unit(score)
             results.append(chunk)
         return results
+
+
+def corpus_generation(data_dir: Any) -> str:
+    """Identify the persisted corpus version used to coordinate index refreshes."""
+    try:
+        stat = (Path(data_dir) / "versions.json").stat()
+    except OSError:
+        return "missing"
+    return f"{stat.st_mtime_ns}:{stat.st_size}"
+
+
+async def hydrate_bm25(ctx: Any, *, force: bool = False) -> BM25Retriever:
+    """Build BM25 from the shared vector store and atomically swap it into the context."""
+    generation = corpus_generation(ctx.settings.data_dir)
+    current = ctx.extras.get("bm25")
+    if (
+        not force
+        and isinstance(current, BM25Retriever)
+        and ctx.extras.get("bm25_generation") == generation
+    ):
+        return current
+
+    lock = ctx.extras.setdefault("bm25_refresh_lock", asyncio.Lock())
+    async with lock:
+        current = ctx.extras.get("bm25")
+        if (
+            not force
+            and isinstance(current, BM25Retriever)
+            and ctx.extras.get("bm25_generation") == generation
+        ):
+            return current
+        from backend.ingestion.versioning import VersionStore
+
+        chunks: list[EvidenceChunk] = []
+        getter = getattr(ctx.vector_store, "get_by_document_id", None)
+        if getter is not None:
+            for document_id in VersionStore(ctx.settings.data_dir).list_document_ids():
+                result = getter(document_id)
+                if inspect.isawaitable(result):
+                    result = await result
+                chunks.extend(result or [])
+
+        refreshed = BM25Retriever()
+        refreshed.add_documents(chunks)
+        ctx.extras["bm25"] = refreshed
+        ctx.extras["bm25_generation"] = generation
+        ctx.extras["bm25_chunk_count"] = refreshed.size
+        return refreshed

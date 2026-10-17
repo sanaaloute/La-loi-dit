@@ -112,10 +112,10 @@ class RetrievalCoordinator:
         """Execute the retrieval plan: workers in parallel, then fuse/rerank.
 
         When ``temporal_intent`` is "current" or "historical" (spec §10, §24),
-        fused candidates pass a hard temporal filter so current and historical
-        versions are never silently mixed.  If the filter would empty the
-        candidate set, the unfiltered results are kept and a warning is
-        logged — retrieval never silently returns nothing.
+        fused candidates and exact graph hits pass a hard temporal filter so
+        current and historical versions are never silently mixed. If nothing
+        is temporally applicable, retrieval returns no evidence instead of
+        restoring inapplicable passages.
         """
         if not tasks:
             return []
@@ -204,25 +204,31 @@ class RetrievalCoordinator:
         kept_ids = {chunk.chunk_id for chunk in merged}
         fused = [chunk for chunk in fused if chunk.chunk_id in kept_ids]
 
-        if intent in TEMPORAL_INTENTS and fused:
-            applicable = [
-                chunk
-                for chunk in fused
-                if passes_temporal_filter(chunk, intent, scenario_date)
-            ]
-            if applicable:
+        if intent in TEMPORAL_INTENTS:
+            if direct_hits:
+                direct_hits = [
+                    chunk
+                    for chunk in direct_hits
+                    if passes_temporal_filter(chunk, intent, scenario_date)
+                ]
+            if fused:
+                applicable = [
+                    chunk
+                    for chunk in fused
+                    if passes_temporal_filter(chunk, intent, scenario_date)
+                ]
                 if len(applicable) < len(fused):
                     logger.info(
                         "temporal filter (%s): kept %d/%d fused candidates",
                         intent, len(applicable), len(fused),
                     )
+                if not applicable:
+                    logger.warning(
+                        "temporal filter (%s) removed every candidate; "
+                        "returning no temporally applicable evidence",
+                        intent,
+                    )
                 fused = applicable
-            else:
-                logger.warning(
-                    "temporal filter (%s) removed every candidate; "
-                    "keeping unfiltered results instead of returning empty",
-                    intent,
-                )
 
         max_top_k = max((task.top_k for task in tasks), default=settings.default_top_k)
         # Score ALL candidates first, then apply the relevance floor, then

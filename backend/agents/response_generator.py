@@ -137,6 +137,44 @@ def compute_confidence_breakdown(
     )
 
 
+def compute_aggregate_confidence(
+    state: GraphState,
+    evidence: list[EvidenceChunk],
+    *,
+    citation_accuracy: float,
+    coverage: float,
+    settings: Any,
+    legal_support: Optional[float] = None,
+) -> float:
+    """Combine answer-quality dimensions and apply consistent trust adjustments."""
+    confidence = (
+        settings.confidence_citation_weight * citation_accuracy
+        + settings.confidence_coverage_weight * coverage
+    )
+    if legal_support is not None:
+        weight = settings.confidence_legal_support_weight
+        confidence = (1.0 - weight) * confidence + weight * legal_support
+
+    unresolved = [c for c in state.get("conflicts", []) if not c.resolved]
+    if unresolved:
+        exponent = min(len(unresolved), settings.confidence_conflict_max_dampenings)
+        confidence *= settings.confidence_unresolved_conflict_dampening ** exponent
+
+    reflection = state.get("reflection")
+    if reflection is not None and not reflection.answered_all_questions:
+        confidence = min(confidence, settings.confidence_reflection_gap_cap)
+
+    plan = state.get("plan")
+    temporal_intent = plan.temporal_intent if plan else "any"
+    if (
+        not unresolved
+        and temporal_intent in ("current", "historical")
+        and not any(c.publication_date or c.effective_date for c in evidence)
+    ):
+        confidence *= settings.temporal_undated_penalty
+    return round(max(0.0, min(1.0, confidence)), 2)
+
+
 class ResponseGeneratorAgent(CompletionAgent):
     """Drafts the final grounded answer from ranked evidence."""
 
@@ -149,9 +187,8 @@ class ResponseGeneratorAgent(CompletionAgent):
         """LLM-first answer with one corrective retry for missing citations.
 
         If the LLM produces prose without any [n] citation, ask it once to
-        rewrite with citations before falling back to the deterministic
-        template.  This keeps the final answer an actual answer to the
-        question rather than a bare list of articles whenever possible.
+        rewrite with citations before returning the fixed unavailability
+        message. No pre-written legal template is substituted for synthesis.
         """
         # Direct/general routes: no evidence screening, citations or grounding.
         if state.get("route") in {"direct", "general"}:
@@ -345,11 +382,12 @@ class ResponseGeneratorAgent(CompletionAgent):
             draft = self._unavailable_message(language)
 
         verified, rejected = extract_citations(draft, evidence)
-        # Strip unverifiable citations from the final answer.
-        if rejected:
-            for bad in rejected:
-                draft = draft.replace(bad.label, "")
-            draft = draft.strip()
+        citation_total = len(verified) + len(rejected)
+        accuracy = (
+            len(verified) / citation_total
+            if citation_total
+            else (0.0 if evidence else 1.0)
+        )
 
         # Build Citation models from the verified list.
         citations: list[Citation] = []
@@ -395,17 +433,11 @@ class ResponseGeneratorAgent(CompletionAgent):
             # A fully-cited answer that only covers part of the question must
             # NOT display "100% confidence".
             settings = ctx.settings if ctx is not None else get_settings()
-            accuracy = state.get("citation_accuracy", 1.0) or 1.0
             coverage_report = state.get("coverage_report")
             coverage = (
                 coverage_report.coverage
                 if coverage_report is not None
                 else _question_coverage(state, evidence, settings)
-            )
-            confidence = round(
-                settings.confidence_citation_weight * accuracy
-                + settings.confidence_coverage_weight * coverage,
-                2,
             )
             breakdown = compute_confidence_breakdown(
                 state, evidence, citation_accuracy=accuracy, coverage=coverage, settings=settings
@@ -421,19 +453,8 @@ class ResponseGeneratorAgent(CompletionAgent):
                         "Réponse potentiellement incomplète : certaines dimensions de la "
                         "question ne sont pas couvertes par les sources indexées."
                     )
-            # Trust adjustment: unresolved contradictions dampen the aggregate
-            # multiplicatively instead of a flat hard cap, so a single contested
-            # point no longer pins every answer to the same score. The exponent
-            # is capped (confidence_conflict_max_dampenings): with a corpus full
-            # of undated parallel versions, one question can yield many pairwise
-            # conflicts, and uncapped decay would drag every answer toward zero.
             unresolved = [c for c in state.get("conflicts", []) if not c.resolved]
             if unresolved:
-                exponent = min(len(unresolved), settings.confidence_conflict_max_dampenings)
-                confidence = round(
-                    confidence * settings.confidence_unresolved_conflict_dampening ** exponent,
-                    2,
-                )
                 if language.startswith("en"):
                     warnings.append(
                         f"{len(unresolved)} conflicting source(s) could not be resolved; "
@@ -446,7 +467,6 @@ class ResponseGeneratorAgent(CompletionAgent):
                     )
             reflection = state.get("reflection")
             if reflection is not None and not reflection.answered_all_questions:
-                confidence = min(confidence, settings.confidence_reflection_gap_cap)
                 if language.startswith("en"):
                     warnings.append(
                         "The self-review indicates that not every part of the question "
@@ -457,6 +477,13 @@ class ResponseGeneratorAgent(CompletionAgent):
                         "L'auto-évaluation indique que la réponse ne couvre pas toutes "
                         "les parties de la question."
                     )
+            confidence = compute_aggregate_confidence(
+                state,
+                evidence,
+                citation_accuracy=accuracy,
+                coverage=coverage,
+                settings=settings,
+            )
 
         answer = FinalAnswer(
             answer=draft,
@@ -467,10 +494,16 @@ class ResponseGeneratorAgent(CompletionAgent):
             language=language,
             warnings=warnings,
             conflicts=state.get("conflicts", []),
+            metadata={
+                "citation_total_count": citation_total,
+                "citation_rejected_count": len(rejected),
+            },
         )
         return {
             "final_answer": answer,
             "draft_answer": draft,
+            "ranked_evidence": evidence,
+            "citation_accuracy": accuracy,
             "trace": [
                 *state.get("trace", []),
                 f"response_generator: answer drafted ({len(draft)} chars, {len(citations)} citations)",

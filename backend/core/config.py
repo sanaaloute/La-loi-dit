@@ -63,10 +63,8 @@ class Settings(BaseSettings):
     audit_log_cap: int = 1000
 
     # --- Local Ollama chat and test-only mock ---------------------------------
-    # provider: ollama | mock. Production role models are fixed in core.llm;
-    # llm_model is used only by the deterministic mock client.
+    # provider: ollama | mock. Production role models are fixed in core.llm.
     llm_provider: str = "mock"
-    llm_model: str = "gpt-4o-mini"
     llm_api_key: str = ""
     llm_api_base: str = ""
     llm_temperature: float = 0.1
@@ -205,7 +203,6 @@ class Settings(BaseSettings):
     temporal_score_repealed_before_date: float = 0.1  # "historical" score when repealed before the scenario date
     temporal_score_unconfirmed: float = 0.5  # "historical" score when applicability cannot be confirmed
     search_web_hit_score: float = 0.5  # initial retrieval_score for official-source web hits
-    search_authority_fallback: float = 0.15  # confidence for sources missing from AUTHORITY_WEIGHTS
     milvus_connect_attempts: int = 3  # Milvus connection attempts before in-memory fallback
     milvus_connect_backoff_seconds: float = 1.0  # backoff sleep multiplier (x attempt number)
     embedding_batch_size: int = 200  # texts per embedding API call (NVIDIA via OpenRouter caps at 256)
@@ -421,17 +418,17 @@ class Settings(BaseSettings):
     # response generator / confidence
     answer_llm_timeout_seconds: float = 300.0
     answer_max_tokens: int = 2000
-    answer_max_excerpt_chars: int = 4000  # per-excerpt char cap in the evidence block sent to the LLM
+    answer_max_excerpt_chars: int = 1000  # per-excerpt char cap; response_generator also hard-caps at 1000
     answer_child_preview_chars: int = 200  # child-chunk preview length inside a parent excerpt
     confidence_citation_weight: float = 0.6  # weight of citation accuracy in the aggregate confidence
     confidence_coverage_weight: float = 0.4  # weight of sub-question coverage in the aggregate confidence
+    confidence_legal_support_weight: float = 0.2  # post-generation claim-support blend; 0 disables it
     confidence_unresolved_conflict_dampening: float = 0.85  # per-unresolved-conflict multiplier on the aggregate confidence
     confidence_conflict_max_dampenings: int = 3  # cap on the dampening exponent: heavily-conflicted answers decay to 0.85³, not toward zero
     confidence_reflection_gap_cap: float = 0.75  # confidence cap when reflection flags unanswered parts
-    # Fast lane: simple FACTUAL/DEFINITION questions with decent coverage skip
-    # the reasoning + reflection LLM calls (two serial analysis passes) and go
-    # straight from coverage audit to synthesis. Unresolved conflicts always
-    # take the full path.
+    # Fast lane: simple FACTUAL/DEFINITION questions use the configured coverage
+    # floor; high-impact RIGHTS/PROCEDURE questions require complete coverage.
+    # Unresolved conflicts always take the full reasoning + reflection path.
     fast_lane_enabled: bool = True
     fast_lane_min_coverage: float = 0.5
     source_default_authority_weight: float = 0.15  # authority weight assumed for unknown authority levels

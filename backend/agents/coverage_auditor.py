@@ -9,6 +9,7 @@ instead of being discovered after the answer is written.
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any, Optional
 
@@ -61,7 +62,7 @@ def question_is_covered(
         terms = discriminative_terms(question, settings)
     if not terms:
         return True
-    threshold = max(1, int(len(terms) * settings.coverage_term_match_ratio))
+    threshold = max(1, math.ceil(len(terms) * settings.coverage_term_match_ratio))
     return any(sum(1 for t in terms if t in content) >= threshold for content in texts)
 
 

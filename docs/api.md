@@ -147,7 +147,10 @@ Runs the full agentic workflow for one query (`ChatRequest`):
 ADMIN tokens only. Non-admin roles receive `"trace": []` here, trace-free
 `update` frames on SSE, and a trace-free final object on the WebSocket. The
 shared answer cache never stores the trace, so a cached replay cannot leak it
-either.
+either. Cache entries are keyed by a full context fingerprint (user scope,
+language, scenario date, role models, embeddings, corpus generation, prompts,
+and generation settings), so temporal, language, and personalized answers do
+not cross-contaminate.
 
 ### GET /api/v1/chat/stream (SSE)
 

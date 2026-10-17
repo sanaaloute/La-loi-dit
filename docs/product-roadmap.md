@@ -48,7 +48,7 @@ Env-only quick wins (no code change, deploy = restart api container):
 | `LEGAL_AI_RERANK_LLM_ENABLED=false` | −N optional Nemotron LLM rescore calls (one per branch); heuristic/cross-encoder reranking is separate |
 | `LEGAL_AI_CLAIM_LLM_REFINEMENT_ENABLED=false` | −1 Nemotron call (heuristic grading stays) |
 | `LEGAL_AI_OLLAMA_KEEP_ALIVE=24h` | keeps the fixed local role models loaded between requests |
-| `LEGAL_AI_ANSWER_MAX_EXCERPT_CHARS=2000`, `ANSWER_MAX_EVIDENCE_PER_SUBQUESTION=3`, `REASONING_MAX_EXCERPT_CHARS=1200` | ~2–3× smaller reasoning/synthesis prompts |
+| `LEGAL_AI_ANSWER_MAX_EXCERPT_CHARS=1000`, `LEGAL_AI_ANSWER_MAX_EVIDENCE_PER_SUBQUESTION=3`, `LEGAL_AI_REASONING_MAX_EXCERPT_CHARS=1200` | ~2–3× smaller reasoning/synthesis prompts |
 | `LEGAL_AI_LLM_MAX_TOKENS=1500` | caps worst-case generation time |
 | `LEGAL_AI_RETRIEVAL_FETCH_K=10` | halves uncached rerank embedding batch |
 | `LEGAL_AI_OLLAMA_WARMUP_ON_STARTUP=true` + `OLLAMA_NUM_PARALLEL=2+` on the Ollama server | preloads both fixed chat models; concurrent users stop queueing |

@@ -210,10 +210,12 @@ The apex `neobytech.net` stays a plain DNS record (company site) — only the
 - `https://yawoto.neobytech.net`: the login gate shows; ask a legal
   question (SSE stream); upload a document from the admin panel.
 - `curl https://yawoto.neobytech.net/backend-api/health` → `{"status":"ok"}`.
-- After each api restart, warm the exact answer cache with the canonical FAQ
-  so the first asker of each common question doesn't pay full pipeline time:
+- After each api restart, warm the exact answer cache with the canonical FAQ:
   `WARMUP_USER=<login> WARMUP_PASS=<password> bash scripts/warm_cache.sh`
-  (hits the container directly, safe to cron).
+  (hits the container directly, safe to cron). Authenticated cache entries are
+  user-scoped, so this primes the configured account; anonymous requests use
+  the separate anonymous cache scope. BM25 refreshes automatically from the
+  shared corpus after reindexing (allow about 60 s plus the retrieval-cache TTL).
 - New laws: a weekly crawl pulls newly promulgated laws from
   assembleenationale.bf and ingests them (idempotent; known law numbers are
   skipped). Cron example (Mondays 06:30):

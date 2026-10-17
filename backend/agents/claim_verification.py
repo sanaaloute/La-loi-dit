@@ -17,10 +17,11 @@ The node QUALIFIES and FLAGS — it never rewrites or removes answer text
 (citation_verification, which runs right after, already strips unverifiable
 ``[n]`` markers).  Unsupported claims raise bilingual warnings, contradictory
 claims additionally set ``requires_human_review`` (a contradicted legal
-statement is high-impact), and ``confidence_breakdown.legal_support_confidence``
+statement is high-impact). ``confidence_breakdown.legal_support_confidence``
 is recomputed as the fraction of supported claims, dampened by the share of
-contradicted ones (see the node docstring).  The aggregate
-``FinalAnswer.confidence`` semantics stay untouched.
+contradicted ones. The aggregate is then recalculated with claim support and
+post-generation answer coverage; contradicted or LLM-unverified answers are
+capped below the serving thresholds.
 
 LLM refinement (:func:`refine_support_with_llm`): the heuristic grades topical
 overlap, so it cannot see that a claim *applies* an excerpt to a legal
@@ -41,7 +42,8 @@ import re
 from typing import Any, Optional
 
 from backend.agents.agent import Agent
-from backend.agents.coverage_auditor import discriminative_terms
+from backend.agents.coverage_auditor import audit_coverage, discriminative_terms
+from backend.agents.response_generator import compute_aggregate_confidence
 from backend.core.config import get_settings
 from backend.core.context import AppContext
 from backend.core.models import (
@@ -58,7 +60,7 @@ logger = logging.getLogger(__name__)
 _CITATION_RE = re.compile(r"\[(\d+)\]")
 _HEADING_RE = re.compile(r"^\s*#{1,6}\s+")
 _LIST_MARKER_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+")
-_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?!\[\d+\])")
 _NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?")
 
 # FR + EN legal vocabulary marking a sentence as a substantive statement.
@@ -409,16 +411,42 @@ class ClaimVerificationAgent(Agent):
                     else f"Certaines affirmations contredisent les sources ({contradictory}) ; révision humaine requise."
                 )
             final.warnings.extend(warnings)
-            if claims and final.confidence_breakdown is not None:
-                # Legal-support dimension: fraction of claims grounded in the
-                # evidence (DIRECT or INDIRECT), dampened by the share of
-                # contradicted claims so a contradiction always pushes the
-                # score toward 0: support * (1 - contradicted/total).
-                supported = (direct + indirect) / len(claims)
-                dampening = 1 - contradictory / len(claims)
-                final.confidence_breakdown.legal_support_confidence = round(
-                    supported * dampening, 2
+            if final.confidence_breakdown is not None:
+                legal_support = final.confidence_breakdown.legal_support_confidence
+                if claims:
+                    supported = (direct + indirect) / len(claims)
+                    dampening = 1 - contradictory / len(claims)
+                    legal_support = supported * dampening
+                    final.confidence_breakdown.legal_support_confidence = round(legal_support, 2)
+
+                plan = state.get("plan")
+                sub_questions = [q for q in (plan.sub_questions if plan else []) if q.strip()]
+                if not sub_questions:
+                    sub_questions = [state.get("query", "")]
+                answer_report = audit_coverage(
+                    sub_questions,
+                    [],
+                    query=state.get("query", ""),
+                    answer_text=final.answer,
+                    settings=ctx.settings,
                 )
+                final.metadata["retrieval_coverage"] = final.confidence_breakdown.coverage
+                final.metadata["answer_coverage"] = round(answer_report.coverage, 2)
+                final.confidence = compute_aggregate_confidence(
+                    state,
+                    evidence,
+                    citation_accuracy=final.confidence_breakdown.citation_confidence,
+                    coverage=answer_report.coverage,
+                    settings=ctx.settings,
+                    legal_support=legal_support,
+                )
+                final.confidence_breakdown.coverage = round(answer_report.coverage, 2)
+                if contradictory:
+                    final.confidence = min(final.confidence, ctx.settings.human_review_threshold)
+                if flagged_unverified:
+                    final.confidence = min(
+                        final.confidence, max(0.0, ctx.settings.confidence_threshold - 0.01)
+                    )
 
         return {
             "claims": claims,

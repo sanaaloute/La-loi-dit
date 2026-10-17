@@ -159,18 +159,18 @@ class EvidenceChunk(BaseModel):
     retrieval_text: Optional[str] = None
     context_text: Optional[str] = None
     version: int = 1
-    confidence: float = 0.0  # source confidence score
-    retrieval_score: float = 0.0  # raw score from the retriever
-    rerank_score: float = 0.0  # cross-encoder / authority-weighted score
+    confidence: float = 0.0  # source reliability score, independent of relevance
+    retrieval_score: float = 0.0  # absolute raw score from the retriever
+    fusion_score: float = 0.0  # query-relative RRF rank signal, not a confidence input
+    rerank_score: float = 0.0  # absolute cross-encoder / heuristic relevance score
     metadata: dict[str, Any] = Field(default_factory=dict)
     # --- structured legal metadata (spec §6); all optional/backward-compatible ---
     document_type: Optional[DocumentType] = None  # instrument type (code/law/decree/...)
     law_number: Optional[str] = None  # e.g. "028-2008/AN"
     jurisdiction: str = "Burkina Faso"
-    # Lifecycle: active | repealed | amended | future | unknown.  Chunks
-    # ingested before this field existed deserialize to the "active" default,
-    # which the temporal filter never excludes (see backend/retrieval/temporal.py).
-    status: str = "active"
+    # Lifecycle: active | repealed | amended | future | unknown. Missing
+    # lifecycle metadata stays unknown rather than claiming to be in force.
+    status: str = "unknown"
     valid_from: Optional[date] = None  # entry into force (defaults from effective_date at ingest)
     valid_until: Optional[date] = None  # repeal/expiry date when known
     # Ordered heading path, highest level first, e.g.
@@ -308,11 +308,11 @@ class ConfidenceBreakdown(BaseModel):
     """
 
     source_confidence: float = 0.0  # mean authority weight of the evidence
-    retrieval_confidence: float = 0.0  # normalized top retrieval scores
-    legal_support_confidence: float = 0.0  # citation accuracy (legal grounding)
+    retrieval_confidence: float = 0.0  # absolute top retrieval scores; RRF excluded
+    legal_support_confidence: float = 0.0  # claim-level legal grounding after verification
     temporal_confidence: float = 1.0  # 1.0 unless conflicts/undated time-sensitive evidence
-    citation_confidence: float = 0.0  # citation accuracy post-verification
-    coverage: float = 0.0  # sub-question coverage (CoverageReport)
+    citation_confidence: float = 0.0  # raw-draft citation accuracy after verification
+    coverage: float = 0.0  # post-generation sub-question coverage
 
 
 class FinalAnswer(BaseModel):

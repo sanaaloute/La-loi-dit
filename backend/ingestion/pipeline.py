@@ -21,7 +21,6 @@ from typing import Any, Optional, Sequence, Union
 
 from backend.core.embeddings import HashEmbeddings
 from backend.core.exceptions import IngestionError
-from backend.core.constants import AUTHORITY_WEIGHTS
 from backend.core.models import AuthorityLevel, DocumentIngestResult, DocumentType, EvidenceChunk
 from backend.core.model_roles import resolve_role_llm
 from backend.ingestion.chunking import legal_parent_child_chunk, looks_like_legal, parent_child_chunk, semantic_chunk
@@ -457,8 +456,8 @@ class IngestionPipeline:
 
         Temporal defaults (kept deliberately simple): ``valid_from`` defaults
         to ``effective_date``; ``status`` becomes "future" only when the
-        effective date lies ahead, otherwise the model default ("active")
-        stands — we do not claim repeal/expiry without explicit data.
+        effective date lies ahead, otherwise the model default ("unknown")
+        stands — we do not claim active/repealed status without explicit data.
         """
         name = metadata.get("document_name") or doc.name
         text_sample = doc.text[:2000] if doc.text else ""
@@ -874,7 +873,7 @@ class IngestionPipeline:
         """Propagate document-level enrichment onto every chunk (spec §6).
 
         Only fills fields the enrichment actually resolved; chunk defaults
-        (``status="active"``, ``jurisdiction="Burkina Faso"``) stand otherwise.
+        (``status="unknown"``, ``jurisdiction="Burkina Faso"``) stand otherwise.
         """
         document_type = metadata.get("document_type")
         if document_type is not None and not isinstance(document_type, DocumentType):
@@ -896,12 +895,9 @@ class IngestionPipeline:
                 if value is not None:
                     setattr(chunk, field, value)
             if chunk.confidence == 0.0:
-                # Source confidence from the authority table (spec §9): the
-                # reranker's confidence weight and the evidence UI read this
-                # field — leaving it at 0.0 makes every card show "0.00".
-                chunk.confidence = AUTHORITY_WEIGHTS.get(
-                    chunk.authority, AUTHORITY_WEIGHTS[AuthorityLevel.UNKNOWN]
-                )
+                # Reliability stays neutral unless independent evidence exists;
+                # authority is already a separate ranking signal.
+                chunk.confidence = 0.5
 
     def _embedding_model_name(self) -> Optional[str]:
         """Name of the embedder in use, stamped on chunks at upsert time."""

@@ -15,6 +15,7 @@ from typing import Any, Optional
 from pydantic import BaseModel
 
 from backend.core.config import Settings, get_settings
+from backend.core.llm import CLASSIFICATION_MODEL, SYNTHESIS_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +33,11 @@ class ModelEntry(BaseModel):
 
 _ALL_PROVIDERS = ["ollama"]
 _ALL_MODELS: list[dict[str, str]] = [
-    {"id": "ollama/gemma4:12b", "provider": "ollama", "label": "Gemma 4 12B (local, synthesis)"},
+    {"id": f"ollama/{SYNTHESIS_MODEL}", "provider": "ollama", "label": "Local synthesis model"},
     {
-        "id": "ollama/nemotron-3-nano:4b",
+        "id": f"ollama/{CLASSIFICATION_MODEL}",
         "provider": "ollama",
-        "label": "Nemotron 3 Nano 4B (local, structured roles)",
+        "label": "Local structured-role model",
     },
 ]
 

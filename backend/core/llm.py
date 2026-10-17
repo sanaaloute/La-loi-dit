@@ -36,6 +36,37 @@ PROVIDER_DEFAULT_API_BASES = {
 CLASSIFICATION_MODEL = "nemotron-3-nano:4b"
 SYNTHESIS_MODEL = "gemma4:12b"
 
+ROLE_MODEL_CONFIGS: dict[str, dict[str, Any]] = {
+    "classification": {
+        "model": CLASSIFICATION_MODEL,
+        "think_enabled": False,
+        "num_ctx": 16384,
+        "max_tokens": 2048,
+        "temperature": 0.0,
+    },
+    "planner": {
+        "model": CLASSIFICATION_MODEL,
+        "think_enabled": False,
+        "num_ctx": 8192,
+        "max_tokens": 2048,
+        "temperature": 0.0,
+    },
+    "analysis": {
+        "model": SYNTHESIS_MODEL,
+        "think_enabled": False,
+        "num_ctx": 32768,
+        "max_tokens": 4096,
+        "temperature": 0.1,
+    },
+    "synthesis": {
+        "model": SYNTHESIS_MODEL,
+        "think_enabled": False,
+        "num_ctx": 32768,
+        "max_tokens": 4096,
+        "temperature": 0.1,
+    },
+}
+
 
 def default_ollama_api_base() -> str:
     """Use the Mac host's Ollama from Docker, localhost otherwise."""
@@ -55,13 +86,13 @@ class LLMClient:
         model: Optional[str] = None,
         api_key: Optional[str] = None,
         api_base: Optional[str] = None,
+        role_options: Optional[dict[str, Any]] = None,
     ):
         self.settings = settings
         self.provider = (provider or settings.llm_provider).lower()
         if self.provider not in PROVIDER_PREFIXES:
             raise ValueError(f"unsupported chat provider: {self.provider}")
-        default_model = settings.llm_model if self.provider == "mock" else SYNTHESIS_MODEL
-        raw_model = model if model is not None else default_model
+        raw_model = model if model is not None else SYNTHESIS_MODEL
         namespace = f"{self.provider}/"
         if raw_model.startswith(namespace):
             raw_model = raw_model[len(namespace):]
@@ -70,7 +101,8 @@ class LLMClient:
         self.api_base = api_base if api_base is not None else settings.llm_api_base
         if not self.api_base and self.provider == "ollama":
             self.api_base = default_ollama_api_base()
-        self.timeout_seconds = settings.llm_timeout_seconds
+        self.role_options = dict(role_options or {})
+        self.timeout_seconds = self.role_options.get("timeout_seconds", settings.llm_timeout_seconds)
         # Cumulative token metering across calls on this instance. Read as a
         # delta around one request when the client is shared (mock mode).
         self.usage_totals: dict[str, int] = {"tokens_in": 0, "tokens_out": 0}
@@ -111,6 +143,27 @@ class LLMClient:
             self.usage_totals["tokens_in"] += self._estimate_tokens(system) + self._estimate_tokens(user)
             self.usage_totals["tokens_out"] += self._estimate_tokens(completion)
 
+    def _think_enabled(self) -> bool:
+        return bool(self.role_options.get("think_enabled", self.settings.ollama_think_enabled))
+
+    def _generation_options(
+        self,
+        temperature: Optional[float],
+        max_tokens: Optional[int],
+    ) -> dict[str, Any]:
+        options: dict[str, Any] = {
+            "temperature": (
+                self.role_options.get("temperature", self.settings.llm_temperature)
+                if temperature is None
+                else temperature
+            ),
+            "num_predict": max_tokens or self.role_options.get("max_tokens", self.settings.llm_max_tokens),
+        }
+        num_ctx = self.role_options.get("num_ctx")
+        if num_ctx:
+            options["num_ctx"] = int(num_ctx)
+        return options
+
     async def _ollama_complete(
         self,
         system: str,
@@ -138,11 +191,8 @@ class LLMClient:
                     ],
                     stream=False,
                     keep_alive=self.settings.ollama_keep_alive,
-                    think=self.settings.ollama_think_enabled,
-                    options={
-                        "temperature": self.settings.llm_temperature if temperature is None else temperature,
-                        "num_predict": max_tokens or self.settings.llm_max_tokens,
-                    },
+                    think=self._think_enabled(),
+                    options=self._generation_options(temperature, max_tokens),
                 ),
                 timeout=timeout_seconds,
             )
@@ -357,11 +407,8 @@ class LLMClient:
                     tools=tools,
                     stream=False,
                     keep_alive=self.settings.ollama_keep_alive,
-                    think=self.settings.ollama_think_enabled,
-                    options={
-                        "temperature": self.settings.llm_temperature if temperature is None else temperature,
-                        "num_predict": max_tokens or self.settings.llm_max_tokens,
-                    },
+                    think=self._think_enabled(),
+                    options=self._generation_options(temperature, max_tokens),
                 ),
                 timeout=self.timeout_seconds,
             )
@@ -567,4 +614,5 @@ def get_llm(settings: Settings) -> LLMClient:
         model=SYNTHESIS_MODEL,
         api_key="",
         api_base=settings.llm_api_base,
+        role_options=ROLE_MODEL_CONFIGS["synthesis"],
     )

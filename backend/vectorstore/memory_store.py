@@ -13,6 +13,7 @@ from enum import Enum
 from typing import Any, Optional
 
 from backend.core.models import EvidenceChunk
+from backend.retrieval.scoring import cosine_to_unit
 
 
 def _norm(value: Any) -> str:
@@ -118,7 +119,7 @@ class InMemoryVectorStore:
         scored.sort(key=lambda pair: pair[0], reverse=True)
         results: list[EvidenceChunk] = []
         for score, chunk in scored[:top_k]:
-            chunk.retrieval_score = max(0.0, min(1.0, (score + 1.0) / 2.0))
+            chunk.retrieval_score = cosine_to_unit(score)
             results.append(chunk)
         return results
 

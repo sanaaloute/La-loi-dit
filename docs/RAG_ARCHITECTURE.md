@@ -60,7 +60,7 @@ flowchart TB
 | `reflection_agent` | `backend/agents/reflection_agent.py` | LLM self-critique (`ReflectionResult`); may request one bounded retrieval retry. |
 | `response_generator` | `backend/agents/response_generator.py` | LLM-only grounded synthesis with `[n]` markers, evidence screened for injected instructions and wrapped as DATA; builds the `FinalAnswer` (confidence, warnings, breakdown). |
 | `claim_verification` | `backend/agents/claim_verification.py` | Post-synthesis, deterministic per-statement support grading (DIRECT/INDIRECT/INSUFFICIENT/CONTRADICTORY); flags warnings and escalates contradictions. |
-| `citation_verification` | `backend/agents/citation_verification.py` | Post-synthesis marker check: every `[n]` must resolve to a retrieved chunk; fabricated markers are stripped and confidence is scaled by citation accuracy. |
+| `citation_verification` | `backend/agents/citation_verification.py` | Post-synthesis marker check on the raw draft: every `[n]` must resolve to a retrieved chunk; fabricated markers are counted before cleanup and stripped without scaling confidence twice. |
 | `output_guardrail` | `backend/agents/output_guardrail.py` | Final policy gate (`check_output`): refusal policy, unsafe-advice escalation, citation integrity, unverified-article warnings, confidence policy, context-sensitive disclaimer. |
 
 ## Orchestration semantics

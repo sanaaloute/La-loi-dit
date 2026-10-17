@@ -12,13 +12,13 @@ Candidate models are served only by the keyless host Ollama service
 (http://localhost:11434). Run with the project venv:
 
     .venv/bin/python scripts/benchmark_role_models.py \
-        --local nemotron-3-nano:4b gemma4:12b qwen3:4b
+        --local nemotron-3-nano:4b gemma4:12b
 
-For thinking models, retain the production-path comparison above and add a
-separate native Ollama run with hidden reasoning disabled:
+For thinking-capable models, retain the production-path comparison above and
+add a separate native Ollama run with hidden reasoning disabled:
 
     .venv/bin/python scripts/benchmark_role_models.py \
-        --local qwen3:4b --no-think-local
+        --local nemotron-3-nano:4b --no-think-local
 """
 
 from __future__ import annotations
@@ -27,7 +27,11 @@ import argparse
 import asyncio
 import json
 import re
+import sys
 import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from backend.agents.language_gate import _looks_french, _parse_translation
 from backend.agents.query_router import parse_route
@@ -115,6 +119,19 @@ def _stats(latencies: list[float]) -> str:
     return f"mean {sum(latencies) / len(latencies):5.2f}s  p50 {p50:5.2f}s  max {max(latencies):5.2f}s"
 
 
+def _latency_payload(latencies: list[float]) -> dict[str, float]:
+    if not latencies:
+        return {}
+    ordered = sorted(latencies)
+    p95_index = min(len(ordered) - 1, round(0.95 * (len(ordered) - 1)))
+    return {
+        "mean_seconds": sum(latencies) / len(latencies),
+        "p50_seconds": ordered[len(ordered) // 2],
+        "p95_seconds": ordered[p95_index],
+        "max_seconds": ordered[-1],
+    }
+
+
 # (question, min_sub_questions) — broad questions must be decomposed.
 PLANNER_CASES: list[tuple[str, int]] = [
     ("Quels sont les droits d'un salarié licencié ?", 2),
@@ -122,8 +139,8 @@ PLANNER_CASES: list[tuple[str, int]] = [
     ("What is the legal age of marriage in Burkina Faso?", 1),
 ]
 
-# (question, answer language, expected keyword) — graded deterministically:
-# the answer must carry an [n] citation, the keyword, and the right language.
+# (question, language, required phrases, forbidden phrases). These cases check
+# citation presence, language, and exact category-specific numeric fidelity.
 _SYNTH_EVIDENCE = (
     "[1] Code du travail, article 33 : La durée du préavis est de huit jours "
     "pour les travailleurs payés à l'heure ou à la journée, un mois pour les "
@@ -132,9 +149,25 @@ _SYNTH_EVIDENCE = (
     "[2] Code du travail, article 34 : Toute rupture abusive du contrat de "
     "travail peut donner lieu à des dommages et intérêts."
 )
-SYNTH_CASES: list[tuple[str, str, str]] = [
-    ("Quel est le préavis en cas de licenciement ?", "fr", "mois"),
-    ("What is the notice period for dismissal?", "en", "month"),
+SYNTH_CASES: list[tuple[str, str, list[str], list[str]]] = [
+    (
+        "Quel est le préavis d'un employé mensualisé licencié ?",
+        "fr",
+        ["un mois"],
+        ["trois mois", "huit jours"],
+    ),
+    (
+        "What is the notice period for a monthly-paid employee?",
+        "en",
+        ["one month"],
+        ["three months", "eight days"],
+    ),
+    (
+        "Quel est le préavis d'un cadre licencié ?",
+        "fr",
+        ["trois mois"],
+        ["un mois", "huit jours"],
+    ),
 ]
 
 
@@ -170,7 +203,7 @@ def _french_marker_hits(text: str) -> int:
 async def bench_synthesis(llm: LLMClient) -> tuple[int, list[float], list[str]]:
     prompt = get_prompt("RESPONSE_SYSTEM")
     correct, latencies, misses = 0, [], []
-    for query, language, keyword in SYNTH_CASES:
+    for query, language, required, forbidden in SYNTH_CASES:
         user = f"Question: {query}\nLanguage: {language}\n\nPreuves:\n{_SYNTH_EVIDENCE}"
         start = time.perf_counter()
         try:
@@ -180,20 +213,42 @@ async def bench_synthesis(llm: LLMClient) -> tuple[int, list[float], list[str]]:
             latencies.append(time.perf_counter() - start)
             continue
         latencies.append(time.perf_counter() - start)
+        lowered = raw.lower()
         cited = bool(re.search(r"\[\d+\]", raw))
-        has_keyword = keyword.lower() in raw.lower()
-        # Allow a couple of French markers when answering in English: the
-        # answer may legitimately name « Code du travail » etc.
+        required_ok = all(phrase.lower() in lowered for phrase in required)
+        forbidden_ok = all(phrase.lower() not in lowered for phrase in forbidden)
         right_language = (
             _looks_french(raw) if language == "fr" else _french_marker_hits(raw) <= 2
         )
-        if cited and has_keyword and right_language:
+        if cited and required_ok and forbidden_ok and right_language:
             correct += 1
         else:
             misses.append(
-                f"{query!r}: cited={cited} keyword={has_keyword} lang_ok={right_language} ({raw[:60]!r})"
+                f"{query!r}: cited={cited} required={required_ok} "
+                f"forbidden_absent={forbidden_ok} lang_ok={right_language} ({raw[:80]!r})"
             )
     return correct, latencies, misses
+
+
+async def bench_abstention(llm: LLMClient) -> tuple[int, list[float], list[str]]:
+    prompt = get_prompt("RESPONSE_SYSTEM")
+    query = "Quel est le taux de la redevance sur les engins spatiaux ?"
+    user = f"Question: {query}\nLanguage: fr\n\nPreuves:\n"
+    start = time.perf_counter()
+    try:
+        raw = await llm.complete(prompt, user, temperature=0.0)
+    except Exception as exc:
+        return 0, [time.perf_counter() - start], [f"abstention: LLM error {exc!r}"]
+    latency = time.perf_counter() - start
+    lowered = raw.lower()
+    no_fabricated_citation = not re.search(r"\[\d+\]", raw)
+    admits_gap = any(
+        marker in lowered
+        for marker in ("insuffis", "ne contiennent pas", "ne peux pas", "cannot", "insufficient")
+    )
+    correct = int(no_fabricated_citation and admits_gap)
+    misses = [] if correct else [f"abstention: unsupported answer ({raw[:100]!r})"]
+    return correct, [latency], misses
 
 
 def _extract_json(raw: str) -> dict:
@@ -209,8 +264,8 @@ def _extract_json(raw: str) -> dict:
 
 class OllamaNoThinkClient:
     """Direct Ollama /api/chat with think=False — same .complete() shape as
-    LLMClient, for thinking models (qwen3/qwen3.5) whose reasoning otherwise
-    burns the whole completion budget on classification-style tasks."""
+    LLMClient, for thinking-capable models whose reasoning otherwise burns the
+    whole completion budget on classification-style tasks."""
 
     def __init__(self, model: str, host: str = "http://localhost:11434"):
         self._model = model
@@ -231,24 +286,47 @@ class OllamaNoThinkClient:
         return resp.message.content or ""
 
 
-async def bench_model(label: str, llm: LLMClient) -> None:
+async def bench_model(label: str, llm: LLMClient) -> dict:
     # Warmup: model load time must not pollute the latencies.
     try:
         await llm.complete("Tu es un assistant.", "Dis: ok", temperature=0.0)
     except Exception as exc:
         print(f"\n== {label} == UNAVAILABLE (warmup failed: {exc!r})\n", flush=True)
-        return
+        return {"label": label, "available": False, "error": repr(exc)}
     r_ok, r_lat, r_miss = await bench_router(llm)
     l_ok, l_lat, l_miss = await bench_language(llm)
     p_ok, p_lat, p_miss = await bench_planner(llm)
     s_ok, s_lat, s_miss = await bench_synthesis(llm)
+    a_ok, a_lat, a_miss = await bench_abstention(llm)
     print(f"\n== {label} ==", flush=True)
     print(f"  router    : {r_ok}/{len(ROUTER_CASES)} correct | {_stats(r_lat)}")
     print(f"  language  : {l_ok}/{len(LANG_CASES)} correct | {_stats(l_lat)}")
     print(f"  planner   : {p_ok}/{len(PLANNER_CASES)} valid | {_stats(p_lat)}")
     print(f"  synthesis : {s_ok}/{len(SYNTH_CASES)} grounded | {_stats(s_lat)}")
-    for miss in [*r_miss, *l_miss, *p_miss, *s_miss]:
+    print(f"  abstention: {a_ok}/1 correct | {_stats(a_lat)}")
+    for miss in [*r_miss, *l_miss, *p_miss, *s_miss, *a_miss]:
         print(f"    miss: {miss}")
+
+    def task(correct, total, latencies, misses):
+        return {
+            "correct": correct,
+            "total": total,
+            "accuracy": correct / total if total else 0.0,
+            "latency": _latency_payload(latencies),
+            "misses": misses,
+        }
+
+    return {
+        "label": label,
+        "available": True,
+        "tasks": {
+            "router": task(r_ok, len(ROUTER_CASES), r_lat, r_miss),
+            "language": task(l_ok, len(LANG_CASES), l_lat, l_miss),
+            "planner": task(p_ok, len(PLANNER_CASES), p_lat, p_miss),
+            "synthesis": task(s_ok, len(SYNTH_CASES), s_lat, s_miss),
+            "abstention": task(a_ok, 1, a_lat, a_miss),
+        },
+    }
 
 
 async def main() -> None:
@@ -259,14 +337,16 @@ async def main() -> None:
         action="store_true",
         help="call local models via native Ollama chat with think=False (thinking models)",
     )
+    parser.add_argument("--out", help="optional JSON report path")
     args = parser.parse_args()
 
     settings = get_settings()
+    reports = []
     for model in args.local:
         if args.no_think_local:
-            await bench_model(f"local-nothink:{model}", OllamaNoThinkClient(model))
+            reports.append(await bench_model(f"local-nothink:{model}", OllamaNoThinkClient(model)))
         else:
-            await bench_model(
+            reports.append(await bench_model(
                 f"local:{model}",
                 LLMClient(
                     settings,
@@ -275,7 +355,12 @@ async def main() -> None:
                     api_key="",
                     api_base="http://localhost:11434",
                 ),
-            )
+            ))
+    if args.out:
+        payload = {"generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "models": reports}
+        with open(args.out, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+        print(f"JSON report: {args.out}", flush=True)
 
 
 if __name__ == "__main__":

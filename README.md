@@ -305,10 +305,20 @@ Everything is configured via environment variables prefixed `LEGAL_AI_` (see
 
 ## Development
 
-Run the backend compile check:
+Run the backend compile check and regression tests:
 
 ```bash
 python -m compileall backend -q
+pip install -e '.[test]'
+python -m pytest tests -q
+```
+
+Run the offline RAG evaluation (CI requires at least 85% passing cases):
+
+```bash
+python -m backend.evaluation.runner \
+  --dataset backend/evaluation/golden_dataset.json \
+  --out data/eval/eval_report
 ```
 
 Run the frontend type-check and build:

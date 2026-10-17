@@ -98,6 +98,16 @@ python -m backend.evaluation.runner --live --out data/eval/eval_report_live
 one — use it to audit the real corpus, the offline mode to regression-test
 the pipeline mechanics.
 
+Targeted regressions run with:
+
+```bash
+python -m pytest tests -q
+```
+
+CI compiles the backend, runs these tests, then runs the offline evaluation
+and fails below an 85% case pass rate. Install the test-only dependency in a
+fresh environment with `pip install -e '.[test]'`.
+
 ## Pass thresholds
 
 Per case (constants in `runner.py`):
@@ -113,15 +123,20 @@ Per case (constants in `runner.py`):
 
 ## Current baseline
 
-Recorded in `data/eval/eval_report.md` / `.json` (generated 2026-08-09, offline
-mock-LLM run over the synthetic seed corpus — it validates pipeline mechanics,
-not real-world legal accuracy):
+Recorded in `data/eval/eval_report.md` / `.json` (generated 2026-10-17, offline
+mock-LLM run over the synthetic seed corpus with the local production tuning —
+it validates pipeline mechanics, not real-world legal accuracy):
 
-- **25/25 cases passed (100%)**
-- mean groundedness 1.000, citation accuracy 1.000, answer relevance 1.000,
-  issue coverage 1.000
-- mean recall@5 0.993, precision@5 0.421, MRR 0.910, nDCG@5 0.929
-- hallucination rate 0.000; mean latency 40 ms, p95 42 ms
+- **23/26 cases passed (88%)**; CI requires at least 85%
+- mean groundedness 1.000, citation accuracy 1.000, answer relevance 0.927,
+  issue coverage 0.732
+- mean recall@5 0.990, precision@5 0.376, MRR 0.947, nDCG@5 0.951
+- hallucination rate 0.000
+- A matched-settings untouched-HEAD control scored **21/26 (81%)**, with
+  recall@5 0.910, MRR 0.720 and nDCG@5 0.765. The remaining `qa-015`, `qa-016`
+  and `qa-026` failures are issue-coverage cases requiring further dataset and
+  retrieval work; the live real-corpus evaluation remains a separate release
+  signal.
 
 ## Adding cases
 

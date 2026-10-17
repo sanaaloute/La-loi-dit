@@ -1,4 +1,4 @@
-.PHONY: install dev lint run docker-up docker-down eval ingest reindex reindex-local
+.PHONY: install dev lint test run docker-up docker-down eval ingest reindex reindex-local
 
 install:
 	pip install -r requirements.txt
@@ -12,6 +12,9 @@ run:
 
 lint:
 	python -m compileall backend -q
+
+test: lint
+	python -m pytest tests -q
 
 docker-up:
 	./scripts/init-data-dir.sh

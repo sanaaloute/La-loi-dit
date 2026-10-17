@@ -64,17 +64,19 @@ rewritten). Two wirings: the heuristic planner adds up to
    `ctx.extras["retrieval_errors"]` and the other workers' results still fuse.
 2. **Dedup + RRF fusion** (`dedup.py`, `fusion.py`) — near-duplicates dropped
    (`dedup_jaccard_threshold`), ranked lists merged with reciprocal rank
-   fusion (`score += 1/(k+rank)`, `rrf_k=60`), normalized so the top result
-   scores 1.0.
+   fusion (`score += 1/(k+rank)`, `rrf_k=60`). The normalized RRF signal is
+   stored separately as `fusion_score` for candidate ordering; absolute
+   `retrieval_score` similarities are preserved for ranking and confidence.
+   BM25 uses monotonic raw-score normalization and drops zero-score hits.
 3. **Temporal hard filter** (`temporal.py`) — when the plan's temporal intent
-   is `current` or `historical`, fused candidates pass
+   is `current` or `historical`, fused candidates and exact graph hits pass
    `passes_temporal_filter`: for "current", repealed/expired/not-yet-in-force
    documents are dropped; for "historical" with a scenario date, only documents
    not yet in force at that date are dropped (a document repealed *before* the
    date is kept — it may be exactly what the question asks about). Undated,
-   unknown-status documents always pass. If the filter would empty the
-   candidate set, the unfiltered results are kept with a warning — retrieval
-   never silently returns nothing.
+   unknown-status documents pass with an uncertainty penalty. If nothing is
+   temporally applicable, retrieval returns no evidence instead of restoring
+   inapplicable passages.
 4. **Rerank + relevance floor** (`reranker_providers.py`, coordinator) — the
    coordinator delegates to a `RerankerProvider` port
    (`backend/core/ports.py`): the default `HeuristicReranker` wraps the
@@ -107,6 +109,13 @@ rewritten). Two wirings: the heuristic planner adds up to
 Results are cached per task-set under `retrieval:` (TTL
 `retrieval_cache_ttl_seconds`, default 300s); the temporal intent and scenario
 date are part of the cache key.
+
+**BM25 lifecycle** — each API worker hydrates its process-local BM25 index from
+the shared vector store at startup and after a Milvus reconnect. A background
+loop checks the `versions.json` corpus generation every 60 seconds and
+atomically swaps in a rebuilt index after external reindexing; refreshes pause
+while the ingestion lock is held. This keeps keyword retrieval available and
+current in the serving processes, not only in the ingestion/evaluation process.
 
 ## Legal knowledge graph (spec §19)
 
@@ -155,12 +164,11 @@ The store is shared per process via `graph_store_for(ctx)` (memoized in
 `EvidenceChunk` carries `status` (`active` | `repealed` | `amended` | `future`
 | `unknown`), `valid_from` / `valid_until` (with `effective_date` and
 `publication_date` as fallbacks for the window start). Chunks ingested before
-these fields existed deserialize to `status="active"` with no dates, score 1.0
-for "current" intent and always pass the filter — only explicitly
-repealed/expired/future documents are ever excluded. Beyond the hard filter,
-`temporal_score` (0–1) is blended into evidence ranking so time-inapplicable
-evidence sinks instead of disappearing; undated evidence scores
-`temporal_score_unknown` (default 0.3) for "current" intent.
+these fields existed deserialize to `status="unknown"` with no dates. Unknown
+chunks pass the hard filter but receive `temporal_score_unknown` (default 0.3)
+for "current" intent rather than being treated as certainly in force. Beyond
+the hard filter, `temporal_score` (0–1) is blended into evidence ranking so
+time-inapplicable evidence sinks instead of disappearing.
 
 ## Authority weighting
 
@@ -177,9 +185,13 @@ evidence sinks instead of disappearing; undated evidence scores
 ```text
 relevance  = max(chunk.rerank_score, chunk.retrieval_score)
 authority  = AUTHORITY_WEIGHTS[chunk.authority]
-confidence = chunk.confidence or 0.5
-base       = 0.55·relevance + 0.30·authority + 0.15·confidence    (weights from settings)
+reliability = chunk.confidence or 0.5
+base       = 0.55·relevance + 0.30·authority + 0.15·reliability    (weights from settings)
 ```
+
+New ingestion assigns neutral reliability (0.5) unless independent evidence is
+available, instead of copying the authority weight into a second vote. Reindex
+legacy chunks to apply this separation.
 
 When the plan has a temporal intent (`current`/`historical`), a temporal
 component is blended with weight `ranking_temporal_weight` (default 0.15) and

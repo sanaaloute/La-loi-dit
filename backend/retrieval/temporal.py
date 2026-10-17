@@ -9,9 +9,10 @@ Pure functions over :class:`EvidenceChunk` metadata used in two places:
   score so time-inapplicable evidence sinks instead of disappearing.
 
 Backward compatibility: chunks ingested before the temporal fields existed
-carry the defaults ``status="active"`` and no validity dates — they score 1.0
-for "current" intent and always pass the filter.  Only explicitly
-repealed/expired/not-yet-in-force documents are ever excluded.
+carry ``status="unknown"`` and no validity dates. They pass the hard filter,
+but receive the configured unknown temporal score rather than being treated
+as certainly in force. Only explicitly repealed/expired/not-yet-in-force
+documents are excluded.
 """
 
 from __future__ import annotations

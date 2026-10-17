@@ -32,7 +32,7 @@ spec, and what operators must do. Detailed documentation of each area:
 - **Metadata model** — `EvidenceChunk` gained `document_type`, `law_number`,
   `jurisdiction`, `status`, `valid_from`/`valid_until`, `hierarchy`,
   `issuing_authority` and `embedding_model` (all optional/backward-compatible
-  at deserialization; old chunks read as `status="active"`, no dates).
+  at deserialization; old chunks read as `status="unknown"`, no dates).
 - **Pipeline nodes** — added `parent_expansion`, `coverage_auditor` and
   `claim_verification`; `citation_verification` moved **after**
   `response_generator` so it verifies the actual draft. Bounded re-retrieval
@@ -139,11 +139,11 @@ All settings use the `LEGAL_AI_` env prefix (`backend/core/config.py`):
 | `LEGAL_AI_RERANKER_API_KEY` | unset | Bearer key for the rerank endpoint. |
 | `LEGAL_AI_RERANKER_BATCH_SIZE` | `64` | Documents per rerank API call. |
 | `LEGAL_AI_RERANKER_TIMEOUT_SECONDS` | `10.0` | HTTP timeout of the rerank client. |
-| `LEGAL_AI_MODEL_ROLE_ROUTING_ENABLED` | `false` | Enable per-role model tiering (spec §46). Default off — zero behavior change. |
-| `LEGAL_AI_PLANNER_MODEL` | unset | Model override for the planner node when role routing is on. |
-| `LEGAL_AI_CLASSIFICATION_MODEL` | unset | Model override for `context_agent` / `memory_agent` (cheap tier). |
-| `LEGAL_AI_ANALYSIS_MODEL` | unset | Model override for `reasoning_agent` / `reflection_agent`. |
-| `LEGAL_AI_SYNTHESIS_MODEL` | unset | Model override for `response_generator` (strongest tier). |
+
+Legacy role-routing and model-override environment variables are not supported.
+Model IDs and role defaults are fixed in `ROLE_MODEL_CONFIGS`
+(`backend/core/llm.py`): Nemotron 3 Nano 4B for structured roles and Gemma 4
+12B for analysis/synthesis.
 
 Related pre-existing knobs that the new components also honor:
 `max_retrieval_retries` / `max_reflection_iterations` (loop budgets, both 1),
@@ -188,11 +188,12 @@ Related pre-existing knobs that the new components also honor:
   screening), "citation d'article non vérifiée", "réponse potentiellement
   incomplète", unverifiable-citation removals, claim-verification flags, and
   `requires_human_review` escalations for contradicted or unsafe content.
-- **Confidence semantics**: the aggregate is 0.6 × citation accuracy + 0.4 ×
-  sub-question coverage, dampened ×0.85 per unresolved conflict and capped at
-  0.75 for reflection-flagged gaps — a fully-cited but partial answer no longer
-  displays "100%". Per-dimension detail is in `confidence_breakdown`;
-  per-statement verdicts in `claims`.
+- **Confidence semantics**: the aggregate starts as 0.6 × citation accuracy +
+  0.4 × coverage, then claim verification blends legal support (default 0.2)
+  and post-generation answer coverage. Unresolved conflicts dampen it ×0.85,
+  reflection gaps cap it at 0.75, and temporal/claim failures apply their own
+  caps. Citation accuracy is computed once on the raw draft. Per-dimension
+  detail is in `confidence_breakdown`; per-statement verdicts in `claims`.
 - **Latency**: a coverage gap, `INSUFFICIENT:` reasoning or a reflection retry
   can trigger one extra retrieval fan-out per run; `rerank_llm_enabled` adds
   one LLM rescore call per retrieval branch.

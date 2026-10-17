@@ -3,7 +3,7 @@
 Layered on ``ctx.cache`` (Redis or in-memory — the same abstraction used
 everywhere). Two levels:
 
-1. **Exact** — key ``ans:x:<sha256(normalize(query)|model_id)>`` where
+1. **Exact** — key ``ans:x:<sha256(normalize(query)|cache_identity)>`` where
    normalize = lowercase, strip punctuation, collapse whitespace. Value is
    the ChatResponse JSON, TTL ``settings.cache_ttl_seconds``.
 2. **Semantic** — a tiny JSON index (single key, capped at
@@ -18,8 +18,8 @@ Cacheability rules (enforced by callers / ``is_cacheable``):
 - requests carrying an explicit ``session_id`` are treated as
   mid-conversation and BYPASS the cache entirely (the same query can mean
   something different with prior context);
-- the cache is global across users: answers derive from the public corpus
-  plus the model, and the model id is part of the key.
+- the cache identity covers user scope, language, scenario date, model and
+  embedding roles, corpus generation, prompts, and generation settings.
 
 Every failure degrades to a cache miss — never an error.
 """
@@ -27,13 +27,18 @@ Every failure degrades to a cache miss — never an error.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import math
 import re
 import time
+from pathlib import Path
 from typing import Any, Optional
 
 from backend.core.config import Settings
+from backend.core.llm import CLASSIFICATION_MODEL, ROLE_MODEL_CONFIGS
+from backend.core.prompts import PROMPTS
+from backend.retrieval.bm25 import corpus_generation
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +53,56 @@ def normalize_query(query: str) -> str:
     """Lowercase, strip punctuation, collapse whitespace."""
     text = _PUNCT_RE.sub(" ", query.lower())
     return _SPACE_RE.sub(" ", text).strip()
+
+
+def _prompt_generation(settings: Settings) -> str:
+    built_in = hashlib.sha256(
+        json.dumps(PROMPTS, sort_keys=True).encode()
+    ).hexdigest()
+    overrides = ""
+    if settings.prompts_dir:
+        root = Path(settings.prompts_dir)
+        files = [*root.glob("*.md"), *root.glob("*.txt")] if root.is_dir() else []
+        if files:
+            overrides = str(max(path.stat().st_mtime_ns for path in files))
+    return f"{built_in}:{overrides}"
+
+
+def cache_identity(
+    settings: Settings,
+    *,
+    model_id: str,
+    language: Optional[str] = None,
+    scenario_date: Any = None,
+    user_id: Optional[str] = None,
+) -> str:
+    """Fingerprint every request input that can change a cached legal answer."""
+    payload = {
+        "model_id": model_id,
+        "classification_model": CLASSIFICATION_MODEL,
+        "role_model_configs": ROLE_MODEL_CONFIGS,
+        "embedding_model": settings.embedding_model,
+        "embedding_dimension": settings.embedding_dimension,
+        "language": language or "",
+        "scenario_date": str(scenario_date) if scenario_date else "",
+        "user_id": user_id or "anonymous",
+        "corpus_generation": corpus_generation(settings.data_dir),
+        "prompt_generation": _prompt_generation(settings),
+        "app_version": settings.app_version,
+        "llm_provider": settings.llm_provider,
+        "llm_temperature": settings.llm_temperature,
+        "ollama_think_enabled": settings.ollama_think_enabled,
+        "fast_lane_enabled": settings.fast_lane_enabled,
+        "fast_lane_min_coverage": settings.fast_lane_min_coverage,
+        "confidence_citation_weight": settings.confidence_citation_weight,
+        "confidence_coverage_weight": settings.confidence_coverage_weight,
+        "confidence_legal_support_weight": settings.confidence_legal_support_weight,
+        "reranker_provider": settings.reranker_provider,
+        "reranker_model": settings.reranker_model,
+        "rerank_llm_enabled": settings.rerank_llm_enabled,
+    }
+    serialized = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode()).hexdigest()
 
 
 def exact_key(query: str, model_id: str) -> str:
@@ -136,8 +191,8 @@ class AnswerCache:
                 return None
             threshold = self.settings.answer_cache_semantic_threshold
             for entry in reversed(index):  # most recent first
-                # Same model only: answers are model-specific even for
-                # near-identical queries.
+                # Near-identical queries may still differ by user, legal date,
+                # language, corpus, or model configuration.
                 if entry.get("model") != model_id:
                     continue
                 if _cosine(vector, entry.get("embedding") or []) >= threshold:

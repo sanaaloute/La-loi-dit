@@ -14,7 +14,6 @@ import xml.etree.ElementTree as ET
 from typing import Any, Optional
 
 from backend.core.config import get_settings
-from backend.core.constants import AUTHORITY_WEIGHTS
 from backend.core.models import EvidenceChunk, SearchTask
 from backend.search.sources import DEFAULT_REGISTRY, OfficialSource, sources_for_kind
 
@@ -101,7 +100,7 @@ def _to_chunk(
         government_body=source.government_body,
         source_kind=task.kind,
         authority=source.authority,
-        confidence=AUTHORITY_WEIGHTS.get(source.authority, settings.search_authority_fallback),
+        confidence=0.5,
         retrieval_score=settings.search_web_hit_score,  # refined by fusion/rerank
         metadata={"source": source.name, "retrieved_via": "web"},
     )

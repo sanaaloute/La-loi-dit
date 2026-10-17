@@ -98,7 +98,6 @@ class OutputGuardrailAgent(Agent):
             answer.claims = []
             answer.warnings = []
             answer.conflicts = []
-            answer.requires_human_review = False
             answer.refused = False
             answer.refusal_reason = None
             answer.metadata["low_confidence_fallback"] = True

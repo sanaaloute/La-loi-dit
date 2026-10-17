@@ -132,19 +132,17 @@ class CitationVerificationAgent(Agent):
 
         warnings = [f"citation rejetée (non vérifiable): {r['label']}" for r in rejected]
 
-        # Post-synthesis review: this node now runs AFTER response_generator,
-        # so sync the verdict into the FinalAnswer — strip rejected citations
-        # from the answer text and scale confidence by citation accuracy.
+        # Response generation already computed confidence from this raw draft.
+        # This node removes invalid markers and synchronizes the verification
+        # verdict without applying citation accuracy a second time.
         final = state.get("final_answer")
         if final is not None:
             if cleaned != draft:
                 final.answer = cleaned
-            if accuracy < 1.0:
-                # Scale the coverage-aware confidence down by citation accuracy.
-                final.confidence = round(final.confidence * accuracy, 2)
-                if final.confidence_breakdown is not None:
-                    # Post-verification citation accuracy (spec §39).
-                    final.confidence_breakdown.citation_confidence = round(accuracy, 2)
+            if final.confidence_breakdown is not None:
+                final.confidence_breakdown.citation_confidence = round(accuracy, 2)
+            final.metadata["citation_total_count"] = len(verified) + len(rejected)
+            final.metadata["citation_rejected_count"] = len(rejected)
             if warnings:
                 final.warnings.extend(warnings)
             # User-facing numbering: markers cite evidence positions, which

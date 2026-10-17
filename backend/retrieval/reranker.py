@@ -22,6 +22,7 @@ from backend.core.config import get_settings
 from backend.core.embeddings import HashEmbeddings
 from backend.core.models import EvidenceChunk
 from backend.core.prompts import get_prompt
+from backend.retrieval.scoring import cosine_to_unit, source_reliability
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +147,7 @@ async def rerank(
     query_tokens = _content_tokens(query)
     heuristic: list[float] = []
     for i, chunk in enumerate(chunks):
-        similarity = max(0.0, _cosine(query_vector, chunk_vectors[i])) if chunk_vectors else 0.0
+        similarity = cosine_to_unit(_cosine(query_vector, chunk_vectors[i])) if chunk_vectors else 0.0
 
         shared = query_tokens & _content_tokens(chunk.content)
         chunk.metadata["query_similarity"] = round(similarity, 4)
@@ -156,7 +157,7 @@ async def rerank(
         # Lexical overlap as a small additive signal (helps when dense scores tie).
         lexical = min(1.0, len(shared) / max(1, settings.retrieval_min_shared_tokens))
 
-        confidence = max(0.0, min(1.0, chunk.confidence))
+        confidence = source_reliability(chunk)
         heuristic.append(
             similarity_weight * similarity
             + lexical_weight * lexical

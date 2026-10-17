@@ -24,7 +24,7 @@ flowchart LR
     pe --> er[evidence_ranking]
     er --> cva[coverage_auditor]
     cva -.->|needs_more_retrieval, retry ≤ 1| fan
-    cva -->|fast lane: FACTUAL/DEFINITION, coverage ≥ 0.5, no unresolved conflict| rg
+    cva -->|fast lane: simple coverage ≥ 0.5; RIGHTS/PROCEDURE coverage = 1.0| rg
     cva --> ra[reasoning_agent]
     ra --> rf[reflection]
     ra -.->|needs_more_retrieval, retry ≤ 1| fan
@@ -49,6 +49,12 @@ Users cannot select models, and environment role overrides or runtime catalog
 changes cannot replace these assignments. There is no external chat failover;
 daily quotas and anti-abuse rate limits still cover all role calls. The
 `mock` provider is reserved for deterministic tests/development.
+
+`ROLE_MODEL_CONFIGS` (`backend/core/llm.py`) is the single source for model IDs
+and role defaults: 16K context for classification, 8K for planning, and 32K for
+analysis/synthesis, with hidden thinking disabled and role-specific token and
+temperature limits. The public model catalog derives its IDs from the same
+constants.
 
 Embeddings, faster-whisper STT, OCR, semantic guardrails, and cross-encoder
 reranking are separate capabilities, not alternative chat role models.
@@ -158,8 +164,9 @@ attaches the resulting `Claim` list to the `FinalAnswer`. Insufficient claims
 raise bilingual warnings; contradictory ones also set
 `requires_human_review`. Recomputes
 `confidence_breakdown.legal_support_confidence` as the supported-claim
-fraction dampened by the contradicted share; the aggregate `confidence` is
-untouched.
+fraction dampened by the contradicted share, then recalculates the aggregate
+with claim support and post-generation answer coverage. Contradicted or
+LLM-unverified answers are capped below the serving thresholds.
 
 With a real LLM provider (`claim_llm_refinement_enabled`, skipped for the
 `mock` provider), heuristic-supported claims are then re-graded by an LLM
@@ -177,10 +184,10 @@ warnings (they are too noisy on paraphrased answers to show to users).
 ## citation_verification (`backend/agents/citation_verification.py`)
 
 Post-synthesis judge: runs AFTER `response_generator`. Parses `[n]` citations
-from the draft and resolves each against the actual evidence list. Verified
-citations are kept; fabricated or unresolvable ones are removed from the
-answer and recorded as warnings — never silently kept. Its verdict is synced
-into the `FinalAnswer` (text cleanup, confidence scaled by citation accuracy).
+from the raw draft and resolves each against the actual evidence list. Verified
+citations are kept; fabricated or unresolvable ones are counted before cleanup,
+then removed from the answer and recorded as warnings — never silently kept.
+Its verdict is synced into the `FinalAnswer` without scaling confidence twice.
 
 ## response_generator (`backend/agents/response_generator.py`)
 

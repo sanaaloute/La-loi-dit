@@ -94,12 +94,12 @@ query and redacts PII.
 are fabricated citations. The node (via the `verify_citations` /
 `remove_invalid_citations` tools):
 
+- computes `citation_accuracy` on the raw draft before any cleanup,
 - strips rejected markers from the answer text,
 - records a warning per rejected citation ("citation rejetée (non
   vérifiable): [n]"),
-- computes `citation_accuracy` and scales `FinalAnswer.confidence` by it,
-- writes the post-verification accuracy into
-  `confidence_breakdown.citation_confidence`.
+- writes the accuracy into `confidence_breakdown.citation_confidence` and the
+  rejection counts into answer metadata without scaling confidence twice.
 
 Verified citations are resolved to `Citation` models carrying `chunk_id`,
 `document_name`, `article` and `url` for UI rendering.
@@ -133,7 +133,9 @@ claims raise bilingual warnings, contradictory claims additionally set
 `requires_human_review=True`, and
 `confidence_breakdown.legal_support_confidence` is recomputed as the fraction of
 supported claims dampened by the contradicted share
-(`supported × (1 − contradictory/total)`).
+(`supported × (1 − contradictory/total)`). The aggregate is then recalculated
+with legal support and post-generation answer coverage; contradicted or
+LLM-unverified answers are capped below the serving thresholds.
 
 ## Output guard checks
 
@@ -160,24 +162,28 @@ below `human_review_threshold`) and high-risk query patterns.
 
 ## Confidence model (spec §39)
 
-`FinalAnswer.confidence` is a single aggregate: **0.6 × citation accuracy +
-0.4 × sub-question coverage** (weights in `response_generator`), with trust
-adjustments — each unresolved conflict multiplies it by 0.85 (graded
-dampener, `confidence_unresolved_conflict_dampening`, exponent capped at
-`confidence_conflict_max_dampenings` = 3), a reflection-flagged incomplete answer caps it at 0.75, and citation verification scales it by the
-post-verification accuracy. Unresolved conflicts also append a durable
-user-facing note (production hides the conflicts list itself).
+`FinalAnswer.confidence` starts as **0.6 × citation accuracy + 0.4 ×
+coverage**. Claim verification then blends in legal support (default weight
+0.2) and replaces retrieval-only coverage with post-generation answer
+coverage. Each unresolved conflict multiplies the aggregate by 0.85 (graded
+dampener, exponent capped at 3), a reflection-flagged incomplete answer caps
+it at 0.75, and undated evidence in a time-sensitive plan applies the temporal
+penalty. Contradicted claims cap the score at the human-review threshold;
+LLM-unverified claims cap it below the low-confidence threshold. Citation
+accuracy is computed once from the raw draft and is not applied again during
+cleanup. This remains a heuristic grounding score pending calibration against
+human labels, not a probability of legal correctness.
 
 The per-dimension detail lives in `ConfidenceBreakdown`:
 
 | Dimension | Derivation |
 |---|---|
 | `source_confidence` | mean `AUTHORITY_WEIGHTS` of the evidence |
-| `retrieval_confidence` | mean of the top-3 relevance scores (max of rerank/retrieval, clamped) |
+| `retrieval_confidence` | mean of the top-3 absolute relevance scores (max of rerank/retrieval, clamped); RRF `fusion_score` is excluded |
 | `legal_support_confidence` | fraction of claims DIRECT/INDIRECT, dampened by contradictions (claim verification) |
 | `temporal_confidence` | 1.0 by default; 0.5 with unresolved conflicts; 0.6 when a time-sensitive plan rests only on undated sources |
-| `citation_confidence` | citation accuracy, overwritten post-verification |
-| `coverage` | sub-question coverage from the deterministic auditor |
+| `citation_confidence` | citation accuracy on the raw draft, synchronized after verification |
+| `coverage` | post-generation sub-question coverage; pre-generation retrieval coverage is preserved in metadata |
 
 ## Context-sensitive disclaimers (spec §33)
 

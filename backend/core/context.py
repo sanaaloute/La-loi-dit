@@ -86,6 +86,15 @@ async def build_context(settings: Optional[Settings] = None) -> AppContext:
 
     ctx.vector_store = await get_vector_store(settings)
 
+    from backend.retrieval.bm25 import BM25Retriever, hydrate_bm25
+
+    try:
+        await hydrate_bm25(ctx)
+    except Exception as exc:
+        ctx.extras["bm25"] = BM25Retriever()
+        ctx.extras["bm25_error"] = str(exc)
+        logger.warning("BM25 hydration failed; keyword search starts empty", exc_info=True)
+
     from backend.retrieval.coordinator import RetrievalCoordinator
 
     ctx.retriever = RetrievalCoordinator(ctx)

@@ -22,6 +22,7 @@ from backend.core.constants import AUTHORITY_WEIGHTS
 from backend.core.context import AppContext
 from backend.core.models import EvidenceChunk
 from backend.core.state import GraphState
+from backend.retrieval.scoring import source_reliability
 from backend.retrieval.temporal import TEMPORAL_INTENTS, temporal_score
 
 
@@ -177,7 +178,7 @@ def _final_score(
         settings = get_settings()
     relevance = max(chunk.rerank_score, chunk.retrieval_score)
     authority = AUTHORITY_WEIGHTS[chunk.authority]
-    confidence = chunk.confidence if chunk.confidence > 0 else 0.5
+    confidence = source_reliability(chunk)
     base = (
         settings.ranking_relevance_weight * relevance
         + settings.ranking_authority_weight * authority

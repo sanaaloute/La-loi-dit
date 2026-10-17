@@ -12,16 +12,11 @@ from __future__ import annotations
 import logging
 
 from backend.core.config import Settings
-from backend.core.llm import CLASSIFICATION_MODEL, SYNTHESIS_MODEL, LLMClient
+from backend.core.llm import ROLE_MODEL_CONFIGS, LLMClient
 
 logger = logging.getLogger(__name__)
 
-ROLE_MODELS = {
-    "classification": CLASSIFICATION_MODEL,
-    "planner": CLASSIFICATION_MODEL,
-    "analysis": SYNTHESIS_MODEL,
-    "synthesis": SYNTHESIS_MODEL,
-}
+ROLE_MODELS = {role: config["model"] for role, config in ROLE_MODEL_CONFIGS.items()}
 
 
 def resolve_role_llm(role: str, base_llm: LLMClient, settings: Settings) -> LLMClient:
@@ -35,8 +30,13 @@ def resolve_role_llm(role: str, base_llm: LLMClient, settings: Settings) -> LLMC
     if provider == "mock" or not base_model:
         return base_llm
 
-    model = ROLE_MODELS.get(role, SYNTHESIS_MODEL)
-    if provider == "ollama" and base_model == f"ollama/{model}":
+    config = ROLE_MODEL_CONFIGS.get(role, ROLE_MODEL_CONFIGS["synthesis"])
+    model = config["model"]
+    if (
+        provider == "ollama"
+        and base_model == f"ollama/{model}"
+        and getattr(base_llm, "role_options", {}) == config
+    ):
         return base_llm
 
     role_client = LLMClient(
@@ -45,6 +45,7 @@ def resolve_role_llm(role: str, base_llm: LLMClient, settings: Settings) -> LLMC
         model=model,
         api_key="",
         api_base=getattr(base_llm, "api_base", "") or settings.llm_api_base,
+        role_options=config,
     )
     role_client.usage_totals = base_llm.usage_totals
     logger.debug("role routing: %s -> %s", role, role_client.model)

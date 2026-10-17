@@ -34,7 +34,7 @@ from pydantic import BaseModel, ValidationError
 
 from backend.api.deps import get_ctx, get_graph, require_user
 from backend.core import stt
-from backend.core.answer_cache import AnswerCache, is_cacheable
+from backend.core.answer_cache import AnswerCache, cache_identity, is_cacheable
 from backend.core.config import Settings
 from backend.core.exceptions import STTError
 from backend.core.model_router import check_budget, resolve_llm, resolve_model_entry
@@ -313,6 +313,13 @@ async def chat(
     model_id = entry.id if entry is not None else ""
     llm = resolve_llm(ctx, user, payload.model, query=payload.query)
     state["llm"] = llm
+    model_id = cache_identity(
+        settings,
+        model_id=model_id,
+        language=payload.language,
+        scenario_date=payload.scenario_date,
+        user_id=_state_user_id(payload, user),
+    )
 
     # Answer cache: an explicit session_id means mid-conversation context,
     # which bypasses the cache (same query, different meaning).
@@ -752,6 +759,13 @@ async def chat_stream(
     model_id = entry.id if entry is not None else ""
     llm = resolve_llm(ctx, user, model, query=query)
     state["llm"] = llm
+    model_id = cache_identity(
+        settings,
+        model_id=model_id,
+        language=payload.language,
+        scenario_date=payload.scenario_date,
+        user_id=_state_user_id(payload, user),
+    )
 
     # Same cache rule as POST /chat: explicit session_id => mid-conversation,
     # bypass. A hit is replayed as a synthetic update+final event sequence.

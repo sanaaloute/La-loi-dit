@@ -128,31 +128,32 @@ async def _freshness_loop(ctx: Any) -> None:
 
 
 async def _vector_store_reconnect_loop(ctx: Any) -> None:
-    """Swap the in-memory fallback for Milvus as soon as it is reachable.
-
-    The factory downgrades silently when Milvus is unreachable at boot
-    (slow service startup, NAT flap); without this probe the process would
-    serve degraded retrieval until the next deploy. All consumers read
-    ``ctx.vector_store`` dynamically, so swapping the attribute is enough.
-    Runs per uvicorn worker — each process fixes its own ctx.
-    """
+    """Reconnect Milvus and keep each worker's BM25 index on the shared corpus generation."""
+    from backend.retrieval.bm25 import hydrate_bm25
+    from backend.ingestion.ingest_lock import LOCK_FILENAME
     from backend.vectorstore.factory import get_vector_store
     from backend.vectorstore.memory_store import InMemoryVectorStore
 
     while True:
         await asyncio.sleep(60)
-        if not isinstance(ctx.vector_store, InMemoryVectorStore):
+        reconnected = False
+        if isinstance(ctx.vector_store, InMemoryVectorStore):
+            try:
+                store = await get_vector_store(ctx.settings)
+            except Exception:
+                store = None
+            if store is not None and not isinstance(store, InMemoryVectorStore):
+                ctx.vector_store = store
+                ctx.infra_status["milvus"] = "ok"
+                ctx.infra_status["vector_store_probe"] = "ok"
+                reconnected = True
+                logger.info("vector store: Milvus reconnected (fallback swapped out)")
+        if (ctx.settings.data_dir / LOCK_FILENAME).exists():
             continue
         try:
-            store = await get_vector_store(ctx.settings)
+            await hydrate_bm25(ctx, force=reconnected)
         except Exception:
-            continue  # never crash the probe loop
-        if isinstance(store, InMemoryVectorStore):
-            continue
-        ctx.vector_store = store
-        ctx.infra_status["milvus"] = "ok"
-        ctx.infra_status["vector_store_probe"] = "ok"
-        logger.info("vector store: Milvus reconnected (fallback swapped out)")
+            logger.warning("BM25 refresh failed; keeping the previous index", exc_info=True)
 
 
 async def _auto_ingest_on_startup(app: FastAPI, settings: Any) -> None:

@@ -25,10 +25,24 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install -e .
+          pip install -e '.[test]'
 
       - name: Compile check
         run: python -m compileall backend -q
+
+      - name: Regression tests
+        run: python -m pytest tests -q
+
+      - name: Offline RAG evaluation
+        run: |
+          python -m backend.evaluation.runner --dataset backend/evaluation/golden_dataset.json --out data/eval/eval_report
+          python - <<'PY'
+          import json
+          report = json.load(open('data/eval/eval_report.json', encoding='utf-8'))
+          minimum = 0.85
+          if report['pass_rate'] < minimum:
+              raise SystemExit(f"Offline RAG pass rate {report['pass_rate']:.1%} is below {minimum:.0%}")
+          PY
 
   docker:
     runs-on: ubuntu-latest
