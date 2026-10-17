@@ -53,8 +53,9 @@ daily quotas and anti-abuse rate limits still cover all role calls. The
 `ROLE_MODEL_CONFIGS` (`backend/core/llm.py`) is the single source for model IDs
 and role defaults: 16K context for classification, 8K for planning, and 32K for
 analysis/synthesis, with hidden thinking disabled and role-specific token and
-temperature limits. The public model catalog derives its IDs from the same
-constants.
+temperature limits. Analysis is capped at 120 seconds and 2,048 tokens per call;
+synthesis keeps the larger answer budget. The public model catalog derives its
+IDs from the same constants.
 
 Embeddings, faster-whisper STT, OCR, semantic guardrails, and cross-encoder
 reranking are separate capabilities, not alternative chat role models.

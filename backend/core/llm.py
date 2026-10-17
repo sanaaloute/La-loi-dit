@@ -55,8 +55,9 @@ ROLE_MODEL_CONFIGS: dict[str, dict[str, Any]] = {
         "model": SYNTHESIS_MODEL,
         "think_enabled": False,
         "num_ctx": 32768,
-        "max_tokens": 4096,
+        "max_tokens": 2048,
         "temperature": 0.1,
+        "timeout_seconds": 120.0,
     },
     "synthesis": {
         "model": SYNTHESIS_MODEL,
@@ -177,7 +178,7 @@ class LLMClient:
 
         host = self.api_base or PROVIDER_DEFAULT_API_BASES["ollama"]
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
-        client = AsyncClient(host=host, headers=headers)
+        client = AsyncClient(host=host, headers=headers, timeout=timeout_seconds)
         model = self.model
         if model.startswith("ollama/"):
             model = model[len("ollama/"):]
@@ -395,7 +396,7 @@ class LLMClient:
         headers = {}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        client = AsyncClient(host=host, headers=headers)
+        client = AsyncClient(host=host, headers=headers, timeout=self.timeout_seconds)
         model = self.model
         if model.startswith("ollama/"):
             model = model[len("ollama/"):]

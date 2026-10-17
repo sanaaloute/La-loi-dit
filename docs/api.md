@@ -177,9 +177,14 @@ data: {"type": "final", "response": {"session_id": "…", "answer": {…}, "late
 `node_start` fires when a node BEGINS (real-time "running" indicator);
 `update` fires when it completes. Idle periods are kept alive with `: hb`
 heartbeat comment frames (every `LEGAL_AI_CHAT_HEARTBEAT_SECONDS`, 10s by
-default), and a run is hard-capped at `LEGAL_AI_CHAT_RUN_TIMEOUT_SECONDS`
-(280s, below nginx's 300s `proxy_read_timeout`) — on timeout the pump task is
-cancelled and an error frame is emitted instead of hanging forever.
+default). A per-run watchdog enforces `LEGAL_AI_CHAT_RUN_TIMEOUT_SECONDS`
+(280s by default, 600s in the Mac Mini deployment) and emits an error frame
+instead of hanging forever.
+
+Run metadata and cancellation signals are shared through the cache, so
+`POST /chat/cancel` works even when it reaches a different API worker than the
+one executing the graph. Each run has a unique ID to prevent an old Stop
+request from cancelling a newer question in the same conversation.
 
 `delta` frames carry chunks of the **final, verified** answer text (after
 claim/citation verification and the output guardrail — nothing unverified is

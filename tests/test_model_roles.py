@@ -16,6 +16,9 @@ def test_role_clients_have_independent_generation_defaults(tmp_path):
     assert structured._generation_options(None, None)["num_predict"] == 2048
     assert synthesis is base
     assert synthesis.role_options["num_ctx"] == 32768
+    analysis = resolve_role_llm("analysis", base, settings)
+    assert analysis.timeout_seconds == 120.0
+    assert analysis._generation_options(None, None)["num_predict"] == 2048
     assert structured.usage_totals is base.usage_totals
 
     override = structured._generation_options(0.2, 99)

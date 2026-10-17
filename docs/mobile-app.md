@@ -27,7 +27,7 @@ The backend **is already an API gateway in every meaningful sense**: a standalon
 ### Streaming — usable natively, with caveats
 
 - Primary: `GET /api/v1/chat/stream` (SSE, `backend/api/routers/chat.py:728-790`). Auth via header (EventSource can't send headers — the web app uses `fetch` + `ReadableStream` for this reason; native apps use OkHttp/URLSession and parse `data:` frames manually).
-- Frame protocol: `node_start` / `update` / `delta` (typewriter) / `final` (authoritative `ChatResponse`) / `cancelled` / `error`, plus `: hb` comment heartbeats every 10 s. Hard run cap 280 s.
+- Frame protocol: `node_start` / `update` / `delta` (typewriter) / `final` (authoritative `ChatResponse`) / `cancelled` / `error`, plus `: hb` comment heartbeats every 10 s. Hard run cap 280 s by default (600 s in the Mac Mini deployment). Cancellation and run progress are shared across API workers.
 - Disconnect resilience is built in: the server finishes the run and persists it; the client recovers via `GET /chat/sessions/{id}/run` + `GET /chat/sessions/{id}` (`chat.py:578-640`).
 - Fallback: `WS /api/v1/ws/chat` (`?token=` auth) exists but is **not persisted to history** — prefer SSE.
 - Non-streaming `POST /chat` can take up to 280 s — see the Cloudflare hazard below.

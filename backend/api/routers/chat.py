@@ -23,6 +23,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Literal, Optional
@@ -81,14 +82,12 @@ class CancelPayload(BaseModel):
     session_id: str
 
 
-# In-flight graph executions keyed by session_id, so /chat/cancel can stop
-# them. Entries are removed as soon as the run ends (success, error, cancel).
+# Local task handles plus shared run metadata for multi-worker cancellation.
 _RUNNING: dict[str, "asyncio.Task[Any]"] = {}
-
-# Best-effort current node for each in-flight run, surfaced to the UI via the
-# run-status endpoint so progress can be polled even when SSE frames are
-# buffered by an intermediary.
 _RUN_PROGRESS: dict[str, str] = {}
+_RUN_REGISTRY_PREFIX = "chat:run:"
+_RUN_CANCEL_PREFIX = "chat:cancel:"
+_RUN_WATCH_INTERVAL_SECONDS = 1.0
 
 #: Persisted as the assistant turn when a run cannot complete after the client
 #: disconnected (timeout/error), so history-polling recovery resolves with an
@@ -100,64 +99,131 @@ RUN_FAILURE_NOTE = (
 )
 
 
-def _register_run(session_id: str, task: "asyncio.Task[Any]") -> None:
-    if session_id:
-        _RUNNING[session_id] = task
+def _run_key(session_id: str) -> str:
+    return f"{_RUN_REGISTRY_PREFIX}{session_id}"
 
 
-def _unregister_run(session_id: str, task: "asyncio.Task[Any]") -> None:
+def _cancel_key(session_id: str) -> str:
+    return f"{_RUN_CANCEL_PREFIX}{session_id}"
+
+
+def _run_ttl(settings: Any) -> int:
+    return max(60, int(settings.chat_run_timeout_seconds + 60))
+
+
+def _run_id(task: "asyncio.Task[Any]") -> str:
+    return str(getattr(task, "_yawoto_run_id", ""))
+
+
+def _is_timed_out(task: "asyncio.Task[Any]") -> bool:
+    return bool(getattr(task, "_yawoto_timed_out", False))
+
+
+async def _set_run_node(session_id: str, run_id: str, node: Optional[str], ctx: Any) -> None:
+    if node is not None:
+        _RUN_PROGRESS[session_id] = node
+    metadata = await ctx.cache.get(_run_key(session_id))
+    if metadata is None:
+        metadata = {"run_id": run_id}
+    if isinstance(metadata, dict) and metadata.get("run_id") == run_id:
+        metadata["node"] = node
+        await ctx.cache.set(_run_key(session_id), metadata, ttl=_run_ttl(ctx.settings))
+
+
+async def _watch_run(session_id: str, task: "asyncio.Task[Any]", ctx: Any) -> None:
+    """Cancel the local task on a shared Stop request or the hard deadline."""
+    run_id = _run_id(task)
+    deadline = time.perf_counter() + ctx.settings.chat_run_timeout_seconds
+    try:
+        while not task.done():
+            cancelled = await ctx.cache.get(_cancel_key(session_id))
+            if isinstance(cancelled, dict) and cancelled.get("run_id") == run_id:
+                task.cancel()
+                return
+            remaining = deadline - time.perf_counter()
+            if remaining <= 0:
+                setattr(task, "_yawoto_timed_out", True)
+                logger.warning("chat run timed out", extra={"session_id": session_id})
+                task.cancel()
+                return
+            await asyncio.sleep(min(_RUN_WATCH_INTERVAL_SECONDS, remaining))
+    except (asyncio.CancelledError, Exception):
+        return
+
+
+async def _register_run(session_id: str, task: "asyncio.Task[Any]", ctx: Any, run_id: str) -> None:
+    if not session_id:
+        return
+    setattr(task, "_yawoto_run_id", run_id)
+    _RUNNING[session_id] = task
+    await _set_run_node(session_id, run_id, None, ctx)
+    asyncio.create_task(_watch_run(session_id, task, ctx))
+
+
+async def _unregister_run(session_id: str, task: "asyncio.Task[Any]", ctx: Any) -> None:
     if _RUNNING.get(session_id) is task:
         _RUNNING.pop(session_id, None)
+    run_id = _run_id(task)
+    if not run_id:
+        return
+    metadata = await ctx.cache.get(_run_key(session_id))
+    if isinstance(metadata, dict) and metadata.get("run_id") == run_id:
+        await ctx.cache.delete(_run_key(session_id))
+        await ctx.cache.delete(_cancel_key(session_id))
 
 
-async def _drain_run(session_id: str, task: "asyncio.Task[Any]") -> None:
-    """Await a POST /chat run detached after a client disconnect.
+async def _cancel_run(session_id: str, ctx: Any) -> bool:
+    task = _RUNNING.get(session_id)
+    run_id = _run_id(task) if task is not None else ""
+    if not run_id:
+        metadata = await ctx.cache.get(_run_key(session_id))
+        if isinstance(metadata, dict):
+            run_id = str(metadata.get("run_id") or "")
+    if not run_id:
+        return False
+    await ctx.cache.set(_cancel_key(session_id), {"run_id": run_id}, ttl=_run_ttl(ctx.settings))
+    if task is not None and not task.done():
+        task.cancel()
+    return True
 
-    Keeps the run registered (cancellable via /chat/cancel, visible to the
-    run-status endpoint) until it actually ends; run_query persists the turn
-    itself on success, so the client can recover the answer from the history.
-    """
+
+async def _drain_run(session_id: str, task: "asyncio.Task[Any]", ctx: Any) -> None:
+    """Keep a disconnected POST run registered until it finishes."""
     try:
         await task
     except asyncio.CancelledError:
-        pass  # cancelled via /chat/cancel while draining
+        pass
     except Exception:
         logger.warning("chat run failed after client disconnect", exc_info=True)
     finally:
-        _unregister_run(session_id, task)
+        await _unregister_run(session_id, task, ctx)
 
 
 @router.post("/chat/cancel")
 async def chat_cancel(
     payload: CancelPayload,
+    request: Request,
     user: TokenPayload = Depends(require_role(Role.VIEWER)),
 ) -> dict[str, bool]:
-    """Stop an in-flight chat run for the given session (UI stop button).
-
-    Cancelling the task raises CancelledError inside the LangGraph execution,
-    so the workflow really stops in the backend — no orphan LLM calls.
-    """
-    task = _RUNNING.get(payload.session_id)
-    if task is None or task.done():
-        return {"cancelled": False}
-    task.cancel()
-    return {"cancelled": True}
+    """Stop an in-flight chat run from any API worker."""
+    return {"cancelled": await _cancel_run(payload.session_id, get_ctx(request))}
 
 
 @router.get("/chat/sessions/{session_id}/run")
 async def get_chat_run_status(
     session_id: str,
+    request: Request,
     user: TokenPayload = Depends(require_user),
 ) -> dict[str, Any]:
-    """Best-effort status of an in-flight run, used by the UI progress poll.
-
-    Returns whether a graph run is still active and, when available, the name
-    of the node currently executing so the timeline can advance even if the
-    SSE stream is buffered by a proxy.
-    """
+    """Return shared run status and current node for the UI progress poll."""
+    ctx = get_ctx(request)
     task = _RUNNING.get(session_id)
-    running = task is not None and not task.done()
-    return {"running": running, "node": _RUN_PROGRESS.get(session_id)}
+    metadata = await ctx.cache.get(_run_key(session_id))
+    running = (task is not None and not task.done()) or isinstance(metadata, dict)
+    node = _RUN_PROGRESS.get(session_id)
+    if node is None and isinstance(metadata, dict):
+        node = metadata.get("node")
+    return {"running": running, "node": node}
 
 
 def _state_user_id(payload: ChatRequest, user: TokenPayload) -> str:
@@ -349,7 +415,7 @@ async def chat(
             settings=settings,
         ) as (trace_id, trace, handler):
             run_task = asyncio.create_task(run_query(graph, ctx, state, config=_graph_config(handler)))
-            _register_run(state.get("session_id", ""), run_task)
+            await _register_run(state.get("session_id", ""), run_task, ctx, uuid.uuid4().hex)
             # Wall-clock time the question arrived: the persisted prompt is
             # stamped with it (see the timeout-marker path below).
             received_at = datetime.now(timezone.utc)
@@ -376,6 +442,20 @@ async def chat(
                         pass  # memory persistence must never break the answer path
                 raise HTTPException(status_code=504, detail="le traitement a dépassé le délai maximal")
             except asyncio.CancelledError:
+                if _is_timed_out(run_task):
+                    if ctx.memory is not None:
+                        try:
+                            await ctx.memory.append_turn(
+                                state.get("session_id", ""),
+                                state.get("user_id", "anonymous"),
+                                [
+                                    ChatMessage(role="user", content=payload.query, created_at=received_at),
+                                    ChatMessage(role="assistant", content=RUN_FAILURE_NOTE),
+                                ],
+                            )
+                        except Exception:
+                            pass
+                    raise HTTPException(status_code=504, detail="le traitement a dépassé le délai maximal")
                 if run_task.cancelled():
                     # /chat/cancel (UI stop button) stopped the graph run.
                     raise HTTPException(status_code=409, detail="request cancelled by user")
@@ -387,11 +467,11 @@ async def chat(
                     extra={"session_id": state.get("session_id", "")},
                 )
                 keep_registered = True
-                asyncio.ensure_future(_drain_run(state.get("session_id", ""), run_task))
+                asyncio.ensure_future(_drain_run(state.get("session_id", ""), run_task, ctx))
                 raise
             finally:
                 if not keep_registered:
-                    _unregister_run(state.get("session_id", ""), run_task)
+                    await _unregister_run(state.get("session_id", ""), run_task, ctx)
             response.trace_id = trace_id
             if use_cache and is_cacheable(response.model_dump(mode="json"), settings):
                 # Never persist the internal trace in the shared answer cache:
@@ -427,7 +507,11 @@ async def _pump_events(
             await queue.put(("update", event))
         await queue.put(("done", None))
     except asyncio.CancelledError:
-        await queue.put(("cancelled", None))
+        current = asyncio.current_task()
+        if current is not None and _is_timed_out(current):
+            await queue.put(("error", TimeoutError("Le traitement a dépassé le délai maximal.")))
+        else:
+            await queue.put(("cancelled", None))
     except Exception as exc:  # surfaced to the consumer as an error frame
         await queue.put(("error", exc))
     finally:
@@ -445,10 +529,14 @@ class _NodeStartHandler(AsyncCallbackHandler):
         self,
         queue: "asyncio.Queue[tuple[str, Any]]",
         session_id: str,
+        ctx: Any,
+        run_id: str,
     ):
         super().__init__()
         self._queue = queue
         self._session_id = session_id
+        self._ctx = ctx
+        self._run_id = run_id
         self._last_node: Optional[str] = None
 
     async def on_chain_start(
@@ -462,7 +550,7 @@ class _NodeStartHandler(AsyncCallbackHandler):
         node = (metadata or {}).get("langgraph_node")
         if node and node != self._last_node:
             self._last_node = node
-            _RUN_PROGRESS[self._session_id] = node
+            await _set_run_node(self._session_id, self._run_id, node, self._ctx)
             self._queue.put_nowait(("node_start", node))
 
 
@@ -508,6 +596,7 @@ async def _stream_events(
     answer_cache: Optional[AnswerCache] = None,
     model_id: str = "",
     include_trace: bool = False,
+    ctx: Any = None,
 ) -> AsyncIterator[str]:
     """Yield SSE frames: one per node update, then the final ChatResponse.
 
@@ -517,6 +606,12 @@ async def _stream_events(
     does for the REST endpoint, token usage is metered, and the answer is
     cached when eligible; failed/aborted streams persist nothing.
     """
+    if ctx is None:
+        from types import SimpleNamespace
+        from backend.core.cache import InMemoryCache
+
+        ctx = SimpleNamespace(settings=settings, cache=InMemoryCache())
+
     from backend.workflows.graph import stream_query
 
     async with traced_chat_run(
@@ -535,12 +630,13 @@ async def _stream_events(
         metrics.chat_requests_total.inc()
         queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
         session_id = state.get("session_id", "")
-        callbacks: list[Any] = [_NodeStartHandler(queue, session_id)]
+        run_id = uuid.uuid4().hex
+        callbacks: list[Any] = [_NodeStartHandler(queue, session_id, ctx, run_id)]
         if handler is not None:
             callbacks.insert(0, handler)
         config = {"callbacks": callbacks}
         pump = asyncio.create_task(_pump_events(graph, state, config, queue, session_id))
-        _register_run(session_id, pump)
+        await _register_run(session_id, pump, ctx, run_id)
         logger.info("chat stream started", extra={"session_id": session_id, "query": payload.query[:80]})
         cancelled = False
         # Set when the client connection dropped mid-run: the generator then
@@ -715,7 +811,7 @@ async def _stream_events(
             if not disconnected:
                 yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)}, ensure_ascii=False)}\n\n"
         finally:
-            _unregister_run(session_id, pump)
+            await _unregister_run(session_id, pump, ctx)
             _RUN_PROGRESS.pop(session_id, None)
             if not pump.done():
                 pump.cancel()
@@ -805,6 +901,7 @@ async def chat_stream(
             answer_cache=answer_cache if use_cache else None,
             model_id=model_id,
             include_trace=include_trace,
+            ctx=ctx,
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
