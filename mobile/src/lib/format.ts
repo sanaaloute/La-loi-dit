@@ -41,17 +41,9 @@ export function shortDay(iso: string): string {
   return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
 }
 
-/** ISO date → "2 septembre 2026" for the subscription card. */
-export function longDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
-}
-
 /**
  * Date-only string ("2026-09-02") → "2 septembre 2026", parsed as a LOCAL
- * date so the day never shifts with the device timezone (unlike longDate,
- * which parses ISO strings as UTC midnight).
+ * date so the day never shifts with the device timezone.
  */
 export function localLongDate(ymd: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(ymd.trim());

@@ -4,6 +4,7 @@
 // the device instead of the client IP).
 
 import Constants from "expo-constants";
+import { File } from "expo-file-system";
 import { getDeviceId } from "./device";
 import {
   clearToken,
@@ -251,6 +252,7 @@ export interface PipelineNode {
 export const PIPELINE_NODES: PipelineNode[] = [
   { id: "input_guardrail", label: "Garde-fou d'entrée" },
   { id: "refusal", label: "Refus" },
+  { id: "language_gate", label: "Détection de la langue" },
   { id: "query_router", label: "Analyse de la question" },
   { id: "planner", label: "Planificateur" },
   { id: "context_agent", label: "Agent de contexte" },
@@ -273,6 +275,7 @@ export const PIPELINE_NODES: PipelineNode[] = [
 export const STEP_LABELS: Record<string, string> = {
   input_guardrail: "Vérification des règles de sécurité…",
   refusal: "Vérification des limites…",
+  language_gate: "Détection de la langue…",
   query_router: "Analyse de votre requête…",
   planner: "Planification de la recherche…",
   context_agent: "Analyse du contexte…",
@@ -645,29 +648,21 @@ export async function cancelChat(sessionId: string, token?: string | null): Prom
 // Voice transcription
 // ---------------------------------------------------------------------------
 
-export interface AudioFile {
-  uri: string;
-  /** File extension without the dot (m4a, mp4, webm, ogg…). */
-  ext: string;
-  mimeType: string;
-}
-
 /**
  * Transcribe a recorded audio file (voice input for the chat composer).
  * The returned text is meant to be reviewed by the user before sending.
  */
 export async function transcribeAudio(
-  file: AudioFile,
+  uri: string,
   token?: string | null,
 ): Promise<{ text: string }> {
   const form = new FormData();
-  // React Native FormData accepts a {uri, name, type} file descriptor; the
-  // backend sniffs the audio format from the filename extension.
-  form.append("file", {
-    uri: file.uri,
-    name: `vocal.${file.ext}`,
-    type: file.mimeType,
-  } as unknown as Blob);
+  // The global fetch is expo/fetch (WinterCG): its FormData only accepts
+  // strings and Blob-like parts, so the React Native {uri, name, type}
+  // descriptor throws "Unsupported FormDataPart implementation". The
+  // expo-file-system File implements bytes() and carries the recording's real
+  // filename — the backend sniffs the audio format from its extension.
+  form.append("file", new File(uri) as unknown as Blob);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 120_000);
@@ -1036,7 +1031,7 @@ export async function createShare(
 }
 
 // ---------------------------------------------------------------------------
-// Preferences & assistant memory
+// Preferences
 // ---------------------------------------------------------------------------
 
 export type Preferences = Record<string, unknown>;
@@ -1070,32 +1065,4 @@ export async function putPreferences(
   }
   const data = (await res.json()) as { preferences?: Preferences };
   return data.preferences ?? {};
-}
-
-export interface MemoryRecord {
-  id: string;
-  kind: string;
-  content: string;
-  created_at: string;
-  last_accessed: string;
-}
-
-/** What the assistant remembers about the current user (transparency). */
-export async function listMemories(token?: string | null): Promise<MemoryRecord[]> {
-  const res = await apiFetch("/auth/me/memories", { token });
-  if (!res.ok) {
-    const detail = await safeDetail(res);
-    throw new ApiError(detail ?? `Échec du chargement de la mémoire (${res.status})`, res.status);
-  }
-  const data = (await res.json()) as { memories?: MemoryRecord[] };
-  return data.memories ?? [];
-}
-
-/** Erase everything the assistant remembers about the current user. */
-export async function eraseMemories(token?: string | null): Promise<void> {
-  const res = await apiFetch("/auth/me/memories", { method: "DELETE", token });
-  if (!res.ok) {
-    const detail = await safeDetail(res);
-    throw new ApiError(detail ?? `Échec de l'effacement de la mémoire (${res.status})`, res.status);
-  }
 }

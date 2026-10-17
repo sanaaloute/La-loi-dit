@@ -76,16 +76,6 @@ function formatScenarioDate(date: Date): string {
   return `${date.getFullYear()}-${month}-${day}`;
 }
 
-const AUDIO_MIME: Record<string, string> = {
-  m4a: "audio/m4a",
-  mp4: "audio/mp4",
-  aac: "audio/aac",
-  caf: "audio/x-caf",
-  webm: "audio/webm",
-  ogg: "audio/ogg",
-  "3gp": "audio/3gpp",
-};
-
 type PanelTab = "agents" | "citations" | "preuves";
 
 export default function ChatScreen() {
@@ -205,12 +195,7 @@ export default function ChatScreen() {
     setTranscribing(true);
     setRecError(null);
     try {
-      const ext = (uri.split(".").pop() ?? "m4a").toLowerCase();
-      const { text } = await transcribeAudio({
-        uri,
-        ext,
-        mimeType: AUDIO_MIME[ext] ?? "audio/m4a",
-      });
+      const { text } = await transcribeAudio(uri);
       if (text && mountedRef.current) {
         setInput((prev) => (prev.trim() ? `${prev.trimEnd()} ${text}` : text));
       }
@@ -554,7 +539,7 @@ export default function ChatScreen() {
             style={styles.headerButton}
             accessibilityLabel="Nouvelle conversation"
           >
-            <Ionicons name="create-outline" size={18} color={colors.inkSoft} />
+            <Ionicons name="add-circle-outline" size={18} color={colors.inkSoft} />
           </Pressable>
           <Pressable
             onPress={toggleTheme}

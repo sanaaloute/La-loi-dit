@@ -198,9 +198,9 @@ export default function AccountScreen() {
         {/* Thème */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Thème</Text>
-          <Pressable style={styles.modelButton} onPress={toggleTheme}>
+          <Pressable style={styles.themeButton} onPress={toggleTheme}>
             <Ionicons name={isDark ? "moon" : "sunny"} size={16} color={colors.accent} />
-            <Text style={styles.modelButtonText}>{isDark ? "Sombre" : "Clair"}</Text>
+            <Text style={styles.themeButtonText}>{isDark ? "Sombre" : "Clair"}</Text>
             <Ionicons name="swap-horizontal-outline" size={14} color={colors.muted} />
           </Pressable>
         </View>
@@ -284,15 +284,6 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   profileText: { flex: 1 },
   profileName: { fontSize: 16, fontWeight: "600", color: colors.ink },
   profileDetail: { fontSize: 12, color: colors.muted, marginTop: 1 },
-  tierBadge: {
-    borderWidth: 1,
-    borderColor: colors.accent,
-    backgroundColor: colors.accentLight,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  tierBadgeText: { fontSize: 11, fontWeight: "600", color: colors.accent },
   mutedText: { fontSize: 13, color: colors.muted },
   usageBarTrack: {
     height: 8,
@@ -319,12 +310,7 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   chartBarEmpty: { backgroundColor: colors.border },
   chartLabels: { flexDirection: "row", justifyContent: "space-between", marginTop: 4 },
   chartLabel: { fontSize: 10, color: colors.faint },
-  subscriptionBlock: { gap: 6 },
-  subscriptionRow: { flexDirection: "row", justifyContent: "space-between" },
-  subscriptionLabel: { fontSize: 13, color: colors.muted },
-  subscriptionValue: { fontSize: 13, color: colors.ink, fontWeight: "500" },
-  subscriptionHint: { fontSize: 11, color: colors.faint, marginTop: 6 },
-  modelButton: {
+  themeButton: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
@@ -335,8 +321,7 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
-  modelButtonText: { flex: 1, fontSize: 13, fontWeight: "500", color: colors.ink },
-  cardHint: { fontSize: 11, color: colors.faint },
+  themeButtonText: { flex: 1, fontSize: 13, fontWeight: "500", color: colors.ink },
   disclaimerText: { fontSize: 12, lineHeight: 17, color: colors.inkSoft },
   sourceRow: {
     flexDirection: "row",
