@@ -33,7 +33,7 @@ PROVIDER_DEFAULT_API_BASES = {
     "ollama": "http://localhost:11434",
 }
 
-CLASSIFICATION_MODEL = "nemotron-3-nano:4b"
+CLASSIFICATION_MODEL = "qwen2.5:3b"
 SYNTHESIS_MODEL = "gemma4:12b"
 
 ROLE_MODEL_CONFIGS: dict[str, dict[str, Any]] = {
@@ -49,14 +49,14 @@ ROLE_MODEL_CONFIGS: dict[str, dict[str, Any]] = {
         "think_enabled": False,
         "num_ctx": 8192,
         "max_tokens": 2048,
-        "temperature": 0.0,
+        "temperature": 0.5,
     },
     "analysis": {
         "model": SYNTHESIS_MODEL,
         "think_enabled": False,
         "num_ctx": 32768,
         "max_tokens": 2048,
-        "temperature": 0.1,
+        "temperature": 0.5,
         "timeout_seconds": 120.0,
     },
     "synthesis": {
@@ -64,7 +64,7 @@ ROLE_MODEL_CONFIGS: dict[str, dict[str, Any]] = {
         "think_enabled": False,
         "num_ctx": 32768,
         "max_tokens": 4096,
-        "temperature": 0.1,
+        "temperature": 0.7,
     },
 }
 

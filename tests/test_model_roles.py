@@ -10,11 +10,12 @@ def test_role_clients_have_independent_generation_defaults(tmp_path):
     structured = resolve_role_llm("classification", base, settings)
     synthesis = resolve_role_llm("synthesis", base, settings)
 
-    assert structured.model == "ollama/nemotron-3-nano:4b"
+    assert structured.model == "ollama/qwen2.5:3b"
     assert structured.role_options["num_ctx"] == 16384
     assert structured.role_options["think_enabled"] is False
     assert structured._generation_options(None, None)["num_predict"] == 2048
     assert synthesis is base
+    assert synthesis.model == "ollama/gemma4:12b"
     assert synthesis.role_options["num_ctx"] == 32768
     analysis = resolve_role_llm("analysis", base, settings)
     assert analysis.timeout_seconds == 120.0

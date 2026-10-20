@@ -78,7 +78,7 @@ pip install -e .
 Production chat uses only Ollama running locally, without an API key. Two role
 models are fixed by the server:
 
-- **Nemotron 3 Nano 4B** (`nemotron-3-nano:4b`) handles language routing,
+- **Qwen 2.5 3B** (`qwen2.5:3b`) handles language routing,
   query routing, planning, claim refinement, ingestion classification, and
   optional LLM rerank scoring.
 - **Gemma 4 12B** (`gemma4:12b`) handles reasoning/reflection,
@@ -92,7 +92,7 @@ Install and start Ollama on the host, then pull the chat models and the separate
 embedding model:
 
 ```bash
-ollama pull nemotron-3-nano:4b
+ollama pull qwen2.5:3b
 ollama pull gemma4:12b
 ollama pull nomic-embed-text
 ```

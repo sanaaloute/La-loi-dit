@@ -95,12 +95,12 @@ overrides service addresses). Key groups:
 
 For containers, set both Ollama API base values to
 `http://host.docker.internal:11434`; for a host-run API, use
-`http://localhost:11434`. Pull `nemotron-3-nano:4b`, `gemma4:12b`, and the
+`http://localhost:11434`. Pull `qwen2.5:3b`, `gemma4:12b`, and the
 configured embedding model on that host before startup.
 
 ### Fixed local role models
 
-The server assigns **Nemotron 3 Nano 4B** (`nemotron-3-nano:4b`) to language
+The server assigns **Qwen 2.5 3B** (`qwen2.5:3b`) to language
 routing, query routing, planning, claim refinement, ingestion classification,
 and optional LLM rerank scoring. **Gemma 4 12B** (`gemma4:12b`) handles
 reasoning/reflection, direct/general/grounded synthesis, drafting enrichment,

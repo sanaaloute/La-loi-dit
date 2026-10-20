@@ -2,7 +2,7 @@
 
 > **Historical model-routing sections are superseded.** The optional per-role
 > model overrides described below belonged to the original upgrade. Current
-> production uses only keyless local Ollama with fixed Nemotron 3 Nano 4B and
+> production uses only keyless local Ollama with fixed Qwen 2.5 3B and
 > Gemma 4 12B assignments; users cannot select models, environment role
 > overrides are not supported, and there is no external chat failover. See
 > [RAG_ARCHITECTURE.md](RAG_ARCHITECTURE.md#fixed-local-role-models). The other
@@ -142,7 +142,7 @@ All settings use the `LEGAL_AI_` env prefix (`backend/core/config.py`):
 
 Legacy role-routing and model-override environment variables are not supported.
 Model IDs and role defaults are fixed in `ROLE_MODEL_CONFIGS`
-(`backend/core/llm.py`): Nemotron 3 Nano 4B for structured roles and Gemma 4
+(`backend/core/llm.py`): Qwen 2.5 3B for structured roles and Gemma 4
 12B for analysis/synthesis.
 
 Related pre-existing knobs that the new components also honor:

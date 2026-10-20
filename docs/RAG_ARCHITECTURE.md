@@ -104,7 +104,7 @@ Ollama client through `resolve_role_llm` (`backend/core/model_roles.py`). Legacy
 request `model` inputs are ignored, so callers cannot select a model or provider.
 The assignments are fixed in `backend/core/llm.py`:
 
-- **Nemotron 3 Nano 4B** (`nemotron-3-nano:4b`): language routing, query
+- **Qwen 2.5 3B** (`qwen2.5:3b`): language routing, query
   routing, planning, claim refinement, ingestion classification, and optional
   LLM rerank scoring (`classification` / `planner` roles).
 - **Gemma 4 12B** (`gemma4:12b`): reasoning/reflection (`analysis`), direct,
@@ -143,7 +143,7 @@ Agents depend on ports, never on SDKs (`backend/core/ports.py`); `AppContext`
   credentials) or `ApiCrossEncoderReranker` (Cohere-style `/rerank` endpoint,
   batched, one retry, falls back to heuristic on any failure). Selected by
   `reranker_provider`; `api` without full credentials degrades to heuristic.
-  This cross-encoder capability is separate from the optional Nemotron LLM
+  This cross-encoder capability is separate from the optional Qwen 2.5 LLM
   rescoring pass.
 - **Legal knowledge graph** — `backend/knowledge/` (`LegalGraphStore`,
   spec §19/§34): a relational store (SQLAlchemy Core, `database_url` with a

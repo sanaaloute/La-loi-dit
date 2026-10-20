@@ -1,6 +1,6 @@
 """Deterministic per-node-role model resolution.
 
-Nemotron handles bounded classification/planning tasks. Gemma handles legal
+Qwen 2.5 handles bounded classification/planning tasks. Gemma handles legal
 analysis and every user-facing free-text answer. There is no request or
 environment override: only the test-only mock provider bypasses this mapping.
 Role clients share the base client's ``usage_totals`` dict so API token

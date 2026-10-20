@@ -386,7 +386,7 @@ sender: `backend/core/push.py`; dead tokens pruned on DeviceNotRegistered).
 ## Models and usage (`backend/api/routers/models.py`, `usage.py`)
 
 `GET /api/v1/models` is a read-only compatibility/status endpoint for the two
-fixed local Ollama role models: `ollama/nemotron-3-nano:4b` and
+fixed local Ollama role models: `ollama/qwen2.5:3b` and
 `ollama/gemma4:12b`. Its response includes `"selectable": false`. Users cannot
 select models, and legacy `model` request fields or query parameters are
 ignored; the server always applies its fixed role assignments.

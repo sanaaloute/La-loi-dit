@@ -12,13 +12,13 @@ Candidate models are served only by the keyless host Ollama service
 (http://localhost:11434). Run with the project venv:
 
     .venv/bin/python scripts/benchmark_role_models.py \
-        --local nemotron-3-nano:4b gemma4:12b
+        --local qwen2.5:3b gemma4:12b
 
 For thinking-capable models, retain the production-path comparison above and
 add a separate native Ollama run with hidden reasoning disabled:
 
     .venv/bin/python scripts/benchmark_role_models.py \
-        --local nemotron-3-nano:4b --no-think-local
+        --local qwen2.5:3b --no-think-local
 """
 
 from __future__ import annotations
@@ -57,8 +57,8 @@ ROUTER_CASES: list[tuple[str, str]] = [
     ("C'est quoi l'OHADA ?", "retrieval"),
 ]
 
-# (prompt, expected ISO language) — the unaccented French entries are the
-# trap cases the 3b classifier failed in production.
+# (prompt, expected ISO language) — the unaccented French entries are
+# trap cases for language detection and French translation.
 LANG_CASES: list[tuple[str, str]] = [
     ("What is the notice period for dismissal?", "en"),
     ("What are my rights as a tenant?", "en"),

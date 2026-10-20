@@ -41,7 +41,7 @@ flowchart LR
 ## Fixed local role models
 
 Production LLM calls use keyless local Ollama with server-fixed assignments:
-**Nemotron 3 Nano 4B** (`nemotron-3-nano:4b`) for language routing, query
+**Qwen 2.5 3B** (`qwen2.5:3b`) for language routing, query
 routing, planning, claim refinement, ingestion classification, and optional LLM
 rerank scoring; **Gemma 4 12B** (`gemma4:12b`) for reasoning/reflection,
 direct/general/grounded synthesis, drafting enrichment, and memory summaries.

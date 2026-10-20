@@ -487,6 +487,9 @@ async def chat(
     return response
 
 
+_TERMINAL_GRAPH_NODES = frozenset({"output_guardrail", "refusal"})
+
+
 async def _pump_events(
     graph: Any,
     state: GraphState,
@@ -499,12 +502,16 @@ async def _pump_events(
     Cancelling this task raises CancelledError inside the LangGraph stream,
     which stops the workflow for real, then reports "cancelled" to the
     consumer so the SSE stream can close cleanly without persisting anything.
+    Terminal node updates complete the run without waiting for iterator cleanup.
     """
     from backend.workflows.graph import stream_query
 
+    events = stream_query(graph, state, config=config)
     try:
-        async for event in stream_query(graph, state, config=config):
+        async for event in events:
             await queue.put(("update", event))
+            if event.get("node") in _TERMINAL_GRAPH_NODES:
+                break
         await queue.put(("done", None))
     except asyncio.CancelledError:
         current = asyncio.current_task()
@@ -515,6 +522,10 @@ async def _pump_events(
     except Exception as exc:  # surfaced to the consumer as an error frame
         await queue.put(("error", exc))
     finally:
+        try:
+            await events.aclose()
+        except Exception:
+            pass
         _RUN_PROGRESS.pop(session_id, None)
 
 

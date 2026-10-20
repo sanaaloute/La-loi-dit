@@ -1,4 +1,5 @@
 import asyncio
+import json
 from types import SimpleNamespace
 
 from backend.api.routers.chat import (
@@ -11,7 +12,7 @@ from backend.api.routers.chat import (
 )
 from backend.core.cache import InMemoryCache
 from backend.core.config import Settings
-from backend.core.models import ChatRequest
+from backend.core.models import ChatRequest, FinalAnswer
 from backend.workflows.graph import initial_state
 
 
@@ -97,5 +98,61 @@ def test_stream_timeout_is_an_error_not_a_user_cancellation():
         assert frames
         assert '"type": "error"' in frames[-1]
         assert '"type": "cancelled"' not in frames[-1]
+
+    asyncio.run(scenario())
+
+
+def test_terminal_update_emits_final_without_waiting_for_stream_cleanup():
+    class TerminalThenSlowCleanupGraph:
+        def astream(self, state, *, config=None, stream_mode=None):
+            async def generate():
+                yield {
+                    "output_guardrail": {
+                        "final_answer": FinalAnswer(answer="Réponse vérifiée").model_dump(mode="json")
+                    }
+                }
+                await asyncio.sleep(60)
+                yield {}
+
+            return generate()
+
+    class Memory:
+        def __init__(self):
+            self.turns = []
+
+        async def append_turn(self, session_id, user_id, turns):
+            self.turns.extend(turns)
+
+        async def load_buffer(self, session_id, limit):
+            return self.turns
+
+    async def scenario():
+        ctx = _ctx(InMemoryCache(), timeout=5.0)
+        memory = Memory()
+
+        async def collect():
+            return [
+                frame
+                async for frame in _stream_events(
+                    TerminalThenSlowCleanupGraph(),
+                    initial_state("terminal", session_id="terminal-session"),
+                    ChatRequest(query="terminal", session_id="terminal-session"),
+                    "anonymous",
+                    ctx.settings,
+                    memory=memory,
+                    ctx=ctx,
+                )
+            ]
+
+        frames = await asyncio.wait_for(collect(), timeout=1.0)
+        events = [
+            json.loads(frame.removeprefix("data: "))
+            for frame in frames
+            if frame.startswith("data: ")
+        ]
+        assert events[-1]["type"] == "final"
+        assert events[-1]["response"]["answer"]["answer"] == "Réponse vérifiée"
+        assert not any(event["type"] == "cancelled" for event in events)
+        assert [message.role for message in memory.turns] == ["user", "assistant"]
 
     asyncio.run(scenario())

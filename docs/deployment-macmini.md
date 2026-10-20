@@ -45,7 +45,7 @@ brew install orbstack && open -a OrbStack
 # Ollama natively (Metal acceleration), with the fixed chat role models and
 # the separate local embedding model:
 brew install ollama && brew services start ollama
-ollama pull nemotron-3-nano:4b
+ollama pull qwen2.5:3b
 ollama pull gemma4:12b
 ollama pull nomic-embed-text
 
@@ -87,7 +87,7 @@ LEGAL_AI_MILVUS_URI=            # empty -> http://milvus:19530
 # Also replace the POSTGRES_* and application secret placeholders.
 ```
 
-Nemotron 3 Nano 4B handles language/query routing, planning, claim refinement,
+Qwen 2.5 3B handles language/query routing, planning, claim refinement,
 ingestion classification, and optional LLM rerank scoring. Gemma 4 12B handles
 reasoning/reflection, direct/general/grounded synthesis, drafting enrichment,
 and memory summaries. Users cannot select models or override these roles through

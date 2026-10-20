@@ -8,7 +8,7 @@ import { EmptyState, SectionCard, StatusBadge, TableShell, Td, Th, THead, format
 
 const LOCAL_MODEL_ROLES = [
   {
-    model: "Nemotron 3 Nano 4B",
+    model: "Qwen 2.5 3B",
     roles: "Classification, planification et tâches utilitaires structurées",
   },
   {

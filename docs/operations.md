@@ -60,7 +60,7 @@ newer — wire its `on_change` callback to queue a re-ingestion.
 ## Local Ollama
 
 Production chat requires the keyless Ollama service on the Docker host and the
-fixed `nemotron-3-nano:4b` and `gemma4:12b` role models. Containers reach it at
+fixed `qwen2.5:3b` and `gemma4:12b` role models. Containers reach it at
 `http://host.docker.internal:11434`; host-run processes use
 `http://localhost:11434`. The configured local embedding model is pulled and
 checked separately. Use `ollama ps` to inspect loaded models and
