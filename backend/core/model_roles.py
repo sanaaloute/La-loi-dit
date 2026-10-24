@@ -1,6 +1,6 @@
 """Deterministic per-node-role model resolution.
 
-Qwen 2.5 handles bounded classification/planning tasks. gpt-oss handles legal
+Qwen 2.5 handles all structured roles: classification, planning, legal
 analysis and every user-facing free-text answer. There is no request or
 environment override: only the test-only mock provider bypasses this mapping.
 Role clients share the base client's ``usage_totals`` dict so API token

@@ -12,13 +12,7 @@ Candidate models must be served by the Afrikia provider (see /v1/models); the
 bearer key comes from AFRIKIA_API_KEY in .env. Run with the project venv:
 
     .venv/bin/python scripts/benchmark_role_models.py \
-        --models qwen2.5-7b gpt-oss-20b
-
-For reasoning models, cap the hidden reasoning effort so it does not burn the
-completion budget on classification-style tasks:
-
-    .venv/bin/python scripts/benchmark_role_models.py \
-        --models gpt-oss-20b --effort low
+        --models qwen2.5-7b
 """
 
 from __future__ import annotations

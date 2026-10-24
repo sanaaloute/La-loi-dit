@@ -39,10 +39,10 @@ PROVIDER_DEFAULT_API_BASES = {
 
 # Role-to-model assignments are driven by measured accuracy on this codebase's
 # task suites (scripts/benchmark_role_models.py), not by provider labels.
-# NOTE: in production the newer models caused regressions:
+# NOTE: in production the newer models caused regressions or became unavailable:
 #   - gemma4-e4b mis-routed concrete legal questions to GENERAL;
 #   - nemotron-3-nano hung / stalled indefinitely during synthesis;
-#   - gpt-oss-20b started returning empty completions on Afrikia.
+#   - gpt-oss-20b was removed from Afrikia and had started returning empty completions.
 # As a safe, working configuration all structured roles currently use
 # qwen2.5-7b. It is smaller and reliably produces output on this provider.
 CLASSIFICATION_MODEL = "qwen2.5-7b"
