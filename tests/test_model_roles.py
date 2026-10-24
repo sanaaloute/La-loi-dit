@@ -11,9 +11,9 @@ def test_role_clients_have_independent_generation_defaults(tmp_path):
     synthesis = resolve_role_llm("synthesis", base, settings)
     planner = resolve_role_llm("planner", base, settings)
 
-    assert structured.model == "openai/gemma4-e4b"
+    assert structured.model == "openai/qwen2.5-7b"
     assert structured._generation_kwargs(None, None)["max_tokens"] == 2048
-    assert structured._generation_kwargs(None, None)["reasoning_effort"] == "low"
+    assert "reasoning_effort" not in structured._generation_kwargs(None, None)
     assert synthesis is base
     assert synthesis.model == "openai/nemotron-3-nano"
     assert synthesis._generation_kwargs(None, None)["reasoning_effort"] == "low"
@@ -29,4 +29,5 @@ def test_role_clients_have_independent_generation_defaults(tmp_path):
     override = structured._generation_kwargs(0.2, 99)
     assert override["temperature"] == 0.2
     assert override["max_tokens"] == 99
+    assert ROLE_MODEL_CONFIGS["classification"]["model"] == "qwen2.5-7b"
     assert ROLE_MODEL_CONFIGS["planner"]["model"] == "qwen2.5-7b"

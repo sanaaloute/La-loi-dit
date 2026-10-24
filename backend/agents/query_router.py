@@ -79,6 +79,22 @@ _DIRECT_CLAUSES = tuple(re.compile(p, re.IGNORECASE) for p in _DIRECT_CLAUSE_PAT
 
 _CLAUSE_SPLIT = re.compile(r"[,;:!?.\n…]+")
 
+# High-confidence legal fact patterns that must never be classified as GENERAL.
+# These are checked before the LLM classifier so concrete legal questions keep
+# their corpus grounding even if the classifier misbehaves.
+_RETRIEVAL_SHORTCUT_PATTERNS = (
+    r"délai de prescription|prescription des actions|délais de prescription",
+    r"délai de recours|délai pour former|délai de pourvoi",
+    r"délai de préavis|préavis de licenciement|préavis de démission",
+    r"peine (prévue|encourt|encourue|infligée)",
+    r"article\s+\d+",
+    r"code (civil|pénal|du travail|de procédure|des personnes)",
+    r"droit (ohada|OHADA)",
+    r"SARL|SAS|SA\b|RCCM",
+    r"divorce|mariage|succession",
+)
+_RETRIEVAL_SHORTCUTS = tuple(re.compile(p, re.IGNORECASE) for p in _RETRIEVAL_SHORTCUT_PATTERNS)
+
 
 def _normalize(text: str) -> str:
     """Lowercase, NFC-normalize and collapse whitespace for pattern matching."""
@@ -99,6 +115,18 @@ def is_direct_shortcut(query: str) -> bool:
     return bool(clauses) and all(
         any(pattern.fullmatch(clause) for pattern in _DIRECT_CLAUSES) for clause in clauses
     )
+
+
+def is_retrieval_shortcut(query: str) -> bool:
+    """Deterministic retrieval-route safety net (no LLM).
+
+    Catches concrete legal fact questions that must stay grounded in the
+    corpus, even if the LLM classifier would label them GENERAL.
+    """
+    if not query:
+        return False
+    normalized = _normalize(query)
+    return any(pattern.search(normalized) for pattern in _RETRIEVAL_SHORTCUTS)
 
 
 def parse_route(text: str) -> str:
@@ -123,6 +151,8 @@ class QueryRouterAgent(Agent):
         query = state.get("query", "")
         if is_direct_shortcut(query):
             route, method = "direct", "patterns"
+        elif is_retrieval_shortcut(query):
+            route, method = "retrieval", "patterns"
         else:
             route, method = await self._classify(state, ctx), "llm"
         return {

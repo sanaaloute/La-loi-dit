@@ -38,11 +38,12 @@ PROVIDER_DEFAULT_API_BASES = {
 }
 
 # Role-to-model assignments are driven by measured accuracy on this codebase's
-# task suites (scripts/benchmark_role_models.py), not by provider labels:
-# gemma4-e4b routes/detects best (14/14, 8/8); qwen2.5-7b plans best (3/3 at
-# half the latency of the other 3/3 models); nemotron-3-nano is the only model
-# that both grounds synthesis with citations (2/3) and abstains correctly (1/1).
-CLASSIFICATION_MODEL = "gemma4-e4b"
+# task suites (scripts/benchmark_role_models.py), not by provider labels.
+# NOTE: in production gemma4-e4b mis-routed concrete legal questions
+# (e.g. civil prescription deadlines) to the GENERAL path, so classification
+# stays on qwen2.5-7b for now. qwen2.5-7b plans best; nemotron-3-nano is the
+# only model that both grounds synthesis with citations and abstains correctly.
+CLASSIFICATION_MODEL = "qwen2.5-7b"
 PLANNER_MODEL = "qwen2.5-7b"
 SYNTHESIS_MODEL = "nemotron-3-nano"
 
@@ -51,9 +52,6 @@ ROLE_MODEL_CONFIGS: dict[str, dict[str, Any]] = {
         "model": CLASSIFICATION_MODEL,
         "max_tokens": 2048,
         "temperature": 0.0,
-        # gemma4-e4b is a reasoning model: cap hidden reasoning so it does not
-        # consume the completion budget on short structured outputs.
-        "reasoning_effort": "low",
     },
     "planner": {
         "model": PLANNER_MODEL,

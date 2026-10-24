@@ -37,12 +37,7 @@ _ALL_MODELS: list[dict[str, str]] = [
     {
         "id": f"afrikia/{CLASSIFICATION_MODEL}",
         "provider": "afrikia",
-        "label": "Afrikia structured-role model",
-    },
-    {
-        "id": f"afrikia/{PLANNER_MODEL}",
-        "provider": "afrikia",
-        "label": "Afrikia planner model",
+        "label": "Afrikia classification/planner model",
     },
 ]
 
