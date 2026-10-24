@@ -39,14 +39,15 @@ PROVIDER_DEFAULT_API_BASES = {
 
 # Role-to-model assignments are driven by measured accuracy on this codebase's
 # task suites (scripts/benchmark_role_models.py), not by provider labels.
-# NOTE: in production the newer models caused two regressions:
+# NOTE: in production the newer models caused regressions:
 #   - gemma4-e4b mis-routed concrete legal questions to GENERAL;
-#   - nemotron-3-nano hung / stalled indefinitely during synthesis.
-# So classification stays on qwen2.5-7b and synthesis/analysis stay on
-# gpt-oss-20b, which is the last known-good production configuration.
+#   - nemotron-3-nano hung / stalled indefinitely during synthesis;
+#   - gpt-oss-20b started returning empty completions on Afrikia.
+# As a safe, working configuration all structured roles currently use
+# qwen2.5-7b. It is smaller and reliably produces output on this provider.
 CLASSIFICATION_MODEL = "qwen2.5-7b"
 PLANNER_MODEL = "qwen2.5-7b"
-SYNTHESIS_MODEL = "gpt-oss-20b"
+SYNTHESIS_MODEL = "qwen2.5-7b"
 
 ROLE_MODEL_CONFIGS: dict[str, dict[str, Any]] = {
     "classification": {
@@ -64,10 +65,6 @@ ROLE_MODEL_CONFIGS: dict[str, dict[str, Any]] = {
         "max_tokens": 2048,
         "temperature": 0.5,
         "timeout_seconds": 120.0,
-        # Reasoning models count hidden reasoning against max_tokens; "low"
-        # keeps headroom for the answer itself. LiteLLM drops the parameter
-        # for models that do not support it (litellm.drop_params = True).
-        "reasoning_effort": "low",
     },
     "synthesis": {
         "model": SYNTHESIS_MODEL,
@@ -194,14 +191,20 @@ class LLMClient:
         # stalls a single upstream request (connection open, no response);
         # without a retry that one stall fails the whole graph node. Same
         # policy as the embedding adapter in core/embeddings.py.
-        transient = (
-            asyncio.TimeoutError,
-            litellm.APIConnectionError,
-            litellm.Timeout,
-            litellm.InternalServerError,
-            litellm.BadGatewayError,
-            litellm.RateLimitError,
-            litellm.ServiceUnavailableError,
+        # Use getattr(...) because litellm exception classes are lazily loaded
+        # and some names differ across installed versions.
+        transient = tuple(
+            exc_cls
+            for exc_cls in (
+                asyncio.TimeoutError,
+                getattr(litellm, "APIConnectionError", None),
+                getattr(litellm, "Timeout", None),
+                getattr(litellm, "InternalServerError", None),
+                getattr(litellm, "BadGatewayError", None),
+                getattr(litellm, "RateLimitError", None),
+                getattr(litellm, "ServiceUnavailableError", None),
+            )
+            if exc_cls is not None
         )
         last_exc: Optional[Exception] = None
         for attempt in range(2):

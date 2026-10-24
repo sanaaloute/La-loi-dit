@@ -33,11 +33,10 @@ class ModelEntry(BaseModel):
 
 _ALL_PROVIDERS = ["afrikia"]
 _ALL_MODELS: list[dict[str, str]] = [
-    {"id": f"afrikia/{SYNTHESIS_MODEL}", "provider": "afrikia", "label": "Afrikia synthesis model"},
     {
         "id": f"afrikia/{CLASSIFICATION_MODEL}",
         "provider": "afrikia",
-        "label": "Afrikia classification/planner model",
+        "label": "Afrikia role model",
     },
 ]
 
