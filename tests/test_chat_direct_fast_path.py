@@ -76,3 +76,28 @@ def test_stream_direct_shortcut_returns_final_frame(chat_client):
     body = res.text
     assert '"type": "final"' in body
     assert '"node": "direct_fast_path"' in body
+
+
+def test_direct_shortcut_falls_back_when_llm_fails(chat_client):
+    """Trivial queries should never show the technical 'models unavailable' message."""
+    ctx = chat_client.app.state.ctx
+    original_complete = ctx.llm.complete
+
+    async def _failing_complete(*args, **kwargs):
+        raise RuntimeError("provider down")
+
+    ctx.llm.complete = _failing_complete
+    try:
+        res = chat_client.post(
+            "/api/v1/chat",
+            json={"query": "hi"},
+            headers={"Authorization": f"Bearer {_token(chat_client)}"},
+        )
+    finally:
+        ctx.llm.complete = original_complete
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert "direct_fast_path" in data["answer"]["answer"] or "assistant" in data["answer"]["answer"].lower()
+    assert "momentanément incapables" not in data["answer"]["answer"]
+    assert "unavailable" not in data["answer"]["answer"].lower()
+    assert any("direct_fast_path" in t for t in data.get("trace", []))

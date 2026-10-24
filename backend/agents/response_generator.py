@@ -284,7 +284,10 @@ class ResponseGeneratorAgent(CompletionAgent):
                 "RESPONSE_LOW_CONFIDENCE_EN" if language.startswith("en") else "RESPONSE_LOW_CONFIDENCE_FR"
             )
         else:
-            draft = self._unavailable_message(language)
+            # Direct conversational route should never show the technical
+            # "models unavailable" message for a simple greeting. Fall back to
+            # a short, intent-aware reply so trivial queries always feel instant.
+            draft = self._direct_fallback_response(state.get("original_query") or state.get("query", ""), language)
         answer = FinalAnswer(
             answer=draft,
             language=language,
@@ -522,6 +525,43 @@ class ResponseGeneratorAgent(CompletionAgent):
         """Honest status message when every LLM provider failed to answer."""
         return get_prompt(
             "RESPONSE_UNAVAILABLE_EN" if language.startswith("en") else "RESPONSE_UNAVAILABLE_FR"
+        )
+
+    @staticmethod
+    def _direct_fallback_response(query: str, language: str) -> str:
+        """Deterministic reply for direct-route shortcuts when the LLM fails.
+
+        Keeps greetings, thanks, goodbyes and meta questions fast and reliable
+        even if the provider is down; the response is always in the user's
+        language when we can detect it.
+        """
+        q = (query or "").lower()
+        english = language.startswith("en")
+        if any(token in q for token in ("merci", "thanks", "thank you")):
+            return (
+                "You're welcome! Feel free to ask me anything about Burkinabe law."
+                if english
+                else "Je vous en prie ! N'hésitez pas si vous avez d'autres questions sur le droit burkinabè."
+            )
+        if any(token in q for token in ("au revoir", "adieu", "bye", "goodbye", "à bientôt", "a bientot")):
+            return (
+                "Goodbye! Have a great day."
+                if english
+                else "Au revoir ! Passez une bonne journée."
+            )
+        if any(token in q for token in ("qui es-tu", "qui êtes-vous", "who are you", "what can you do", "what do you do", "help", "aide", "présente-toi", "presente-toi")):
+            return (
+                "I am a legal research assistant for Burkina Faso. I can search the official sources "
+                "(Constitution, codes, laws, Official Gazette, OHADA) to answer your legal questions."
+                if english
+                else "Je suis un assistant de recherche juridique pour le Burkina Faso. Je peux rechercher "
+                "dans les sources officielles (Constitution, codes, lois, Journal Officiel, OHADA) pour répondre "
+                "à vos questions juridiques."
+            )
+        return (
+            "Hello! I am your legal research assistant for Burkina Faso. Ask me a legal question and I will search the official sources."
+            if english
+            else "Bonjour ! Je suis votre assistant de recherche juridique pour le Burkina Faso. Posez-moi une question juridique et je rechercherai dans les sources officielles."
         )
 
 
