@@ -58,18 +58,20 @@ ROLE_MODEL_CONFIGS: dict[str, dict[str, Any]] = {
     "planner": {
         "model": PLANNER_MODEL,
         "max_tokens": 2048,
-        "temperature": 0.5,
+        "temperature": 0.3,
     },
     "analysis": {
         "model": SYNTHESIS_MODEL,
         "max_tokens": 2048,
-        "temperature": 0.5,
+        "temperature": 0.2,
         "timeout_seconds": 120.0,
     },
     "synthesis": {
         "model": SYNTHESIS_MODEL,
         "max_tokens": 4096,
-        "temperature": 0.7,
+        # Near-deterministic drafting: at 0.7 the 7B model drifted — repeating
+        # conversation history and varying legal statements between runs.
+        "temperature": 0.2,
     },
 }
 
@@ -188,8 +190,10 @@ class LLMClient:
         if self.api_base:
             kwargs["api_base"] = self.api_base
         # One bounded retry on transient failures: the provider occasionally
-        # stalls a single upstream request (connection open, no response);
-        # without a retry that one stall fails the whole graph node. Same
+        # stalls a single upstream request (connection open, no response) or
+        # returns a retryable 5xx (Cloudflare 502/503 arrive wrapped as a
+        # generic APIError with a status_code, NOT as litellm.BadGatewayError).
+        # Without a retry that one blip fails the whole graph node. Same
         # policy as the embedding adapter in core/embeddings.py.
         # Use getattr(...) because litellm exception classes are lazily loaded
         # and some names differ across installed versions.
@@ -206,6 +210,13 @@ class LLMClient:
             )
             if exc_cls is not None
         )
+
+        def _is_transient(exc: Exception) -> bool:
+            if isinstance(exc, transient):
+                return True
+            status = getattr(exc, "status_code", None)
+            return isinstance(status, int) and status >= 500
+
         last_exc: Optional[Exception] = None
         for attempt in range(2):
             try:
@@ -215,12 +226,12 @@ class LLMClient:
                 content = resp.choices[0].message.content or ""
                 self._record_usage(system, user, content, getattr(resp, "usage", None))
                 return content
-            except transient as exc:
+            except Exception as exc:
+                if not _is_transient(exc):  # non-transient provider/request errors
+                    raise LLMError(f"LLM call failed ({self.model}): {exc}") from exc
                 last_exc = exc
                 if attempt == 0:
                     await asyncio.sleep(2.0)
-            except Exception as exc:  # non-transient provider/request errors
-                raise LLMError(f"LLM call failed ({self.model}): {exc}") from exc
         raise LLMError(f"LLM call failed ({self.model}): {last_exc}") from last_exc
 
     async def complete_json(self, system: str, user: str, schema: Type[T]) -> T:

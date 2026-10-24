@@ -10,11 +10,14 @@ everywhere). Two levels:
    ``settings.answer_cache_max_index`` most recent entries) holding each
    entry's query embedding. On exact-miss, cosine similarity against the
    index; a hit requires >= ``settings.answer_cache_semantic_threshold``
-   (0.98 — legal answers must not cross-contaminate).
+   (0.995 — legal answers must not cross-contaminate) AND identical numeric
+   tokens (article numbers, amounts, durations) between the two questions.
 
 Cacheability rules (enforced by callers / ``is_cacheable``):
 - only non-refused answers with confidence >= settings.confidence_threshold
   and requires_human_review == False;
+- answers declaring a coverage gap (``abstention_detected``) or with low
+  answer-text coverage are NEVER cached, whatever their confidence;
 - requests carrying an explicit ``session_id`` are treated as
   mid-conversation and BYPASS the cache entirely (the same query can mean
   something different with prior context);
@@ -127,7 +130,22 @@ def is_cacheable(response_json: dict[str, Any], settings: Settings) -> bool:
         return False
     if answer.get("requires_human_review"):
         return False
+    metadata = answer.get("metadata") or {}
+    # Never cache a declared non-answer, whatever its confidence score.
+    if metadata.get("abstention_detected"):
+        return False
+    # Nor an answer whose own text covers few of the planned sub-questions.
+    answer_coverage = metadata.get("answer_coverage")
+    if isinstance(answer_coverage, (int, float)) and answer_coverage < settings.coverage_retry_threshold:
+        return False
     return answer.get("confidence", 0.0) >= settings.confidence_threshold
+
+
+def _digit_tokens(text: str) -> frozenset[str]:
+    """Numeric tokens (article numbers, amounts, durations): two legal
+    questions that differ in these are different questions, however similar
+    their embeddings."""
+    return frozenset(re.findall(r"\d+", text))
 
 
 class AnswerCache:
@@ -185,14 +203,21 @@ class AnswerCache:
             index = await self._load_index()
             if not index:
                 return None
-            vector = await self._embed(normalize_query(query))
+            normalized = normalize_query(query)
+            vector = await self._embed(normalized)
             if vector is None:
                 return None
             threshold = self.settings.answer_cache_semantic_threshold
+            digits = _digit_tokens(normalized)
             for entry in reversed(index):  # most recent first
                 # Near-identical queries may still differ by user, legal date,
                 # language, corpus, or model configuration.
                 if entry.get("model") != model_id:
+                    continue
+                # Same-template questions that differ by an article/amount/
+                # duration number are DIFFERENT legal questions: no cache hit
+                # unless the numeric tokens match exactly.
+                if frozenset(entry.get("digits", ())) != digits:
                     continue
                 if _cosine(vector, entry.get("embedding") or []) >= threshold:
                     hit = await self.cache.get(entry["key"])
@@ -203,12 +228,21 @@ class AnswerCache:
 
     async def _index_add(self, query: str, key: str, model_id: str) -> None:
         try:
-            vector = await self._embed(normalize_query(query))
+            normalized = normalize_query(query)
+            vector = await self._embed(normalized)
             if vector is None:
                 return
             index = await self._load_index()
             index = [e for e in index if e.get("key") != key]
-            index.append({"key": key, "model": model_id, "embedding": vector, "created_at": time.time()})
+            index.append(
+                {
+                    "key": key,
+                    "model": model_id,
+                    "embedding": vector,
+                    "digits": sorted(_digit_tokens(normalized)),
+                    "created_at": time.time(),
+                }
+            )
             index = index[-self.settings.answer_cache_max_index :]
             await self.cache.set(_INDEX_KEY, index, ttl=self.settings.cache_ttl_seconds)
         except Exception:

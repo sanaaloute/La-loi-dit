@@ -26,8 +26,12 @@ there is no template fallback. The prompt contract:
 - Quoted articles must be recopied in full, word for word (only PDF-extraction
   formatting repairs allowed, never truncation with "...").
 - If the evidence is insufficient, the model must say so instead of guessing.
-- One corrective retry: if the draft carries no `[n]` marker while evidence
-  exists, the LLM is asked once to rewrite with citations.
+- Corrective retries (one each, never a loop): if the draft carries no `[n]`
+  marker while evidence exists, the LLM is asked once to rewrite with
+  citations; if it declares the question uncovered although the coverage audit
+  says the evidence covers it, it is asked once to answer from the excerpts;
+  if it contradicts the cited excerpts on numbers/durations, it is asked once
+  to rewrite in agreement with them (the conflicting claim is named).
 
 **Response format (spec §40)**: complex question types (`rights`,
 `obligations`, `procedure`, `legal_rule`, `case_analysis`, `comparison`) get a
@@ -132,10 +136,37 @@ The node **qualifies and flags — it never rewrites answer text**: unsupported
 claims raise bilingual warnings, contradictory claims additionally set
 `requires_human_review=True`, and
 `confidence_breakdown.legal_support_confidence` is recomputed as the fraction of
-supported claims dampened by the contradicted share
-(`supported × (1 − contradictory/total)`). The aggregate is then recalculated
-with legal support and post-generation answer coverage; contradicted or
-LLM-unverified answers are capped below the serving thresholds.
+supported claims dampened by the contradicted share and (at half weight) the
+unsupported share (`supported × (1 − (contradictory + 0.5 × insufficient)/total)`).
+Insufficiency declarations (« …n'est pas couverte par les extraits [1] ») are
+excluded from claims by `extract_claims`: they are status statements, not legal
+statements, and must not earn citation/support credit. The aggregate is then
+recalculated with legal support and the pre-draft EVIDENCE coverage —
+answer-text coverage stays diagnostic metadata (`metadata["answer_coverage"]`)
+because an abstention restating the question's terms must not inflate the
+score; contradicted, LLM-unverified or abstaining answers are capped below the
+serving thresholds.
+
+## Answerability gate
+
+`backend/agents/answerability.py` detects insufficiency/abstention
+declarations in the draft (phrase-based, accent-insensitive, FR+EN) and
+prevents the historical failure where a well-cited non-answer displayed a 0.96
+confidence:
+
+- the response generator runs ONE extra corrective retry
+  (`RESPONSE_ABSTENTION_CORRECTIVE`) when the draft declares the question
+  uncovered although the deterministic coverage audit says the evidence covers
+  it;
+- a flat refusal (no affirmative cited content) caps confidence at
+  `human_review_threshold` (0.40) — the low-confidence replacement takes over;
+- a partial answer (some grounded content plus a declared gap) caps just below
+  `confidence_threshold` (0.54) and keeps its body — the output guardrail
+  exempts `metadata["abstention_partial"]` answers from wholesale replacement;
+- caveats confined to the mandated « ## Points d'incertitude » section are
+  ignored: that section exists precisely to declare gaps;
+- `metadata["abstention_detected"]` excludes the answer from the answer cache
+  regardless of score.
 
 ## Output guard checks
 
@@ -164,12 +195,15 @@ below `human_review_threshold`) and high-risk query patterns.
 
 `FinalAnswer.confidence` starts as **0.6 × citation accuracy + 0.4 ×
 coverage**. Claim verification then blends in legal support (default weight
-0.2) and replaces retrieval-only coverage with post-generation answer
-coverage. Each unresolved conflict multiplies the aggregate by 0.85 (graded
-dampener, exponent capped at 3), a reflection-flagged incomplete answer caps
+0.2), keeping the pre-draft EVIDENCE coverage in the blend (answer-text
+coverage is diagnostic only). Each unresolved conflict multiplies the
+aggregate by 0.85 (graded dampener, exponent capped at 3), a
+reflection-flagged incomplete answer caps
 it at 0.75, and undated evidence in a time-sensitive plan applies the temporal
 penalty. Contradicted claims cap the score at the human-review threshold;
-LLM-unverified claims cap it below the low-confidence threshold. Citation
+LLM-unverified claims cap it below the low-confidence threshold; declared
+abstention caps it at 0.40 (flat refusal) or 0.54 (partial answer) via the
+answerability gate. Citation
 accuracy is computed once from the raw draft and is not applied again during
 cleanup. This remains a heuristic grounding score pending calibration against
 human labels, not a probability of legal correctness.
@@ -180,10 +214,10 @@ The per-dimension detail lives in `ConfidenceBreakdown`:
 |---|---|
 | `source_confidence` | mean `AUTHORITY_WEIGHTS` of the evidence |
 | `retrieval_confidence` | mean of the top-3 absolute relevance scores (max of rerank/retrieval, clamped); RRF `fusion_score` is excluded |
-| `legal_support_confidence` | fraction of claims DIRECT/INDIRECT, dampened by contradictions (claim verification) |
+| `legal_support_confidence` | fraction of claims DIRECT/INDIRECT, dampened by contradictions and (half weight) unsupported claims (claim verification) |
 | `temporal_confidence` | 1.0 by default; 0.5 with unresolved conflicts; 0.6 when a time-sensitive plan rests only on undated sources |
 | `citation_confidence` | citation accuracy on the raw draft, synchronized after verification |
-| `coverage` | post-generation sub-question coverage; pre-generation retrieval coverage is preserved in metadata |
+| `coverage` | pre-draft sub-question coverage against the evidence; answer-text coverage is preserved in `metadata["answer_coverage"]` |
 
 ## Context-sensitive disclaimers (spec §33)
 

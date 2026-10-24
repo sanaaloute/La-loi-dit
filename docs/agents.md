@@ -42,29 +42,29 @@ flowchart LR
 
 Production LLM calls use the private Afrikia provider (OpenAI-compatible,
 bearer key `AFRIKIA_API_KEY`, base URL `https://afrikia.neobytech.net/v1`) with
-server-fixed assignments:
-**gemma4-e4b** for language routing, query
-routing, claim refinement, ingestion classification, and optional LLM
-rerank scoring; **Qwen 2.5 7B** (`qwen2.5-7b`) for retrieval planning; and
-**nemotron-3-nano** for reasoning/reflection,
+server-fixed assignments: **Qwen 2.5 7B** (`qwen2.5-7b`) for ALL roles —
+language routing, query routing, claim refinement, ingestion classification,
+optional LLM rerank scoring, retrieval planning, reasoning/reflection,
 direct/general/grounded synthesis, drafting enrichment, and memory summaries.
 The assignments come from measured accuracy on the repo's benchmark suite
-(`scripts/benchmark_role_models.py`), not provider labels — nemotron-3-nano
-was the only model that both grounded synthesis with citations and abstained
-correctly.
+(`scripts/benchmark_role_models.py`), not provider labels. Larger or newer
+models previously caused regressions or became unavailable on the provider
+(gemma4-e4b mis-routed concrete legal questions to GENERAL; nemotron-3-nano
+stalled during synthesis; gpt-oss-20b was removed from Afrikia), so the safe
+working configuration keeps every structured role on qwen2.5-7b.
 Users cannot select models, and environment role overrides or runtime catalog
 changes cannot replace these assignments. There is no external chat failover;
 daily quotas and anti-abuse rate limits still cover all role calls. The
 `mock` provider is reserved for deterministic tests/development.
 
 `ROLE_MODEL_CONFIGS` (`backend/core/llm.py`) is the single source for model IDs
-and role defaults: role-specific token and temperature limits, with
-`reasoning_effort=low` on the reasoning models (gemma4-e4b and nemotron-3-nano
-count hidden reasoning against `max_tokens`) and a near-deterministic 0.2
-temperature on synthesis. Analysis is capped at 120 seconds and
-2,048 tokens per call;
-synthesis keeps the larger answer budget. The public model catalog derives its
-IDs from the same constants.
+and role defaults: role-specific token and temperature limits — 0.0 for
+classification, 0.3 for planning, and a near-deterministic 0.2 for analysis
+and synthesis (higher temperatures made the 7B model drift: repeating
+conversation history and varying legal statements between runs). Analysis is
+capped at 120 seconds and 2,048 tokens per call; synthesis keeps the larger
+answer budget (4,096 tokens). The public model catalog derives its IDs from
+the same constants.
 
 Embeddings, faster-whisper STT, OCR, semantic guardrails, and cross-encoder
 reranking are separate capabilities, not alternative chat role models.
@@ -100,14 +100,23 @@ validates the returned JSON (including fenced JSON); on any failure — and with
 the `mock` provider — it uses `heuristic_plan`, a keyword-driven deterministic
 planner that can never hallucinate. Tool-transcript output is also rejected and
 falls back to that deterministic plan. Also extracts an optional `scenario_date`
-for legal timeline reasoning.
+for legal timeline reasoning. Independently of which path produced the plan,
+the curated issue decomposition (`deterministic_decompose`, including FACTUAL
+questions — "Quel est le délai de…" is the dominant real-world shape) is merged
+in as a floor: broad questions always get issue-phrased keyword searches, not
+just their raw keywords.
 
 ## context_agent (`backend/agents/context_agent.py`)
 
 Loads the conversation window from the memory store
 (`load_buffer(session_id, limit=20)`, i.e. the last 10 turns) so answers
 stay coherent across long conversations, server restarts and workflow
-interruptions.
+interruptions. Past ASSISTANT answers are truncated much harder than user
+turns (`context_assistant_max_chars` ≈ 400 vs `context_message_max_chars`
+2000): they are orientation context, not a template to parrot — full-length
+prior answers in the prompt caused in-session answer contamination. Prompt
+consumers (reasoning_agent, response_generator) place the history block LAST,
+after the question and the evidence, in a "do not repeat" frame.
 
 ## memory_agent (`backend/agents/memory_agent.py`)
 
@@ -150,7 +159,10 @@ Output: `ranked_evidence`.
 
 Reads only the ranked evidence, identifies what is established, what is
 missing and any contradictions. May set `needs_more_retrieval` to trigger
-**one** bounded retrieval retry. With no usable evidence it states that
+**one** bounded retrieval retry — honored only when evidence is genuinely
+thin (≤ `reasoning_retry_max_evidence` chunks) or coverage is below
+`coverage_retry_threshold`, so a well-covered question never pays a double
+retrieval pass. With no usable evidence it states that
 explicitly instead of guessing (grounded answer policy).
 
 ## reflection (`backend/agents/reflection_agent.py`)
@@ -158,9 +170,10 @@ explicitly instead of guessing (grounded answer policy).
 Self-critique before answering: did the analysis answer every part of the
 question, is every claim citable, could anything be hallucinated, are there
 contradictions? Produces a `ReflectionResult`. May request one retrieval
-re-run (`should_retry_retrieval`), bounded by `MAX_REFLECTION_ITERATIONS=1`
-and the shared retrieval retry budget. Falls back to a heuristic reflection
-without an LLM.
+re-run (`should_retry_retrieval`), bounded by `MAX_REFLECTION_ITERATIONS=1`,
+the shared retrieval retry budget, and the same sufficiency gate as the
+reasoning agent (no retry when evidence is rich and coverage is high).
+Falls back to a heuristic reflection without an LLM.
 
 ## claim_verification (`backend/agents/claim_verification.py`)
 
@@ -170,13 +183,19 @@ substantive statements (headings, source lists and short connectors skipped),
 grades each against the evidence with deterministic heuristics
 (`direct`/`indirect`/`insufficient`/`contradictory`, reusing the coverage
 auditor's discriminative terms plus a conservative number-mismatch check) and
-attaches the resulting `Claim` list to the `FinalAnswer`. Insufficient claims
+attaches the resulting `Claim` list to the `FinalAnswer`. Insufficiency
+declarations (« …n'est pas couverte par les extraits [1] ») are excluded from
+claims: they are status statements, not legal statements, and must not earn
+citation/support credit. Insufficient claims
 raise bilingual warnings; contradictory ones also set
 `requires_human_review`. Recomputes
 `confidence_breakdown.legal_support_confidence` as the supported-claim
-fraction dampened by the contradicted share, then recalculates the aggregate
-with claim support and post-generation answer coverage. Contradicted or
-LLM-unverified answers are capped below the serving thresholds.
+fraction dampened by the contradicted share and (at half weight) the
+unsupported share, then recalculates the aggregate with claim support and the
+pre-draft EVIDENCE coverage — answer-text coverage is kept as diagnostic
+metadata only, because an abstention that restates the question's terms must
+not inflate confidence. Contradicted, LLM-unverified or abstaining answers
+are capped below the serving thresholds.
 
 With a real LLM provider (`claim_llm_refinement_enabled`, skipped for the
 `mock` provider), heuristic-supported claims are then re-graded by an LLM
@@ -207,11 +226,34 @@ routes skip retrieval and citations; general answers use model knowledge only
 for concepts that do not depend on a current or jurisdiction-specific text and
 receive an explicit ungrounded-note.
 
+The prompt leads with the question, then the evidence block; conversation
+history comes LAST in a "do not repeat" frame (leading with history made the
+7B model repeat previous answers for the new question). One corrective retry
+asks for `[n]` citations when the draft has none; a second, independent
+corrective retry fires when the draft DECLARES the question uncovered although
+the deterministic coverage audit says the evidence covers it
+(`RESPONSE_ABSTENTION_CORRECTIVE`); a third fires when the draft CONTRADICTS
+the cited excerpts on numbers/durations (`RESPONSE_CONTRADICTION_CORRECTIVE`,
+naming the conflicting claim — the downstream claim_verification re-checks the
+final draft). If the abstention persists, the
+answerability gate (`backend/agents/answerability.py`) caps the confidence:
+flat refusal → ≤ `human_review_threshold` (0.40, the low-confidence
+replacement takes over); partial answer with some grounded content →
+< `confidence_threshold` (0.54) so a declared gap can never display a high
+badge. Caveats confined to the mandated « ## Points d'incertitude » section
+are ignored — that section exists to declare gaps, so following the format is
+not punished. The detection is phrase-based, accent-insensitive
+(`abstention_detected` / `abstention_partial` in `FinalAnswer.metadata`), and
+abstaining answers are excluded from the answer cache.
+
 ## output_guardrail (`backend/agents/output_guardrail.py`)
 
 Final policy gate. Performs unsafe-output checks, then replaces any non-refused
 retrieval answer below confidence 0.55 with a localized insufficient-information
-message (citations/evidence are cleared and `low_confidence_fallback` is set).
+message (citations/evidence are cleared and `low_confidence_fallback` is set) —
+EXCEPT partial answers flagged `abstention_partial`: those keep their body
+because they still answer part of the question and their sub-0.55 badge is
+honest; wholesale replacement would discard usable content.
 Safety refusals take precedence; direct/general routes are not subject to that
 retrieval-confidence fallback. Sufficiently grounded answers receive the
 appropriate legal disclaimer (French/English). When claim verification flagged

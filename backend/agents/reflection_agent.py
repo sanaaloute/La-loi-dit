@@ -60,13 +60,30 @@ class ReflectionAgent(CompletionAgent):
         count = state.get("reflection_count", 0) + 1
         if count > ctx.settings.max_reflection_iterations:
             result.should_retry_retrieval = False
+        # Same sufficiency gate as the reasoning agent: re-fetching the same
+        # tasks when evidence is rich and coverage is high doubles retrieval
+        # latency for zero new chunks (production trace: LLM reflection
+        # retried with 18 ranked chunks and 89% coverage).
+        declined = False
+        if result.should_retry_retrieval:
+            evidence = list(state.get("ranked_evidence", []))
+            coverage_report = state.get("coverage_report")
+            thin = len(evidence) <= ctx.settings.reasoning_retry_max_evidence
+            low_coverage = (
+                coverage_report is not None
+                and coverage_report.coverage < ctx.settings.coverage_retry_threshold
+            )
+            if not (thin or low_coverage):
+                result.should_retry_retrieval = False
+                declined = True
         return {
             "reflection": result,
             "reflection_count": count,
             "trace": [
                 *state.get("trace", []),
                 f"reflection ({count}/{ctx.settings.max_reflection_iterations}): "
-                f"{'retry retrieval' if result.should_retry_retrieval else 'proceed to answer'}",
+                f"{'retry retrieval' if result.should_retry_retrieval else 'proceed to answer'}"
+                f"{' (retry declined: evidence sufficient)' if declined else ''}",
             ],
         }
 

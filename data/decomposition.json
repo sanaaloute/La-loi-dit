@@ -19,6 +19,7 @@
     "indemnité de licenciement",
     "licenciement abusif et dommages-intérêts",
     "droits acquis du salarié (congés payés, certificat de travail)",
+    "délai et procédure de recours contre le licenciement",
     "voies de recours du salarié licencié",
     "juridiction compétente en cas de licenciement"
    ]
@@ -118,6 +119,28 @@
     "capital social et apports",
     "dirigeants sociaux et responsabilité",
     "dissolution et liquidation de la société"
+   ]
+  },
+  "prescription": {
+   "domains": [
+    "civil_law"
+   ],
+   "keywords": [
+    "prescription",
+    "prescrit",
+    "forclusion",
+    "forclos",
+    "délai pour agir",
+    "délai d'action",
+    "\\bstatute of limitations\\b",
+    "\\blimitation period\\b"
+   ],
+   "issues": [
+    "délai de prescription des actions personnelles et réelles",
+    "point de départ du délai de prescription",
+    "suspension et interruption de la prescription",
+    "prescription et délais de forclusion en matière civile",
+    "délais de recours et d'opposition en justice"
    ]
   }
  }

@@ -53,7 +53,7 @@ _FR_MARKERS = (
 _DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
     "constitution": ("constitution", "constitutionnel"),
     "criminal_law": ("pénal", "penal", "infraction", "crime", "délit", "criminal"),
-    "civil_law": ("civil", "contrat", "responsabilité civile"),
+    "civil_law": ("civil", "contrat", "responsabilité civile", "prescription", "forclusion"),
     "family_code": ("famille", "mariage", "divorce", "filiation", "family"),
     "labor_code": ("travail", "travailleur", "licenciement", "licencié", "salarié", "salaire", "employeur", "employé", "labor", "labour"),
     "tax_law": ("impôt", "impots", "fiscal", "taxe", "tva", "tax"),

@@ -30,10 +30,16 @@ class ReasoningAgent(CompletionAgent):
     def _build_user_message(self, state: GraphState, ctx: Optional[AppContext] = None) -> str:
         settings = ctx.settings if ctx is not None else get_settings()
         memory_sections = format_memory_sections(state, max_entry_chars=settings.context_message_max_chars)
-        prefix = f"{memory_sections}\n\n" if memory_sections else ""
+        # History goes last (same anti-contamination framing as the response
+        # generator): the question and the evidence lead the prompt.
+        suffix = (
+            "\n\n---\nCONTEXTE DE CONVERSATION (context only — do not repeat or "
+            "continue it / ne pas répéter):\n"
+            f"{memory_sections}"
+        ) if memory_sections else ""
         evidence = list(state.get("ranked_evidence", []))
         if not evidence:
-            return f"{prefix}Question: {state['query']}\n\nNo evidence was retrieved."
+            return f"Question: {state['query']}\n\nNo evidence was retrieved.{suffix}"
         # ranked_evidence is already bounded per sub-question by the ranking
         # node; every kept chunk reaches the prompt.
         evidence_text = "\n\n".join(
@@ -41,12 +47,24 @@ class ReasoningAgent(CompletionAgent):
             f"{repair_extraction_artifacts(c.content)[: settings.reasoning_max_excerpt_chars]}"
             for i, c in enumerate(evidence, start=1)
         )
-        return f"{prefix}Question: {state['query']}\n\nPreuves:\n{evidence_text}"
+        return f"Question: {state['query']}\n\nPreuves:\n{evidence_text}{suffix}"
 
     def _parse_final(self, text: str, state: GraphState, ctx: AppContext) -> dict[str, Any]:
         retries = state.get("retrieval_retries", 0)
         max_retries = ctx.settings.max_retrieval_retries
-        needs_more = text.strip().lower().startswith("insufficient:")
+        wants_retry = text.strip().lower().startswith("insufficient:")
+        # Honor the retry only when evidence is genuinely thin or coverage is
+        # low: re-fetching the same tasks otherwise returns the same chunks
+        # and doubles retrieval latency for nothing (production trace: retry
+        # requested with 18 ranked chunks and 89% coverage).
+        evidence = list(state.get("ranked_evidence", []))
+        coverage_report = state.get("coverage_report")
+        thin = len(evidence) <= ctx.settings.reasoning_retry_max_evidence
+        low_coverage = (
+            coverage_report is not None
+            and coverage_report.coverage < ctx.settings.coverage_retry_threshold
+        )
+        needs_more = wants_retry and (thin or low_coverage)
         if needs_more and retries < max_retries and not state.get("needs_more_retrieval"):
             return {
                 "needs_more_retrieval": True,
@@ -57,7 +75,11 @@ class ReasoningAgent(CompletionAgent):
         return {
             "reasoning_notes": text.strip(),
             "needs_more_retrieval": False,
-            "trace": [*state.get("trace", []), f"reasoning: analyzed {len(state.get('ranked_evidence', []))} evidence chunks"],
+            "trace": [
+                *state.get("trace", []),
+                f"reasoning: analyzed {len(state.get('ranked_evidence', []))} evidence chunks"
+                + (" (retry declined: evidence sufficient)" if wants_retry else ""),
+            ],
         }
 
 

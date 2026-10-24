@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     tier_catalog_json: str = ""
     # --- token metering / quotas / answer cache -------------------------------
     answer_cache_enabled: bool = True
-    answer_cache_semantic_threshold: float = 0.98  # cosine floor for near-duplicate hits
+    answer_cache_semantic_threshold: float = 0.995  # cosine floor for near-duplicate hits; legal questions differing by one fact must not share answers
     answer_cache_max_index: int = 50  # semantic index size (most recent entries)
     embedding_model: str = "text-embedding-3-small"
     embedding_dimension: int = 384
@@ -457,6 +457,8 @@ class Settings(BaseSettings):
     conflict_prefix_chars: int = 80  # identical-content prefix length compared before declaring a contradiction
     context_buffer_limit: int = 20  # default window size of the load_conversation_buffer tool
     context_message_max_chars: int = 2000  # per-message char cap in the loaded conversation buffer
+    context_assistant_max_chars: int = 400  # tighter cap for past ASSISTANT answers: a reminder, not a template to parrot
+    reasoning_retry_max_evidence: int = 2  # reasoning's INSUFFICIENT retry is honored only with this many chunks or fewer (or low coverage)
 
     @property
     def langfuse_enabled(self) -> bool:

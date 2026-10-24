@@ -32,11 +32,20 @@ async def load_conversation_buffer(ctx: Any, state: Any, args: LoadConversationB
     from backend.core.models import plain_message_content
 
     max_chars = ctx.settings.context_message_max_chars
+    # Past assistant answers get a much tighter cap than user turns: they are
+    # orientation context, not a template to parrot. Full-length prior answers
+    # in the prompt caused in-session answer contamination.
+    assistant_max = getattr(ctx.settings, "context_assistant_max_chars", 400)
     buffer: list[dict[str, Any]] = []
     if ctx.memory is not None and args.session_id:
         messages = await ctx.memory.load_buffer(args.session_id, limit=args.limit)
         buffer = [
-            {"role": m.role, "content": plain_message_content(m.content)[:max_chars]}
+            {
+                "role": m.role,
+                "content": plain_message_content(m.content)[
+                    : max_chars if m.role == "user" else assistant_max
+                ],
+            }
             for m in messages
         ]
     return buffer

@@ -1,0 +1,93 @@
+{
+  "name": "regression_failures",
+  "description": "Production failure cases reported 2026-10-25 (divorce-answer contamination, 96% confidence on a non-answer, false 'not covered'). Multi-turn sessions reproduce the in-session contamination; fresh sessions check the same questions without history. Assertions: forbidden_keywords must not appear in the answer; expected_document_patterns (regex, accent-folded lowercase) must match at least one evidence document_name; abstention_consistent requires confidence < 0.55 whenever the answer declares insufficiency; expect_answered requires no abstention and no low-confidence fallback.",
+  "sessions": [
+    {
+      "id": "contamination-licenciement",
+      "turns": [
+        {
+          "question": "En quoi consiste la procédure de divorce au Burkina Faso ?",
+          "assertions": {}
+        },
+        {
+          "question": "Quel est le délai de recours contre un licenciement au Burkina Faso ?",
+          "assertions": {
+            "forbidden_keywords": ["divorce", "personnes et de la famille"],
+            "expected_document_patterns": ["travail"],
+            "abstention_consistent": true,
+            "_comment": "Production bug: answer opened with the previous turn's divorce paragraph."
+          }
+        }
+      ]
+    },
+    {
+      "id": "contamination-prescription",
+      "turns": [
+        {
+          "question": "En quoi consiste la procédure de divorce au Burkina Faso ?",
+          "assertions": {}
+        },
+        {
+          "question": "Quels sont les délais de prescription en matière civile ?",
+          "assertions": {
+            "forbidden_keywords": ["divorce", "personnes et de la famille"],
+            "abstention_consistent": true,
+            "_comment": "Production bug: 96% confidence on an answer declaring the question not covered."
+          }
+        }
+      ]
+    },
+    {
+      "id": "fresh-licenciement",
+      "turns": [
+        {
+          "question": "Quel est le délai de recours contre un licenciement au Burkina Faso ?",
+          "assertions": {
+            "forbidden_keywords": ["divorce", "personnes et de la famille"],
+            "expected_document_patterns": ["travail"],
+            "abstention_consistent": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "fresh-prescription",
+      "turns": [
+        {
+          "question": "Quels sont les délais de prescription en matière civile ?",
+          "assertions": {
+            "forbidden_keywords": ["divorce"],
+            "abstention_consistent": true,
+            "_comment": "Acceptable outcomes: answered from the Code civil, or honest low-confidence insufficiency. Never a high-confidence non-answer."
+          }
+        }
+      ]
+    },
+    {
+      "id": "fresh-divorce",
+      "turns": [
+        {
+          "question": "Quelle est la procédure de divorce au Burkina Faso ?",
+          "assertions": {
+            "expected_document_patterns": ["famille"],
+            "abstention_consistent": true,
+            "_comment": "The family code IS ingested; 'not covered' here means retrieval missed it."
+          }
+        }
+      ]
+    },
+    {
+      "id": "fresh-ccja",
+      "turns": [
+        {
+          "question": "Quelle est la procédure de saisine de la Cour Commune de Justice et d'Arbitrage (CCJA) ?",
+          "assertions": {
+            "expected_document_patterns": ["ohada|ccja"],
+            "expect_answered": true,
+            "_comment": "Known-good production answer; guards against regressions from the redesign."
+          }
+        }
+      ]
+    }
+  ]
+}

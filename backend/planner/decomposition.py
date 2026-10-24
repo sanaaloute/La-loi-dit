@@ -38,8 +38,12 @@ class _Topic(TypedDict):
 
 
 # Question types broad enough to warrant an issue-based decomposition.
-# Specific lookups (article, amount, definition, current/historical law...)
-# are answered by direct searches and are never decomposed here.
+# Specific lookups (article numbers, definitions, current/historical law...)
+# are answered by direct searches and are never decomposed here. FACTUAL *is*
+# included: the dominant real-world question shape ("Quel est le délai de…",
+# "Quels sont les droits…") is a legal-rule question, not a specific lookup,
+# and without decomposition those questions retrieve with only their raw
+# keywords — the production "délai de recours" / "prescription civile" misses.
 _DECOMPOSABLE_TYPES = {
     QuestionType.RIGHTS,
     QuestionType.OBLIGATIONS,
@@ -47,6 +51,7 @@ _DECOMPOSABLE_TYPES = {
     QuestionType.LEGAL_RULE,
     QuestionType.CASE_ANALYSIS,
     QuestionType.GENERAL,
+    QuestionType.FACTUAL,
 }
 
 _TOPIC_TAXONOMY: dict[str, _Topic] = {
@@ -59,6 +64,7 @@ _TOPIC_TAXONOMY: dict[str, _Topic] = {
             "indemnité de licenciement",
             "licenciement abusif et dommages-intérêts",
             "droits acquis du salarié (congés payés, certificat de travail)",
+            "délai et procédure de recours contre le licenciement",
             "voies de recours du salarié licencié",
             "juridiction compétente en cas de licenciement",
         ),
@@ -116,6 +122,26 @@ _TOPIC_TAXONOMY: dict[str, _Topic] = {
             "capital social et apports",
             "dirigeants sociaux et responsabilité",
             "dissolution et liquidation de la société",
+        ),
+    },
+    "prescription": {
+        "domains": ("civil_law",),
+        "keywords": (
+            "prescription",
+            "prescrit",
+            "forclusion",
+            "forclos",
+            "délai pour agir",
+            "délai d'action",
+            r"\bstatute of limitations\b",
+            r"\blimitation period\b",
+        ),
+        "issues": (
+            "délai de prescription des actions personnelles et réelles",
+            "point de départ du délai de prescription",
+            "suspension et interruption de la prescription",
+            "prescription et délais de forclusion en matière civile",
+            "délais de recours et d'opposition en justice",
         ),
     },
 }

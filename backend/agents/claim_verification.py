@@ -19,9 +19,11 @@ The node QUALIFIES and FLAGS — it never rewrites or removes answer text
 claims additionally set ``requires_human_review`` (a contradicted legal
 statement is high-impact). ``confidence_breakdown.legal_support_confidence``
 is recomputed as the fraction of supported claims, dampened by the share of
-contradicted ones. The aggregate is then recalculated with claim support and
-post-generation answer coverage; contradicted or LLM-unverified answers are
-capped below the serving thresholds.
+contradicted ones and (at half weight) unsupported ones. The aggregate is then
+recalculated with claim support and the pre-draft EVIDENCE coverage —
+answer-text coverage stays a diagnostic, because an abstention that restates
+the question's terms must not inflate confidence. Contradicted, LLM-unverified
+or abstaining answers are capped below the serving thresholds.
 
 LLM refinement (:func:`refine_support_with_llm`): the heuristic grades topical
 overlap, so it cannot see that a claim *applies* an excerpt to a legal
@@ -42,6 +44,7 @@ import re
 from typing import Any, Optional
 
 from backend.agents.agent import Agent
+from backend.agents.answerability import confidence_cap, has_abstention_language
 from backend.agents.coverage_auditor import audit_coverage, discriminative_terms
 from backend.agents.response_generator import compute_aggregate_confidence
 from backend.core.config import get_settings
@@ -112,6 +115,11 @@ def extract_claims(answer_text: str, settings: Optional[Any] = None) -> list[str
         for sentence in _SENTENCE_SPLIT_RE.split(stripped):
             sentence = sentence.strip()
             if len(sentence) < settings.claim_min_chars:
+                continue
+            # Insufficiency declarations (« …n'est pas couverte par les
+            # extraits [1] ») are status statements, not legal claims: they
+            # must not earn citation/legal-support credit.
+            if has_abstention_language(sentence):
                 continue
             if _CITATION_RE.search(sentence) or _LEGAL_KEYWORDS_RE.search(sentence):
                 claims.append(sentence)
@@ -415,8 +423,12 @@ class ClaimVerificationAgent(Agent):
                 legal_support = final.confidence_breakdown.legal_support_confidence
                 if claims:
                     supported = (direct + indirect) / len(claims)
-                    dampening = 1 - contradictory / len(claims)
-                    legal_support = supported * dampening
+                    # INSUFFICIENT (unsupported) claims dampen support at half
+                    # weight: heuristic insufficiency alone is noisy on
+                    # paraphrases, but unbacked statements must cost something —
+                    # a well-cited non-answer used to score full support.
+                    dampening = 1 - (contradictory + 0.5 * insufficient) / len(claims)
+                    legal_support = supported * max(0.0, dampening)
                     final.confidence_breakdown.legal_support_confidence = round(legal_support, 2)
 
                 plan = state.get("plan")
@@ -430,23 +442,30 @@ class ClaimVerificationAgent(Agent):
                     answer_text=final.answer,
                     settings=ctx.settings,
                 )
-                final.metadata["retrieval_coverage"] = final.confidence_breakdown.coverage
+                # Answer-text coverage is kept as a DIAGNOSTIC only. The
+                # confidence blend uses the pre-draft EVIDENCE coverage: an
+                # abstention that restates the question's terms would
+                # otherwise score full coverage (the 0.96 non-answer bug).
+                retrieval_coverage = final.confidence_breakdown.coverage
+                final.metadata["retrieval_coverage"] = retrieval_coverage
                 final.metadata["answer_coverage"] = round(answer_report.coverage, 2)
                 final.confidence = compute_aggregate_confidence(
                     state,
                     evidence,
                     citation_accuracy=final.confidence_breakdown.citation_confidence,
-                    coverage=answer_report.coverage,
+                    coverage=retrieval_coverage,
                     settings=ctx.settings,
                     legal_support=legal_support,
                 )
-                final.confidence_breakdown.coverage = round(answer_report.coverage, 2)
                 if contradictory:
                     final.confidence = min(final.confidence, ctx.settings.human_review_threshold)
                 if flagged_unverified:
                     final.confidence = min(
                         final.confidence, max(0.0, ctx.settings.confidence_threshold - 0.01)
                     )
+                cap = confidence_cap(final.answer, ctx.settings)
+                if cap is not None:
+                    final.confidence = min(final.confidence, cap)
 
         return {
             "claims": claims,

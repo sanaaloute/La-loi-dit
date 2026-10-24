@@ -100,6 +100,28 @@ class PlannerAgent(CompletionAgent):
             plan.tasks.append(
                 SearchTask(kind=kind, query=state["query"], top_k=ctx.settings.default_top_k, filters=filters)
             )
+        # Deterministic decomposition is a floor, not a fallback: merge the
+        # curated issue searches even when the LLM produced its own plan —
+        # broad "Quel est/Quels sont…" questions otherwise retrieve with only
+        # their raw keywords and miss the on-point provisions (production:
+        # "délai de recours licenciement", "prescription civile").
+        query_lowered = state["query"].lower()
+        heuristic_domains = [
+            d for d, kws in _DOMAIN_KEYWORDS.items() if any(k in query_lowered for k in kws)
+        ]
+        decomposed = deterministic_decompose(
+            state["query"],
+            classify_question_type(state["query"], plan.response_language),
+            heuristic_domains or plan.legal_domains,
+        )
+        if not decomposed and plan.question_type is not None:
+            decomposed = deterministic_decompose(
+                state["query"], plan.question_type, plan.legal_domains
+            )
+        for issue in decomposed:
+            if issue not in plan.sub_questions:
+                plan.sub_questions.append(issue)
+
         # Cover every sub-question of the decomposition with a keyword task,
         # so broad "rights/procedure" questions are searched by legal issue,
         # not only by the query's own keywords.

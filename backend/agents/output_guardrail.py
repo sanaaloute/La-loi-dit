@@ -82,10 +82,16 @@ class OutputGuardrailAgent(Agent):
                 answer.requires_human_review = True
             answer.warnings.extend(policy.get("warnings", []))
 
+        # A partial answer that declares a coverage gap but still answers part
+        # of the question keeps its body — its sub-0.55 badge is honest and
+        # replacing it wholesale would discard usable content. Replacement is
+        # reserved for answers with no usable content.
+        partial_with_content = bool(answer.metadata.get("abstention_partial")) and bool(answer.evidence)
         low_confidence = (
             route == "retrieval"
             and not answer.refused
             and answer.confidence < ctx.settings.confidence_threshold
+            and not partial_with_content
         )
         english = answer.language.startswith("en")
         if low_confidence:

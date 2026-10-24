@@ -16,7 +16,7 @@ def test_role_clients_have_independent_generation_defaults(tmp_path):
     assert "reasoning_effort" not in structured._generation_kwargs(None, None)
     assert synthesis is base
     assert synthesis.model == "openai/qwen2.5-7b"
-    assert synthesis._generation_kwargs(None, None)["temperature"] == 0.7
+    assert synthesis._generation_kwargs(None, None)["temperature"] == 0.2
     assert planner.model == "openai/qwen2.5-7b"
     assert "reasoning_effort" not in planner._generation_kwargs(None, None)
     analysis = resolve_role_llm("analysis", base, settings)

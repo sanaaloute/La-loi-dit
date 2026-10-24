@@ -465,16 +465,20 @@ class IngestionPipeline:
             metadata = {**metadata, "authority": infer_authority(name)}
         # legal_domains: curated values (caller/manifest/sidecar) are
         # authoritative — keyword inference only runs when nothing was
-        # curated, so a manifest entry is not diluted by noisy guesses.
-        # Folder-derived domains ("folder_domains", see reindex_directory)
-        # always union in; empty stays empty (never blocks indexing).
+        # curated, and then on the NAME ONLY: sampling 2000 chars of text
+        # tagged classic codes with 5+ domains (a code du travail mentions
+        # property, tax, commerce...). Folder-derived domains
+        # ("folder_domains", see reindex_directory) union in only when they
+        # are real taxonomy domains — jurisdiction slugs (bf/ohada/cima) are
+        # folders, not legal domains, and used to pollute every chunk.
         folder_domains = metadata.pop("folder_domains", None)
+        valid_domains = set(load_domain_keywords())
         domains: list[str] = []
         curated = _as_list(metadata.get("legal_domains"))
-        sources = (curated, folder_domains) if curated else (folder_domains, infer_legal_domains(name, text_sample))
+        sources = (curated, folder_domains) if curated else (folder_domains, infer_legal_domains(name))
         for source in sources:
             for domain in _as_list(source):
-                if domain not in domains:
+                if domain in valid_domains and domain not in domains:
                     domains.append(domain)
         metadata = {**metadata, "legal_domains": domains}
         metadata["document_name"] = IngestionPipeline._display_name(name)

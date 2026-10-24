@@ -8,6 +8,7 @@ default; pass --apply to write changes.
   python scripts/corpus_fix.py dates    [--apply]   # extract publication_date from first page / filename
   python scripts/corpus_fix.py dedupe   [--apply]   # byte-identical PDFs indexed twice
   python scripts/corpus_fix.py repeal   [--apply]   # older versions of the same text -> status=repealed
+  python scripts/corpus_fix.py domains  [--apply]   # re-tag legal_domains from the curated manifest
 
 Why: chunks never get dates from text (only from the manifest, 22/105 docs), so
 conflict resolution's "latest law wins" can never fire and parallel versions
@@ -427,20 +428,94 @@ def cmd_repeal(apply: bool, data_dir: Path, uri: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# domains
+# ---------------------------------------------------------------------------
+
+
+def _target_domains(pdf_name: str, doc_meta: dict, valid: set[str]) -> list[str]:
+    """Curated manifest domains, else name-only inference — validated against
+    the taxonomy so folder slugs (bf/ohada/cima) and guesses never survive."""
+    from backend.ingestion.classification import infer_legal_domains
+
+    entry = doc_meta.get(pdf_name) or doc_meta.get(pdf_name.lower()) or {}
+    curated = entry.get("legal_domains")
+    target = [d for d in (curated or infer_legal_domains(pdf_name)) if d in valid]
+    return target or ["administrative_law"]
+
+
+def cmd_domains(apply: bool, data_dir: Path, uri: str) -> None:
+    """Re-tag every chunk's legal_domains from the curated manifest.
+
+    Folder slugs and 2000-char text inference previously tagged nearly every
+    document with 5+ pseudo-domains, making the retrieval-time domain filter
+    useless. In-place patch of the scalar field AND chunk_json.metadata — no
+    re-embedding. Restart the API afterwards so BM25 rehydrates.
+    """
+    sys.path.insert(0, str(REPO_ROOT))
+    from backend.ingestion.classification import load_domain_keywords
+
+    journal = load_journal(data_dir)
+    manifest = json.loads((data_dir / "legal_sources.json").read_text())
+    doc_meta = manifest.get("document_metadata", {})
+    valid = set(load_domain_keywords())
+
+    client = milvus_client(uri)
+    changed_docs = changed_rows = scanned = 0
+    for document_id, entry in sorted(journal.items()):
+        pdf_name = Path(entry.get("path", "")).name
+        if not pdf_name:
+            continue
+        target = _target_domains(pdf_name, doc_meta, valid)
+        rows = doc_chunks(client, document_id)
+        scanned += len(rows)
+        patched: list[dict] = []
+        current_sample: list[str] = []
+        for row in rows:
+            current = list(row.get("legal_domains") or [])
+            if not current_sample:
+                current_sample = current
+            if sorted(current) == sorted(target):
+                continue
+            chunk = json.loads(row["chunk_json"])
+            metadata = chunk.setdefault("metadata", {}) or {}
+            metadata["legal_domains"] = list(target)
+            row["chunk_json"] = json.dumps(chunk, ensure_ascii=False)
+            row["legal_domains"] = list(target)
+            patched.append(row)
+        if patched:
+            changed_docs += 1
+            changed_rows += len(patched)
+            print(
+                f"  ⟳ {entry.get('document_name', pdf_name)[:64]}: {len(patched)}/{len(rows)} rows\n"
+                f"      {current_sample} -> {target}"
+            )
+            if apply:
+                for offset in range(0, len(patched), 500):
+                    client.upsert(
+                        collection_name=COLLECTION, data=patched[offset : offset + 500]
+                    )
+    print(
+        f"\n{scanned} chunks scanned across {len(journal)} documents: "
+        f"{changed_rows} chunks to re-tag in {changed_docs} documents"
+        + (" — APPLIED (restart the api to rehydrate BM25)" if apply else " — dry-run")
+    )
+
+
+# ---------------------------------------------------------------------------
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["dates", "dedupe", "repeal"])
+    parser.add_argument("command", choices=["dates", "dedupe", "repeal", "domains"])
     parser.add_argument("--apply", action="store_true", help="write changes (default: dry-run)")
     parser.add_argument("--data-dir", default=str(DATA_DIR))
     parser.add_argument("--milvus", default=MILVUS_URI)
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir)
-    {"dates": cmd_dates, "dedupe": cmd_dedupe, "repeal": cmd_repeal}[args.command](
-        args.apply, data_dir, args.milvus
-    )
+    {"dates": cmd_dates, "dedupe": cmd_dedupe, "repeal": cmd_repeal, "domains": cmd_domains}[
+        args.command
+    ](args.apply, data_dir, args.milvus)
 
 
 if __name__ == "__main__":

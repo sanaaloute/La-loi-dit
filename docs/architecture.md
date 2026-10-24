@@ -136,10 +136,17 @@ credentials.
   resolved to a real retrieved chunk; rejected citations are removed and
   recorded as warnings.
 - With insufficient evidence, agents say so explicitly instead of guessing.
+- The answerability gate (`backend/agents/answerability.py`) detects declared
+  non-answers in the draft: one corrective retry fires when the evidence
+  actually covers the question; otherwise confidence is capped at 0.40 (flat
+  refusal) or 0.54 (partial answer with a declared gap), and abstaining
+  answers never enter the answer cache.
 - A non-refused retrieval answer below `CONFIDENCE_THRESHOLD` (0.55) is
   replaced by the localized insufficient-information response; citations and
-  evidence are cleared. Safety refusals take precedence, and direct/general
-  routes do not use this retrieval-confidence fallback.
+  evidence are cleared. Partial answers that declare a gap but still answer
+  part of the question (`abstention_partial`) keep their body. Safety refusals
+  take precedence, and direct/general routes do not use this
+  retrieval-confidence fallback.
 
 ### Bounded retries
 

@@ -135,6 +135,12 @@ RULES
   eur a le choix », write « Pour les litiges nés d'un licenciement, le travailleur a
   le choix ».
 - Write clean, correct, well-formatted French (or the user's language).
+- Answer ONLY the question on the "Question:" line. A "CONTEXTE DE
+  CONVERSATION" section, when present, serves solely to interpret references
+  in the current question (e.g. « et en cas de démission ? ») — NEVER repeat,
+  continue, summarize or answer previous exchanges. / Réponds UNIQUEMENT à la
+  question actuelle : ne répète ni ne poursuis JAMAIS les questions ou
+  réponses du contexte de conversation.
 - If the evidence is insufficient to answer the question, say so explicitly instead
   of guessing.
 
@@ -203,6 +209,29 @@ Respond in the user's requested language.""",
         "Your previous answer did not cite the evidence with [n] markers. "
         "Rewrite it so that every substantive statement is cited with [n] "
         "referring to the numbered evidence excerpts.\n\n"
+        "Previous answer:\n{text}"
+    ),
+    # Corrective-retry template when the draft declares the question uncovered
+    # although the retrieved evidence DOES cover it (placeholders: user_message, text).
+    "RESPONSE_ABSTENTION_CORRECTIVE": (
+        "{user_message}\n\n"
+        "Your previous answer claimed the excerpts do not cover the question, but "
+        "they DO contain relevant provisions. Answer the question directly from the "
+        "excerpts, citing every statement with [n]. If one specific aspect is "
+        "genuinely missing, answer the covered aspects first, then name the missing "
+        "one in a single sentence. Never repeat content from the conversation "
+        "context.\n\n"
+        "Previous answer:\n{text}"
+    ),
+    # Corrective-retry template when the draft CONTRADICTS the cited evidence
+    # — e.g. a wrong duration or amount (placeholders: user_message, text, conflict).
+    "RESPONSE_CONTRADICTION_CORRECTIVE": (
+        "{user_message}\n\n"
+        "Your previous answer contradicts the evidence on this point: "
+        "«{conflict}». Rewrite the answer so that every statement agrees with the "
+        "cited excerpts — numbers, durations, amounts and conditions exactly as "
+        "written — citing each statement with [n]. If two excerpts genuinely "
+        "conflict, say so explicitly instead of choosing silently.\n\n"
         "Previous answer:\n{text}"
     ),
     "RESPONSE_INSUFFICIENT_FR": (

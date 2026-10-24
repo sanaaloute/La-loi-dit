@@ -107,3 +107,56 @@ def test_screened_evidence_list_is_shared_with_downstream_verifiers(tmp_path):
 
     assert [c.chunk_id for c in generated["ranked_evidence"]] == ["safe"]
     assert [c.chunk_id for c in generated["final_answer"].evidence] == ["safe"]
+
+
+def test_contradicted_draft_triggers_one_corrective_redraft(tmp_path):
+    """A draft contradicting the cited excerpt (wrong duration) gets one
+    corrective redraft naming the conflict before serving."""
+    calls: list[str] = []
+
+    class FakeLLM:
+        provider = "mock"
+        model = "fake"
+
+        async def complete(self, *args, **kwargs):
+            calls.append(args[1] if len(args) > 1 else "")
+            if len(calls) == 1:
+                return "Le délai est de 30 jours pour le licenciement du salarié concerné. [1]"
+            return "Le délai est de 60 jours pour le licenciement du salarié concerné. [1]"
+
+    settings = _settings(tmp_path)
+    chunk = EvidenceChunk(
+        chunk_id="c1",
+        content="Le délai est de 60 jours pour le licenciement du salarié concerné.",
+    )
+    state = _state([chunk], query="délai licenciement")
+    ctx = SimpleNamespace(settings=settings, llm=FakeLLM())
+
+    generated = asyncio.run(ResponseGeneratorAgent().run(state, ctx))
+
+    assert len(calls) == 2
+    assert "60 jours" in generated["final_answer"].answer
+
+
+def test_persistent_contradiction_is_not_retried_twice(tmp_path):
+    calls: list[str] = []
+
+    class FakeLLM:
+        provider = "mock"
+        model = "fake"
+
+        async def complete(self, *args, **kwargs):
+            calls.append(args[1] if len(args) > 1 else "")
+            return "Le délai est de 30 jours pour le licenciement du salarié concerné. [1]"
+
+    settings = _settings(tmp_path)
+    chunk = EvidenceChunk(
+        chunk_id="c1",
+        content="Le délai est de 60 jours pour le licenciement du salarié concerné.",
+    )
+    state = _state([chunk], query="délai licenciement")
+    ctx = SimpleNamespace(settings=settings, llm=FakeLLM())
+
+    generated = asyncio.run(ResponseGeneratorAgent().run(state, ctx))
+
+    assert len(calls) == 2  # exactly ONE contradiction corrective, never a loop

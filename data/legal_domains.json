@@ -3,7 +3,7 @@
  "domains": {
   "constitution": {"label": "Constitution", "keywords": ["constitution", "transition"]},
   "criminal_law": {"label": "Droit pénal", "keywords": ["pénal", "penal", "infraction", "crime", "délit", "criminal"]},
-  "civil_law": {"label": "Droit civil", "keywords": ["civil", "contrat", "responsabilité civile", "droit commercial général"]},
+  "civil_law": {"label": "Droit civil", "keywords": ["civil", "contrat", "responsabilité civile", "droit commercial général", "prescription", "forclusion"]},
   "family_code": {"label": "Droit de la famille", "keywords": ["famille", "mariage", "divorce", "filiation"]},
   "labor_code": {"label": "Droit du travail", "keywords": ["travail", "licenci", "salaire", "salari", "employeur", "preavis"]},
   "tax_law": {"label": "Droit fiscal", "keywords": ["impôt", "impots", "fiscal", "taxe", "tva"]},
