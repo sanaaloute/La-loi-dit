@@ -103,13 +103,16 @@ service is involved. The `mock` provider stays available for offline tests.
 
 ### Fixed role models
 
-The server assigns **Qwen 2.5 7B** (`qwen2.5-7b`) to language
-routing, query routing, planning, claim refinement, ingestion classification,
-and optional LLM rerank scoring. **gpt-oss 20B** (`gpt-oss-20b`) handles
+The server assigns **gemma4-e4b** to language
+routing, query routing, claim refinement, ingestion classification,
+and optional LLM rerank scoring, and **Qwen 2.5 7B** (`qwen2.5-7b`) to
+retrieval planning. **nemotron-3-nano** handles
 reasoning/reflection, direct/general/grounded synthesis, drafting enrichment,
-and memory summaries (called with `reasoning_effort=low` because reasoning
-models count hidden reasoning against `max_tokens`). These IDs are fixed in
-`backend/core/llm.py`.
+and memory summaries (gemma4-e4b and nemotron-3-nano are reasoning models,
+called with `reasoning_effort=low` because reasoning
+models count hidden reasoning against `max_tokens`). The assignments come from
+measured accuracy on the repo's benchmark suite, not provider labels. These
+IDs are fixed in `backend/core/llm.py`.
 
 Users cannot select models. Environment role overrides and runtime catalog
 replacement are not supported, and chat never fails over to an external
@@ -152,7 +155,7 @@ changes the contract:
 ## Usage limits
 
 All users have access to every feature; legacy JWT/DB tier values no longer
-change entitlements. The two role models are fixed by the server and are
+change entitlements. The three role models are fixed by the server and are
 not user-selectable. Anti-abuse per-minute/per-second limits from the shared
 catalog remain active, while `LEGAL_AI_RATE_LIMIT_PER_MINUTE` is the
 **anonymous/IP** default. Invalid or expired tokens also fall back to that

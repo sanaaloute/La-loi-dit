@@ -385,9 +385,9 @@ sender: `backend/core/push.py`; dead tokens pruned on DeviceNotRegistered).
 
 ## Models and usage (`backend/api/routers/models.py`, `usage.py`)
 
-`GET /api/v1/models` is a read-only compatibility/status endpoint for the two
-fixed Afrikia role models: `afrikia/qwen2.5-7b` and
-`afrikia/gpt-oss-20b`. Its response includes `"selectable": false`. Users cannot
+`GET /api/v1/models` is a read-only compatibility/status endpoint for the
+fixed Afrikia role models: `afrikia/gemma4-e4b`, `afrikia/qwen2.5-7b` and
+`afrikia/nemotron-3-nano`. Its response includes `"selectable": false`. Users cannot
 select models, and legacy `model` request fields or query parameters are
 ignored; the server always applies its fixed role assignments.
 

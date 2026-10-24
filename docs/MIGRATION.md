@@ -3,8 +3,9 @@
 > **Historical model-routing sections are superseded.** The optional per-role
 > model overrides described below belonged to the original upgrade. Since
 > 2026-10-24, production chat and embeddings run on the private Afrikia
-> provider (OpenAI-compatible) with fixed `qwen2.5-7b` and
-> `gpt-oss-20b` assignments; users cannot select models, environment role
+> provider (OpenAI-compatible) with fixed `gemma4-e4b` (structured roles),
+> `qwen2.5-7b` (planner) and `nemotron-3-nano` (analysis/synthesis)
+> assignments; users cannot select models, environment role
 > overrides are not supported, and there is no external chat failover. See
 > [RAG_ARCHITECTURE.md](RAG_ARCHITECTURE.md#fixed-role-models). The other
 > migration steps remain applicable.
@@ -143,8 +144,8 @@ All settings use the `LEGAL_AI_` env prefix (`backend/core/config.py`):
 
 Legacy role-routing and model-override environment variables are not supported.
 Model IDs and role defaults are fixed in `ROLE_MODEL_CONFIGS`
-(`backend/core/llm.py`): `qwen2.5-7b` for structured roles and `gpt-oss-20b`
-for analysis/synthesis.
+(`backend/core/llm.py`): `gemma4-e4b` for structured roles, `qwen2.5-7b` for
+planning, and `nemotron-3-nano` for analysis/synthesis.
 
 Related pre-existing knobs that the new components also honor:
 `max_retrieval_retries` / `max_reflection_iterations` (loop budgets, both 1),

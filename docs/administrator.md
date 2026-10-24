@@ -28,7 +28,7 @@ Operational tasks for users with the `admin` (and where noted,
 ## Daily quotas
 
 - All features are free for every user. Legacy `gratuit` / `pro` / `cabinet`
-  values remain in old rows and tokens but no longer change access. The two
+  values remain in old rows and tokens but no longer change access. The three
   role models (served by the private Afrikia provider) are fixed by the server;
   users cannot select models.
 - Every account shares the same default daily budget: **30 requests and

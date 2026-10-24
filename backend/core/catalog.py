@@ -15,7 +15,7 @@ from typing import Any, Optional
 from pydantic import BaseModel
 
 from backend.core.config import Settings, get_settings
-from backend.core.llm import CLASSIFICATION_MODEL, SYNTHESIS_MODEL
+from backend.core.llm import CLASSIFICATION_MODEL, PLANNER_MODEL, SYNTHESIS_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,11 @@ _ALL_MODELS: list[dict[str, str]] = [
         "id": f"afrikia/{CLASSIFICATION_MODEL}",
         "provider": "afrikia",
         "label": "Afrikia structured-role model",
+    },
+    {
+        "id": f"afrikia/{PLANNER_MODEL}",
+        "provider": "afrikia",
+        "label": "Afrikia planner model",
     },
 ]
 

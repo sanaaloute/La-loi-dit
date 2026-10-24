@@ -43,10 +43,15 @@ flowchart LR
 Production LLM calls use the private Afrikia provider (OpenAI-compatible,
 bearer key `AFRIKIA_API_KEY`, base URL `https://afrikia.neobytech.net/v1`) with
 server-fixed assignments:
-**Qwen 2.5 7B** (`qwen2.5-7b`) for language routing, query
-routing, planning, claim refinement, ingestion classification, and optional LLM
-rerank scoring; **gpt-oss 20B** (`gpt-oss-20b`) for reasoning/reflection,
+**gemma4-e4b** for language routing, query
+routing, claim refinement, ingestion classification, and optional LLM
+rerank scoring; **Qwen 2.5 7B** (`qwen2.5-7b`) for retrieval planning; and
+**nemotron-3-nano** for reasoning/reflection,
 direct/general/grounded synthesis, drafting enrichment, and memory summaries.
+The assignments come from measured accuracy on the repo's benchmark suite
+(`scripts/benchmark_role_models.py`), not provider labels — nemotron-3-nano
+was the only model that both grounded synthesis with citations and abstained
+correctly.
 Users cannot select models, and environment role overrides or runtime catalog
 changes cannot replace these assignments. There is no external chat failover;
 daily quotas and anti-abuse rate limits still cover all role calls. The
@@ -54,8 +59,9 @@ daily quotas and anti-abuse rate limits still cover all role calls. The
 
 `ROLE_MODEL_CONFIGS` (`backend/core/llm.py`) is the single source for model IDs
 and role defaults: role-specific token and temperature limits, with
-`reasoning_effort=low` on the analysis/synthesis roles (reasoning models count
-hidden reasoning against `max_tokens`). Analysis is capped at 120 seconds and
+`reasoning_effort=low` on the reasoning models (gemma4-e4b and nemotron-3-nano
+count hidden reasoning against `max_tokens`) and a near-deterministic 0.2
+temperature on synthesis. Analysis is capped at 120 seconds and
 2,048 tokens per call;
 synthesis keeps the larger answer budget. The public model catalog derives its
 IDs from the same constants.

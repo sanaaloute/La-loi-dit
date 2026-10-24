@@ -8,11 +8,15 @@ import { EmptyState, SectionCard, StatusBadge, TableShell, Td, Th, THead, format
 
 const MODEL_ROLES = [
   {
-    model: "Qwen 2.5 7B",
-    roles: "Classification, planification et tâches utilitaires structurées",
+    model: "Gemma 4 E4B",
+    roles: "Classification, routage et tâches utilitaires structurées",
   },
   {
-    model: "gpt-oss 20B",
+    model: "Qwen 2.5 7B",
+    roles: "Planification",
+  },
+  {
+    model: "Nemotron 3 Nano",
     roles: "Analyse, synthèse, rédaction et mémoire",
   },
 ];

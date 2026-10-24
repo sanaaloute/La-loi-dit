@@ -9,13 +9,17 @@ def test_role_clients_have_independent_generation_defaults(tmp_path):
 
     structured = resolve_role_llm("classification", base, settings)
     synthesis = resolve_role_llm("synthesis", base, settings)
+    planner = resolve_role_llm("planner", base, settings)
 
-    assert structured.model == "openai/qwen2.5-7b"
+    assert structured.model == "openai/gemma4-e4b"
     assert structured._generation_kwargs(None, None)["max_tokens"] == 2048
-    assert "reasoning_effort" not in structured._generation_kwargs(None, None)
+    assert structured._generation_kwargs(None, None)["reasoning_effort"] == "low"
     assert synthesis is base
-    assert synthesis.model == "openai/gpt-oss-20b"
+    assert synthesis.model == "openai/nemotron-3-nano"
     assert synthesis._generation_kwargs(None, None)["reasoning_effort"] == "low"
+    assert synthesis._generation_kwargs(None, None)["temperature"] == 0.2
+    assert planner.model == "openai/qwen2.5-7b"
+    assert "reasoning_effort" not in planner._generation_kwargs(None, None)
     analysis = resolve_role_llm("analysis", base, settings)
     assert analysis.timeout_seconds == 120.0
     assert analysis._generation_kwargs(None, None)["max_tokens"] == 2048

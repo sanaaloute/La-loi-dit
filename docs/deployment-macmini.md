@@ -80,12 +80,13 @@ LEGAL_AI_MILVUS_URI=            # empty -> http://milvus:19530
 
 Chat and embeddings are served by the private **Afrikia** provider
 (OpenAI-compatible, bearer-authenticated via `AFRIKIA_API_KEY`); containers
-reach it over HTTPS — no model service runs on the Mac. `qwen2.5-7b` handles
-language/query routing, planning, claim refinement, ingestion classification,
-and optional LLM rerank scoring. `gpt-oss-20b` handles reasoning/reflection,
+reach it over HTTPS — no model service runs on the Mac. `gemma4-e4b` handles
+language/query routing, claim refinement, ingestion classification,
+and optional LLM rerank scoring, while `qwen2.5-7b` handles retrieval
+planning. `nemotron-3-nano` handles reasoning/reflection,
 direct/general/grounded synthesis, drafting enrichment, and memory summaries
-(called with `reasoning_effort=low`, since reasoning models count hidden
-reasoning against `max_tokens`). Users cannot select models or override these
+(the two reasoning models are called with `reasoning_effort=low`, since hidden
+reasoning counts against `max_tokens`). Users cannot select models or override these
 roles through the environment; there is no external chat failover. Daily quotas
 and anti-abuse rate limits remain active. Embeddings (`qwen3-embedding-8b`,
 4096 dimensions) come from the same provider — an existing Milvus corpus

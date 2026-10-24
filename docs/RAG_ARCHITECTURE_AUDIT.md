@@ -4,7 +4,8 @@
 > architecture, including its former multi-provider/failover and model-catalog
 > design. It is not current setup guidance. Current production (since
 > 2026-10-24) uses fixed role models on the private Afrikia provider
-> (`qwen2.5-7b` / `gpt-oss-20b`) with no user model selection or external chat
+> (`gemma4-e4b` / `qwen2.5-7b` / `nemotron-3-nano`) with no user model
+> selection or external chat
 > failover; see [RAG_ARCHITECTURE.md](RAG_ARCHITECTURE.md#fixed-role-models).
 
 Date: 2026-08-09

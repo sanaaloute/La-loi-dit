@@ -1,6 +1,6 @@
 """Fixed Afrikia-model resolution and shared daily-budget enforcement.
 
-The default request model is gpt-oss-20b. Structured graph roles are assigned
+The default request model is nemotron-3-nano. Structured graph roles are assigned
 by ``backend.core.model_roles``. Caller-supplied model IDs are ignored: there
 is no catalog selection, cheap-model routing, or external provider failover.
 Offline mock processes keep ``ctx.llm`` for deterministic tests.

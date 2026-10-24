@@ -61,7 +61,8 @@ newer — wire its `on_change` callback to queue a re-ingestion.
 
 Production chat and embeddings use the private Afrikia provider — an
 OpenAI-compatible endpoint at `https://afrikia.neobytech.net/v1`, bearer-guarded
-by `AFRIKIA_API_KEY` — with the fixed `qwen2.5-7b` and `gpt-oss-20b` role
+by `AFRIKIA_API_KEY` — with the fixed `gemma4-e4b`, `qwen2.5-7b` and
+`nemotron-3-nano` role
 models. Containers and host-run processes alike reach it over HTTPS; no local
 model service runs on the Docker host (for offline development there is a local
 gateway at `http://127.0.0.1:4010/v1`). `GET /ready` and

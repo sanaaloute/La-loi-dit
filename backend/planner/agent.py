@@ -37,7 +37,10 @@ class PlannerAgent(CompletionAgent):
     """Turns the user question into a structured retrieval plan."""
 
     name = "planner"
-    completion_timeout_seconds = 10.0
+    # Remote-provider planning calls take 13-35s (measured); 10s was calibrated
+    # on a fast local model and silently forced the heuristic plan on every
+    # request. Bounded above by the per-request run timeout either way.
+    completion_timeout_seconds = 60.0
     # Resolved through the prompt registry (backend.core.prompts.PLANNER_SYSTEM)
     # at every access, so Settings.prompts_dir overrides apply.
     system_prompt = PromptRef("PLANNER_SYSTEM")

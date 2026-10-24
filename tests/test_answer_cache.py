@@ -10,7 +10,7 @@ from backend.ingestion.versioning import VersionStore
 
 def _identity(settings, **overrides):
     kwargs = {
-        "model_id": "afrikia/gpt-oss-20b",
+        "model_id": "afrikia/nemotron-3-nano",
         "language": "fr",
         "scenario_date": None,
         "user_id": "user-1",

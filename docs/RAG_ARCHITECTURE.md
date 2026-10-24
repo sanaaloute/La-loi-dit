@@ -106,13 +106,21 @@ client for the private Afrikia provider (OpenAI-compatible, bearer key
 request `model` inputs are ignored, so callers cannot select a model or provider.
 The assignments are fixed in `backend/core/llm.py`:
 
-- **Qwen 2.5 7B** (`qwen2.5-7b`): language routing, query
-  routing, planning, claim refinement, ingestion classification, and optional
-  LLM rerank scoring (`classification` / `planner` roles).
-- **gpt-oss 20B** (`gpt-oss-20b`): reasoning/reflection (`analysis`), direct,
+- **gemma4-e4b**: language routing, query
+  routing, claim refinement, ingestion classification, and optional
+  LLM rerank scoring (`classification` role). A reasoning model, called with
+  `reasoning_effort=low` so hidden reasoning does not consume the completion
+  budget on short structured outputs.
+- **Qwen 2.5 7B** (`qwen2.5-7b`): retrieval planning (`planner` role).
+- **nemotron-3-nano**: reasoning/reflection (`analysis`), direct,
   general and grounded synthesis (`synthesis`), drafting enrichment, and memory
-  summaries. Analysis and synthesis calls pass `reasoning_effort=low` because
-  reasoning models count hidden reasoning against `max_tokens`.
+  summaries. Also called with `reasoning_effort=low`; synthesis runs at a
+  near-deterministic temperature of 0.2.
+
+The assignments come from measured accuracy on this codebase's task suites
+(`scripts/benchmark_role_models.py`), not provider labels — nemotron-3-nano
+was the only model that both grounded synthesis with citations and abstained
+correctly.
 
 No environment role override or runtime catalog replacement can change this
 mapping, and there is no external chat failover or query-dependent cheap-model
@@ -131,7 +139,7 @@ Agents depend on ports, never on SDKs (`backend/core/ports.py`); `AppContext`
   test/development provider. JSON mode has
   one corrective retry (`complete_json`), tool calling has native/manual
   fallback (`complete_tools`), and token metering is cumulative. Production chat
-  uses only the two fixed role models described above.
+  uses only the three fixed role models described above.
 - **Embeddings** — `backend/core/embeddings.py`: separately configured
   `LiteLLMEmbeddings` (batched at 200), using the same Afrikia provider
   (`qwen3-embedding-8b`, 4096 dimensions) in the approved setup — the existing
@@ -149,7 +157,7 @@ Agents depend on ports, never on SDKs (`backend/core/ports.py`); `AppContext`
   credentials) or `ApiCrossEncoderReranker` (Cohere-style `/rerank` endpoint,
   batched, one retry, falls back to heuristic on any failure). Selected by
   `reranker_provider`; `api` without full credentials degrades to heuristic.
-  This cross-encoder capability is separate from the optional Qwen 2.5 7B LLM
+  This cross-encoder capability is separate from the optional gemma4-e4b LLM
   rescoring pass.
 - **Legal knowledge graph** — `backend/knowledge/` (`LegalGraphStore`,
   spec §19/§34): a relational store (SQLAlchemy Core, `database_url` with a

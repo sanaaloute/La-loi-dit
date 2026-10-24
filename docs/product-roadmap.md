@@ -36,9 +36,9 @@ region has that. The audit below is ordered by what kills the vision if unfixed.
 
 At the September audit, a typical run made **6 + N LLM calls** (N =
 sub-questions), strictly sequential except retrieval branches, and everything
-serialized on one Ollama model. The current implementation instead uses two
-fixed role models on the Afrikia provider: `qwen2.5-7b` for structured tasks
-and `gpt-oss-20b` for
+serialized on one Ollama model. The current implementation instead uses three
+fixed role models on the Afrikia provider: `gemma4-e4b` for structured tasks,
+`qwen2.5-7b` for planning, and `nemotron-3-nano` for
 reasoning/synthesis. The SSE "streaming" showed progress labels; the answer
 appeared at the end as a cosmetic typewriter replay (`chat.py:462-488`).
 
@@ -46,8 +46,8 @@ Env-only quick wins (no code change, deploy = restart api container):
 
 | Knob | Effect |
 |---|---|
-| `LEGAL_AI_RERANK_LLM_ENABLED=false` | −N optional Qwen 2.5 LLM rescore calls (one per branch); heuristic/cross-encoder reranking is separate |
-| `LEGAL_AI_CLAIM_LLM_REFINEMENT_ENABLED=false` | −1 Qwen 2.5 call (heuristic grading stays) |
+| `LEGAL_AI_RERANK_LLM_ENABLED=false` | −N optional gemma4-e4b LLM rescore calls (one per branch); heuristic/cross-encoder reranking is separate |
+| `LEGAL_AI_CLAIM_LLM_REFINEMENT_ENABLED=false` | −1 gemma4-e4b call (heuristic grading stays) |
 | `LEGAL_AI_ANSWER_MAX_EXCERPT_CHARS=1000`, `LEGAL_AI_ANSWER_MAX_EVIDENCE_PER_SUBQUESTION=3`, `LEGAL_AI_REASONING_MAX_EXCERPT_CHARS=1200` | ~2–3× smaller reasoning/synthesis prompts |
 | `LEGAL_AI_LLM_MAX_TOKENS=1500` | caps worst-case generation time |
 | `LEGAL_AI_RETRIEVAL_FETCH_K=10` | halves uncached rerank embedding batch |

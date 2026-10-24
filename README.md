@@ -77,15 +77,17 @@ pip install -e .
 
 Production chat and embeddings run on the private Afrikia provider, an
 OpenAI-compatible endpoint authenticated by a bearer key (see
-`client-guide.md`). Two role models are fixed by the server:
+`client-guide.md`). Role models are fixed by the server, assigned by measured
+accuracy on the repository's benchmark suite (`scripts/benchmark_role_models.py`):
 
-- **Qwen 2.5 7B** (`qwen2.5-7b`) handles language routing,
-  query routing, planning, claim refinement, ingestion classification, and
-  optional LLM rerank scoring.
-- **gpt-oss 20B** (`gpt-oss-20b`) handles reasoning/reflection,
+- **Gemma 4 E4B** (`gemma4-e4b`) handles language routing,
+  query routing, claim refinement, ingestion classification, and optional LLM
+  rerank scoring.
+- **Qwen 2.5 7B** (`qwen2.5-7b`) handles retrieval planning.
+- **Nemotron 3 Nano** (`nemotron-3-nano`) handles reasoning/reflection,
   direct/general/grounded synthesis, drafting enrichment, and memory summaries
-  (called with `reasoning_effort=low` so hidden reasoning does not consume the
-  answer budget).
+  (reasoning models are called with `reasoning_effort=low` so hidden reasoning
+  does not consume the answer budget).
 
 Users cannot select models, and environment role overrides or runtime catalog
 replacement do not change these assignments. Daily quotas and anti-abuse rate

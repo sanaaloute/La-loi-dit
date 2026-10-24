@@ -37,17 +37,26 @@ PROVIDER_DEFAULT_API_BASES = {
     "afrikia": "https://afrikia.neobytech.net/v1",
 }
 
-CLASSIFICATION_MODEL = "qwen2.5-7b"
-SYNTHESIS_MODEL = "gpt-oss-20b"
+# Role-to-model assignments are driven by measured accuracy on this codebase's
+# task suites (scripts/benchmark_role_models.py), not by provider labels:
+# gemma4-e4b routes/detects best (14/14, 8/8); qwen2.5-7b plans best (3/3 at
+# half the latency of the other 3/3 models); nemotron-3-nano is the only model
+# that both grounds synthesis with citations (2/3) and abstains correctly (1/1).
+CLASSIFICATION_MODEL = "gemma4-e4b"
+PLANNER_MODEL = "qwen2.5-7b"
+SYNTHESIS_MODEL = "nemotron-3-nano"
 
 ROLE_MODEL_CONFIGS: dict[str, dict[str, Any]] = {
     "classification": {
         "model": CLASSIFICATION_MODEL,
         "max_tokens": 2048,
         "temperature": 0.0,
+        # gemma4-e4b is a reasoning model: cap hidden reasoning so it does not
+        # consume the completion budget on short structured outputs.
+        "reasoning_effort": "low",
     },
     "planner": {
-        "model": CLASSIFICATION_MODEL,
+        "model": PLANNER_MODEL,
         "max_tokens": 2048,
         "temperature": 0.5,
     },
@@ -56,15 +65,13 @@ ROLE_MODEL_CONFIGS: dict[str, dict[str, Any]] = {
         "max_tokens": 2048,
         "temperature": 0.5,
         "timeout_seconds": 120.0,
-        # Reasoning models count hidden reasoning against max_tokens; "low"
-        # keeps headroom for the answer itself. LiteLLM drops the parameter
-        # for models that do not support it (litellm.drop_params = True).
         "reasoning_effort": "low",
     },
     "synthesis": {
         "model": SYNTHESIS_MODEL,
         "max_tokens": 4096,
-        "temperature": 0.7,
+        # Near-deterministic: answers must copy numbers/durations verbatim.
+        "temperature": 0.2,
         "reasoning_effort": "low",
     },
 }
@@ -183,15 +190,35 @@ class LLMClient:
             kwargs["api_key"] = self.api_key
         if self.api_base:
             kwargs["api_base"] = self.api_base
-        try:
-            resp = await asyncio.wait_for(
-                litellm.acompletion(**kwargs), timeout=request_timeout
-            )
-            content = resp.choices[0].message.content or ""
-            self._record_usage(system, user, content, getattr(resp, "usage", None))
-            return content
-        except Exception as exc:  # provider/network errors
-            raise LLMError(f"LLM call failed ({self.model}): {exc}") from exc
+        # One bounded retry on transient failures: the provider occasionally
+        # stalls a single upstream request (connection open, no response);
+        # without a retry that one stall fails the whole graph node. Same
+        # policy as the embedding adapter in core/embeddings.py.
+        transient = (
+            asyncio.TimeoutError,
+            litellm.APIConnectionError,
+            litellm.Timeout,
+            litellm.InternalServerError,
+            litellm.BadGatewayError,
+            litellm.RateLimitError,
+            litellm.ServiceUnavailableError,
+        )
+        last_exc: Optional[Exception] = None
+        for attempt in range(2):
+            try:
+                resp = await asyncio.wait_for(
+                    litellm.acompletion(**kwargs), timeout=request_timeout
+                )
+                content = resp.choices[0].message.content or ""
+                self._record_usage(system, user, content, getattr(resp, "usage", None))
+                return content
+            except transient as exc:
+                last_exc = exc
+                if attempt == 0:
+                    await asyncio.sleep(2.0)
+            except Exception as exc:  # non-transient provider/request errors
+                raise LLMError(f"LLM call failed ({self.model}): {exc}") from exc
+        raise LLMError(f"LLM call failed ({self.model}): {last_exc}") from last_exc
 
     async def complete_json(self, system: str, user: str, schema: Type[T]) -> T:
         """Ask for JSON and validate against `schema`; one corrective retry (max retry = 1)."""
