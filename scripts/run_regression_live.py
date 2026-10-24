@@ -78,9 +78,29 @@ def _fold(text: str) -> str:
 
 _FOLDED_PHRASES = [_fold(p) for p in _ABSTENTION_PHRASES]
 
+# Matches the pipeline detector: caveats inside the mandated uncertainty
+# section are NOT abstentions (that section exists to declare gaps).
+_ANY_HEADING_RE = re.compile(r"^\s*#{1,6}\s+")
+_UNCERTAINTY_TITLE_RE = re.compile(
+    r"^\s*(?:#{1,6}\s+|\*\*)?\s*(points? d'incertitudes?|incertitudes?|points? of uncertainty|uncertainties)\s*:?\s*(?:\*\*)?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _strip_uncertainty_sections(text: str) -> str:
+    kept: list[str] = []
+    in_uncertainty = False
+    for line in text.splitlines():
+        if _ANY_HEADING_RE.match(line) or _UNCERTAINTY_TITLE_RE.match(line):
+            in_uncertainty = bool(_UNCERTAINTY_TITLE_RE.match(line))
+            continue
+        if not in_uncertainty:
+            kept.append(line)
+    return "\n".join(kept)
+
 
 def detect_abstention(answer_text: str) -> list[str]:
-    folded = _fold(answer_text or "")
+    folded = _fold(_strip_uncertainty_sections(answer_text or ""))
     return [p for p in _FOLDED_PHRASES if p in folded]
 
 

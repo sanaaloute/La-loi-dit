@@ -9,6 +9,7 @@ Uses the ``check_output`` and ``apply_confidence_policy`` tools.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from backend.agents.agent import Agent
@@ -21,7 +22,7 @@ from backend.core.prompts import get_prompt
 _DISCLAIMER_FR = get_prompt("DISCLAIMER_FR")
 _DISCLAIMER_EN = get_prompt("DISCLAIMER_EN")
 from backend.core.context import AppContext
-from backend.core.models import FinalAnswer, QuestionType
+from backend.core.models import Claim, FinalAnswer, QuestionType, SupportLevel
 from backend.core.state import GraphState
 
 # Question types with a direct impact on the user's legal position (spec §33).
@@ -44,6 +45,16 @@ _HIGH_RISK_PATTERNS = (
     "evade tax",
     "how to bribe",
 )
+
+
+def _strip_claim_sentences(answer_text: str, claims: list[Claim]) -> str:
+    """Remove the sentences carrying the given claims from the answer text."""
+    text = answer_text
+    for claim in claims:
+        needle = claim.text.strip()
+        if needle and needle in text:
+            text = text.replace(needle, " ")
+    return "\n".join(line for line in text.splitlines() if line.strip())
 
 
 class OutputGuardrailAgent(Agent):
@@ -82,18 +93,55 @@ class OutputGuardrailAgent(Agent):
                 answer.requires_human_review = True
             answer.warnings.extend(policy.get("warnings", []))
 
+        # Contradiction salvage: when only SOME claims contradict the sources
+        # (and the contradiction corrective redraft already failed upstream),
+        # serve the verified remainder at a capped confidence instead of the
+        # wholesale fallback — users keep a partial-but-verified answer.
+        # An answer that was ALL contradiction keeps the honest fallback below.
+        english = answer.language.startswith("en")
+        contradicted = [
+            c for c in (answer.claims or []) if c.support_level is SupportLevel.CONTRADICTORY
+        ]
+        salvaged = False
+        if (
+            route == "retrieval"
+            and not answer.refused
+            and contradicted
+            and answer.evidence
+            and getattr(ctx.settings, "salvage_contradicted_claims_enabled", True)
+        ):
+            stripped = _strip_claim_sentences(answer.answer, contradicted)
+            # Salvage only pays when verified content remains: a citation
+            # marker means a cited sentence survived stripping; the length
+            # floor keeps out degenerate fragments. An answer that was ALL
+            # contradiction keeps the honest fallback below.
+            if re.search(r"\[\d+\]", stripped) and len(stripped) >= 60:
+                answer.answer = stripped.rstrip() + get_prompt(
+                    "RESPONSE_SALVAGED_NOTE_EN" if english else "RESPONSE_SALVAGED_NOTE_FR"
+                )
+                answer.confidence = min(
+                    max(answer.confidence, ctx.settings.human_review_threshold),
+                    max(0.0, ctx.settings.confidence_threshold - 0.01),
+                )
+                answer.metadata["salvaged_contradiction"] = True
+                answer.metadata["removed_contradicted_claims"] = [
+                    c.text[:200] for c in contradicted[:3]
+                ]
+                salvaged = True
+
         # A partial answer that declares a coverage gap but still answers part
         # of the question keeps its body — its sub-0.55 badge is honest and
         # replacing it wholesale would discard usable content. Replacement is
         # reserved for answers with no usable content.
-        partial_with_content = bool(answer.metadata.get("abstention_partial")) and bool(answer.evidence)
+        keeps_body = (
+            bool(answer.metadata.get("abstention_partial")) or salvaged
+        ) and bool(answer.evidence)
         low_confidence = (
             route == "retrieval"
             and not answer.refused
             and answer.confidence < ctx.settings.confidence_threshold
-            and not partial_with_content
+            and not keeps_body
         )
-        english = answer.language.startswith("en")
         if low_confidence:
             # Do not expose a weak legal synthesis as if it were dependable.
             answer.answer = get_prompt(

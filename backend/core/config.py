@@ -191,8 +191,8 @@ class Settings(BaseSettings):
     # expensive per-branch stage on a local GPU); the tail keeps its
     # heuristic score. 0 disables the rescore without touching
     # rerank_llm_enabled semantics.
-    rerank_llm_top_k: int = 8
-    rerank_llm_timeout_seconds: float = 10.0
+    rerank_llm_top_k: int = 4  # candidates shown to the LLM rescore (was 8: one call per branch, latency-bound)
+    rerank_llm_timeout_seconds: float = 6.0
     rerank_llm_blend_weight: float = 0.5  # weight of the LLM rescore in the final rerank blend
     reranker_max_retries: int = 1  # extra attempts after the first API rerank failure
     graph_expansion_score: float = 0.01  # retrieval score stamped on graph-expansion candidates
@@ -413,7 +413,7 @@ class Settings(BaseSettings):
     # Defaults preserve the previous hardcoded behavior exactly.
     # planner agent
     planner_max_expansion_tasks: int = 3  # cap on terminology-expansion keyword tasks per plan
-    planner_max_sub_question_tasks: int = 6  # cap on sub-question keyword tasks added to the plan
+    planner_max_sub_question_tasks: int = 4  # cap on sub-question keyword tasks (doubles as retrieval branch budget: each branch is ~30-60s of embed/rerank time)
     # response generator / confidence
     answer_llm_timeout_seconds: float = 300.0
     # Reasoning models count hidden reasoning against this budget: at 2000 the
@@ -459,6 +459,7 @@ class Settings(BaseSettings):
     context_message_max_chars: int = 2000  # per-message char cap in the loaded conversation buffer
     context_assistant_max_chars: int = 400  # tighter cap for past ASSISTANT answers: a reminder, not a template to parrot
     reasoning_retry_max_evidence: int = 2  # reasoning's INSUFFICIENT retry is honored only with this many chunks or fewer (or low coverage)
+    salvage_contradicted_claims_enabled: bool = True  # serve the verified remainder when only some claims contradict the sources
 
     @property
     def langfuse_enabled(self) -> bool:

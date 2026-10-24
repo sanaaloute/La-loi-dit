@@ -234,6 +234,19 @@ Respond in the user's requested language.""",
         "conflict, say so explicitly instead of choosing silently.\n\n"
         "Previous answer:\n{text}"
     ),
+    # Appended by the output guardrail when persistently-contradicted claims
+    # were stripped and only the verified remainder is served.
+    "RESPONSE_SALVAGED_NOTE_FR": (
+        "\n\nNote : un passage de cette réponse a été retiré par mesure de prudence "
+        "parce qu'il contredisait les sources officielles indexées ; le contenu "
+        "restant est vérifié. Une révision par un professionnel du droit est "
+        "recommandée."
+    ),
+    "RESPONSE_SALVAGED_NOTE_EN": (
+        "\n\nNote: a passage of this answer was removed as a precaution because it "
+        "contradicted the indexed official sources; the remaining content is "
+        "verified. Review by a legal professional is recommended."
+    ),
     "RESPONSE_INSUFFICIENT_FR": (
         "Je n'ai pas trouvé de preuves vérifiables dans les sources officielles indexées "
         "pour répondre à cette question. Plutôt que de conjecturer, je dois déclarer que "

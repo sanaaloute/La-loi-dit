@@ -20,15 +20,18 @@ produces the `RetrievalPlan` (sub-questions, search tasks, legal domains,
 languages, scenario date). The deterministic classification seeds
 `question_type`/`temporal_intent`; the LLM may override them. Two safety nets
 are always applied post-hoc: at least one vector and one keyword task on the
-raw query, and one keyword task per sub-question (up to 6) so broad questions
+raw query, and one keyword task per sub-question (up to 4 — the cap doubles
+as the retrieval-branch budget) so broad questions
 are searched by legal issue, not only by the question's own words.
 
 **Deterministic decomposition** — `backend/planner/decomposition.py` is the
 LLM-free fallback (spec §15): a curated French legal-issue taxonomy keyed by
 topic (`licenciement`, `contrat_de_travail`, `divorce`, `bail_loyer`,
-`succession`, `societe_ohada`). Only broad question types (`rights`,
-`obligations`, `procedure`, `legal_rule`, `case_analysis`, `general`) are
-decomposed; specific lookups (article numbers, amounts, definitions) are never
+`succession`, `societe_ohada`, `prescription`). Broad question types (`rights`,
+`obligations`, `procedure`, `legal_rule`, `case_analysis`, `general`,
+`factual`) are decomposed, and the decomposition is merged into every plan as
+a floor — not only into heuristic fallback plans; specific lookups (article
+numbers, amounts, definitions) are never
 rewritten. Matched topics whose domains don't intersect the detected
 `legal_domains` are skipped.
 

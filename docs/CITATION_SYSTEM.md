@@ -189,7 +189,13 @@ confidence:
 
 The `output_guardrail` node additionally applies the confidence policy tool
 (low-confidence warning below `confidence_threshold`, human-review escalation
-below `human_review_threshold`) and high-risk query patterns.
+below `human_review_threshold`) and high-risk query patterns. Below
+`confidence_threshold` the answer body is normally replaced by the
+insufficient-information message — with two exemptions that keep verified
+content: `abstention_partial` answers, and **contradiction salvage**, where
+the sentences carrying persistently-contradicted claims are stripped and the
+verified remainder is served at a pinned sub-threshold confidence with a
+caution note (kill switch: `salvage_contradicted_claims_enabled`).
 
 ## Confidence model (spec §39)
 
