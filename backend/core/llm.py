@@ -39,13 +39,14 @@ PROVIDER_DEFAULT_API_BASES = {
 
 # Role-to-model assignments are driven by measured accuracy on this codebase's
 # task suites (scripts/benchmark_role_models.py), not by provider labels.
-# NOTE: in production gemma4-e4b mis-routed concrete legal questions
-# (e.g. civil prescription deadlines) to the GENERAL path, so classification
-# stays on qwen2.5-7b for now. qwen2.5-7b plans best; nemotron-3-nano is the
-# only model that both grounds synthesis with citations and abstains correctly.
+# NOTE: in production the newer models caused two regressions:
+#   - gemma4-e4b mis-routed concrete legal questions to GENERAL;
+#   - nemotron-3-nano hung / stalled indefinitely during synthesis.
+# So classification stays on qwen2.5-7b and synthesis/analysis stay on
+# gpt-oss-20b, which is the last known-good production configuration.
 CLASSIFICATION_MODEL = "qwen2.5-7b"
 PLANNER_MODEL = "qwen2.5-7b"
-SYNTHESIS_MODEL = "nemotron-3-nano"
+SYNTHESIS_MODEL = "gpt-oss-20b"
 
 ROLE_MODEL_CONFIGS: dict[str, dict[str, Any]] = {
     "classification": {
@@ -63,14 +64,15 @@ ROLE_MODEL_CONFIGS: dict[str, dict[str, Any]] = {
         "max_tokens": 2048,
         "temperature": 0.5,
         "timeout_seconds": 120.0,
+        # Reasoning models count hidden reasoning against max_tokens; "low"
+        # keeps headroom for the answer itself. LiteLLM drops the parameter
+        # for models that do not support it (litellm.drop_params = True).
         "reasoning_effort": "low",
     },
     "synthesis": {
         "model": SYNTHESIS_MODEL,
         "max_tokens": 4096,
-        # Near-deterministic: answers must copy numbers/durations verbatim.
-        "temperature": 0.2,
-        "reasoning_effort": "low",
+        "temperature": 0.7,
     },
 }
 

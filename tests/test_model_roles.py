@@ -15,9 +15,8 @@ def test_role_clients_have_independent_generation_defaults(tmp_path):
     assert structured._generation_kwargs(None, None)["max_tokens"] == 2048
     assert "reasoning_effort" not in structured._generation_kwargs(None, None)
     assert synthesis is base
-    assert synthesis.model == "openai/nemotron-3-nano"
-    assert synthesis._generation_kwargs(None, None)["reasoning_effort"] == "low"
-    assert synthesis._generation_kwargs(None, None)["temperature"] == 0.2
+    assert synthesis.model == "openai/gpt-oss-20b"
+    assert synthesis._generation_kwargs(None, None)["temperature"] == 0.7
     assert planner.model == "openai/qwen2.5-7b"
     assert "reasoning_effort" not in planner._generation_kwargs(None, None)
     analysis = resolve_role_llm("analysis", base, settings)
