@@ -43,13 +43,24 @@ PROVIDER_DEFAULT_API_BASES = {
 #   - gemma4-e4b mis-routed concrete legal questions to GENERAL;
 #   - nemotron-3-nano hung / stalled indefinitely during synthesis;
 #   - gpt-oss-20b was removed from Afrikia and had started returning empty completions.
-# As a safe, working configuration all structured roles currently use
-# qwen2.5-7b. It is smaller and reliably produces output on this provider.
+# Re-benchmarked 2026-10-25 (all three provider models, production prompts):
+#   - synthesis/planning: qwen2.5-7b is the ONLY viable model (3/3 grounded,
+#     4-5x faster than gemma4-e4b; nemotron 0/3);
+#   - query routing: gemma4-e4b scores 14/14 vs qwen2.5-7b 12/14 — qwen
+#     mis-routes "Que sais-tu du droit du travail ?" / "C'est quoi l'OHADA ?"
+#     to GENERAL, producing ungrounded answers, so the router role uses gemma
+#     (p50 ~1s vs 0.7s: acceptable for one call per non-shortcut question).
 CLASSIFICATION_MODEL = "qwen2.5-7b"
 PLANNER_MODEL = "qwen2.5-7b"
 SYNTHESIS_MODEL = "qwen2.5-7b"
+ROUTER_MODEL = "gemma4-e4b"
 
 ROLE_MODEL_CONFIGS: dict[str, dict[str, Any]] = {
+    "router": {
+        "model": ROUTER_MODEL,
+        "max_tokens": 2048,
+        "temperature": 0.0,
+    },
     "classification": {
         "model": CLASSIFICATION_MODEL,
         "max_tokens": 2048,

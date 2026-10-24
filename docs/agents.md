@@ -42,20 +42,22 @@ flowchart LR
 
 Production LLM calls use the private Afrikia provider (OpenAI-compatible,
 bearer key `AFRIKIA_API_KEY`, base URL `https://afrikia.neobytech.net/v1`) with
-server-fixed assignments: **Qwen 2.5 7B** (`qwen2.5-7b`) for ALL roles —
-language routing, query routing, claim refinement, ingestion classification,
-optional LLM rerank scoring, retrieval planning, reasoning/reflection,
-direct/general/grounded synthesis, drafting enrichment, and memory summaries.
+server-fixed assignments per role — models are placed on their measured
+strengths, not uniformly:
+**Qwen 2.5 7B** (`qwen2.5-7b`) for language gate, context/memory, claim
+refinement, LLM rerank scoring (classification role), retrieval planning,
+reasoning/reflection, and all user-facing synthesis;
+**gemma4-e4b** for query routing only (router role).
 The assignments come from measured accuracy on the repo's benchmark suite
-(`scripts/benchmark_role_models.py`), not provider labels. Larger or newer
-models previously caused regressions or became unavailable on the provider
-(gemma4-e4b mis-routed concrete legal questions to GENERAL; nemotron-3-nano
-stalled during synthesis; gpt-oss-20b was removed from Afrikia), so the safe
-working configuration keeps every structured role on qwen2.5-7b. Re-benchmarked
-on 2026-10-25 over all three provider models: qwen2.5-7b is the only one at
-3/3 grounded synthesis (and the fastest); gemma4-e4b reaches 2/3 at 4-5× the
-latency; nemotron-3-nano scores 0/3 on synthesis and 7/14 on routing. A model
-upgrade requires new capacity on the provider, not a config change.
+(`scripts/benchmark_role_models.py`), not provider labels. Re-benchmarked on
+2026-10-25 over all three provider models: qwen2.5-7b is the only viable
+synthesis/planning model (3/3 grounded, 4-5× faster than gemma4-e4b;
+nemotron-3-nano 0/3 synthesis, 7/14 routing), while gemma4-e4b routes
+questions best (14/14 vs 12/14 — qwen mis-routed "Que sais-tu du droit du
+travail ?" / "C'est quoi l'OHADA ?" to GENERAL, producing ungrounded answers).
+Earlier larger/newer assignments caused regressions or became unavailable
+(gpt-oss-20b was removed from Afrikia; nemotron-3-nano stalled during
+synthesis).
 Users cannot select models, and environment role overrides or runtime catalog
 changes cannot replace these assignments. There is no external chat failover;
 daily quotas and anti-abuse rate limits still cover all role calls. The

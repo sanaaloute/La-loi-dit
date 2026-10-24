@@ -1,7 +1,8 @@
 """Deterministic per-node-role model resolution.
 
-Qwen 2.5 handles all structured roles: classification, planning, legal
-analysis and every user-facing free-text answer. There is no request or
+Qwen 2.5 handles most structured roles (classification, planning, analysis,
+synthesis); gemma4-e4b handles query routing, where it out-scores Qwen on the
+production benchmark. There is no request or
 environment override: only the test-only mock provider bypasses this mapping.
 Role clients share the base client's ``usage_totals`` dict so API token
 metering covers every model call in the request.

@@ -205,7 +205,7 @@ def build_graph(ctx: AppContext):
     g.add_node("input_guardrail", bind(input_guardrail.input_guardrail_node))
     g.add_node("refusal", bind(refusal.refusal_node))
     g.add_node("language_gate", bind(language_gate.language_gate_node, role="classification"))
-    g.add_node("query_router", bind(query_router.query_router_node, role="classification"))
+    g.add_node("query_router", bind(query_router.query_router_node, role="router"))
     g.add_node("planner", bind(planner_node, role="planner"))
     g.add_node("context_agent", bind(context_agent.context_agent_node, role="classification"))
     g.add_node("memory_agent", bind(memory_agent.memory_agent_node, role="classification"))

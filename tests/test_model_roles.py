@@ -14,6 +14,9 @@ def test_role_clients_have_independent_generation_defaults(tmp_path):
     assert structured.model == "openai/qwen2.5-7b"
     assert structured._generation_kwargs(None, None)["max_tokens"] == 2048
     assert "reasoning_effort" not in structured._generation_kwargs(None, None)
+    router = resolve_role_llm("router", base, settings)
+    assert router.model == "openai/gemma4-e4b"
+    assert router._generation_kwargs(None, None)["temperature"] == 0.0
     assert synthesis is base
     assert synthesis.model == "openai/qwen2.5-7b"
     assert synthesis._generation_kwargs(None, None)["temperature"] == 0.2
