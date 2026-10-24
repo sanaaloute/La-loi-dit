@@ -1,12 +1,13 @@
-"""Single active session enforcement per user/device class.
+"""Per-device active session enforcement and refresh-token storage.
 
-Every login issues a JWT with a unique ``jti`` and stores the active session
-in Redis (or the in-memory fallback) keyed by ``user_id`` plus a device-class
-scope: web sessions use the historical unscoped key, native clients sending
-``X-Device-Id`` land in the ``mobile`` scope. Subsequent requests must carry
-a token whose ``jti`` matches the stored value; a new login from the same
-device class automatically invalidates the previous session of that class,
-while leaving the other class (phone vs. browser) untouched.
+Every login issues a short-lived access token with a unique ``jti`` and stores
+it as the active session for that user/device. A separate long-lived refresh
+token is stored under ``refresh:<user_id>:<device_id>`` so clients can request
+new access tokens after the old one expires.
+
+Native clients send ``X-Device-Id`` on every request; the web app does the same
+so sessions are not bound to IP addresses. Clients without the header fall back
+to a single unscoped active session for backward compatibility.
 """
 
 from __future__ import annotations
@@ -24,28 +25,27 @@ from backend.core.cache import CacheProtocol
 logger = logging.getLogger(__name__)
 
 SESSION_KEY_PREFIX = "active_session:"
+REFRESH_KEY_PREFIX = "refresh:"
 
-#: Header native clients (mobile apps) send on EVERY request with a stable,
-#: self-generated device UUID. Its presence switches both the session scope
-#: and the device fingerprint to IP-independent variants.
+#: Header clients send on EVERY request with a stable, self-generated device UUID.
+#: Its presence switches both the session scope and the device fingerprint to
+#: IP-independent variants.
 DEVICE_ID_HEADER = "x-device-id"
 
-MOBILE_SCOPE = "mobile"
+
+def session_device_id(request: Request) -> Optional[str]:
+    """Return the device id from the request header, or None."""
+    return request.headers.get(DEVICE_ID_HEADER, "").strip() or None
 
 
-def session_scope(request: Request) -> str:
-    """Return the session scope for this request ("mobile" or "" for web).
-
-    Web sessions keep the historical unscoped key so sessions issued before
-    scoping existed stay valid after a deploy.
-    """
-    return MOBILE_SCOPE if request.headers.get(DEVICE_ID_HEADER) else ""
-
-
-def _session_key(user_id: str, scope: str = "") -> str:
-    if scope:
-        return f"{SESSION_KEY_PREFIX}{user_id}:{scope}"
+def _session_key(user_id: str, device_id: Optional[str] = None) -> str:
+    if device_id:
+        return f"{SESSION_KEY_PREFIX}{user_id}:{device_id}"
     return f"{SESSION_KEY_PREFIX}{user_id}"
+
+
+def _refresh_key(user_id: str, device_id: Optional[str] = None) -> str:
+    return f"{REFRESH_KEY_PREFIX}{user_id}:{device_id or 'default'}"
 
 
 def generate_jti() -> str:
@@ -57,15 +57,12 @@ def device_fingerprint(request: Request) -> str:
     """Stable but coarse device identifier from request metadata.
 
     Intentionally not bullet-proof — the goal is to prevent trivial session
-    sharing across browsers, not to fingerprint hardware. IP alone is
-    avoided as the sole signal because of NAT/CGNAT.
-
-    Native clients (``X-Device-Id`` header) are fingerprinted on their
-    self-supplied stable device UUID only: mobile networks change IPs
-    mid-session (CGNAT, Wi-Fi <-> cellular handover), so binding their
-    fingerprint to request metadata would log them out at random.
+    sharing across browsers, not to fingerprint hardware. When a client sends
+    ``X-Device-Id`` the fingerprint is derived from that value only, so roaming
+    IPs, VPNs and mobile-network handovers never log the user out. Clients
+    without the header fall back to browser metadata plus the client IP.
     """
-    device_id = request.headers.get(DEVICE_ID_HEADER, "").strip()
+    device_id = session_device_id(request)
     if device_id:
         return hashlib.sha256(f"device:{device_id}".encode("utf-8")).hexdigest()[:32]
     user_agent = request.headers.get("user-agent", "")
@@ -82,9 +79,9 @@ async def activate_session(
     exp: int,
     cache: Optional[CacheProtocol],
     *,
-    scope: str = "",
+    device_id: Optional[str] = None,
 ) -> None:
-    """Store ``jti`` as the single active session for ``user_id`` (+scope).
+    """Store ``jti`` as the active access session for ``user_id`` (+device).
 
     ``exp`` is the Unix timestamp at which the token expires; the stored
     session is TTL'd to that same horizon. If ``cache`` is unavailable the
@@ -94,11 +91,14 @@ async def activate_session(
         return
     ttl = max(60, int(exp - time.time()))
     await cache.set(
-        _session_key(user_id, scope),
+        _session_key(user_id, device_id),
         {"jti": jti, "fingerprint": fingerprint, "exp": exp},
         ttl=ttl,
     )
-    logger.debug("session activated", extra={"user_id": user_id, "jti": jti[:8], "scope": scope})
+    logger.debug(
+        "session activated",
+        extra={"user_id": user_id, "jti": jti[:8], "device_id": device_id},
+    )
 
 
 async def verify_active_session(
@@ -107,7 +107,7 @@ async def verify_active_session(
     cache: Optional[CacheProtocol],
     *,
     fingerprint: Optional[str] = None,
-    scope: str = "",
+    device_id: Optional[str] = None,
 ) -> bool:
     """Return True when ``jti`` matches the active session for ``user_id``.
 
@@ -119,7 +119,7 @@ async def verify_active_session(
     if cache is None or not user_id or not jti:
         return True
     try:
-        session: Optional[dict[str, Any]] = await cache.get(_session_key(user_id, scope))
+        session: Optional[dict[str, Any]] = await cache.get(_session_key(user_id, device_id))
     except Exception:
         return True
     if session is None:
@@ -134,8 +134,13 @@ async def verify_active_session(
     return True
 
 
-async def revoke_session(user_id: str, cache: Optional[CacheProtocol], *, scope: str = "") -> None:
-    """Hard-revoke the stored active session (logout / account deletion).
+async def revoke_session(
+    user_id: str,
+    cache: Optional[CacheProtocol],
+    *,
+    device_id: Optional[str] = None,
+) -> None:
+    """Hard-revoke the stored active session for this user/device (logout).
 
     The entry is POISONED, not deleted: ``verify_active_session`` fails open
     when no entry exists (so a cache flush never mass-locks users out), which
@@ -145,7 +150,7 @@ async def revoke_session(user_id: str, cache: Optional[CacheProtocol], *, scope:
     """
     if cache is None or not user_id:
         return
-    key = _session_key(user_id, scope)
+    key = _session_key(user_id, device_id)
     try:
         session: Optional[dict[str, Any]] = await cache.get(key)
     except Exception:
@@ -164,12 +169,59 @@ async def revoke_session(user_id: str, cache: Optional[CacheProtocol], *, scope:
     )
 
 
-#: Every scope a user can hold a session in ("" = web, plus native classes).
-KNOWN_SCOPES = ("", MOBILE_SCOPE)
+async def store_refresh_token(
+    user_id: str,
+    jti: str,
+    device_id: Optional[str],
+    exp: int,
+    cache: Optional[CacheProtocol],
+) -> None:
+    """Persist a refresh token so it can be verified later."""
+    if cache is None or not user_id or not jti:
+        return
+    ttl = max(60, int(exp - time.time()))
+    await cache.set(
+        _refresh_key(user_id, device_id),
+        {"jti": jti, "device_id": device_id, "exp": exp},
+        ttl=ttl,
+    )
+
+
+async def verify_refresh_token(
+    user_id: str,
+    jti: str,
+    device_id: Optional[str],
+    cache: Optional[CacheProtocol],
+) -> bool:
+    """Return True if a matching refresh token is stored for this user/device."""
+    if cache is None or not user_id or not jti:
+        return False
+    try:
+        stored: Optional[dict[str, Any]] = await cache.get(_refresh_key(user_id, device_id))
+    except Exception:
+        return False
+    if not isinstance(stored, dict):
+        return False
+    if stored.get("jti") != jti:
+        return False
+    if stored.get("exp", 0) < int(time.time()):
+        return False
+    return True
+
+
+async def revoke_refresh_tokens(user_id: str, cache: Optional[CacheProtocol]) -> None:
+    """Revoke every stored refresh token for ``user_id`` (logout all devices)."""
+    if cache is None or not user_id:
+        return
+    await cache.clear_prefix(f"{REFRESH_KEY_PREFIX}{user_id}:")
 
 
 async def revoke_all_sessions(user_id: str, cache: Optional[CacheProtocol]) -> None:
-    """Remove the stored active session in every scope (account deletion,
-    password change) so all devices are forced to log in again."""
-    for scope in KNOWN_SCOPES:
-        await revoke_session(user_id, cache, scope=scope)
+    """Remove the stored active session and refresh tokens in every scope
+    (account deletion, password change) so all devices are forced to log in again."""
+    if cache is None or not user_id:
+        return
+    # The unscoped key is used by clients that do not send X-Device-Id.
+    await revoke_session(user_id, cache)
+    await cache.clear_prefix(f"{SESSION_KEY_PREFIX}{user_id}:")
+    await revoke_refresh_tokens(user_id, cache)

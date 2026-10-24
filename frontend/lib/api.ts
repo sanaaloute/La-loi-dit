@@ -98,6 +98,7 @@ export interface ChatResponse {
 
 export interface TokenResponse {
   access_token: string;
+  refresh_token: string;
   token_type: string;
   expires_in: number;
   role: string;
@@ -278,9 +279,15 @@ function apiUrl(path: string): string {
 // ---------------------------------------------------------------------------
 
 const TOKEN_KEY = "legal_ai_token";
+const REFRESH_TOKEN_KEY = "legal_ai_refresh_token";
+const DEVICE_ID_KEY = "legal_ai_device_id";
 const SESSION_KEY = "legal_ai_session_id";
 
 export const AUTH_CHANGE_EVENT = "legal-ai-auth-change";
+
+// Allow a small amount of client clock skew so a token is not discarded the
+// instant its server-issued `exp` is reached.
+const CLOCK_SKEW_LEEWAY_MS = 60 * 1000;
 
 function parseJwtPayload(token: string): { exp?: number } | null {
   try {
@@ -296,7 +303,7 @@ function parseJwtPayload(token: string): { exp?: number } | null {
 export function isTokenExpired(token: string): boolean {
   const payload = parseJwtPayload(token);
   if (!payload?.exp) return false;
-  return payload.exp * 1000 < Date.now();
+  return payload.exp * 1000 < Date.now() + CLOCK_SKEW_LEEWAY_MS;
 }
 
 function notifyAuthChange() {
@@ -327,6 +334,39 @@ export function setToken(token: string | null): void {
 
 export function clearToken(): void {
   setToken(null);
+  clearRefreshToken();
+}
+
+export function getRefreshToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(REFRESH_TOKEN_KEY);
+}
+
+export function setRefreshToken(token: string | null): void {
+  if (typeof window === "undefined") return;
+  if (token) window.localStorage.setItem(REFRESH_TOKEN_KEY, token);
+  else window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+}
+
+export function clearRefreshToken(): void {
+  setRefreshToken(null);
+}
+
+function generateDeviceId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+export function getDeviceId(): string {
+  if (typeof window === "undefined") return "";
+  let id = window.localStorage.getItem(DEVICE_ID_KEY);
+  if (!id) {
+    id = generateDeviceId();
+    window.localStorage.setItem(DEVICE_ID_KEY, id);
+  }
+  return id;
 }
 
 export function getSessionId(): string | null {
@@ -345,8 +385,13 @@ function authHeaders(token?: string | null): Record<string, string> {
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
+function deviceHeaders(): Record<string, string> {
+  const id = getDeviceId();
+  return id ? { "X-Device-Id": id } : {};
+}
+
 // ---------------------------------------------------------------------------
-// Token renewal (sliding session via POST /auth/refresh)
+// Token renewal (refresh-token flow via POST /auth/refresh)
 // ---------------------------------------------------------------------------
 
 // Renew the token when it has less than this many seconds left.
@@ -360,19 +405,23 @@ function tokenSecondsLeft(token: string): number | null {
 
 let refreshInFlight: Promise<string | null> | null = null;
 
-async function requestRefresh(token: string): Promise<string | null> {
+async function requestRefreshWithToken(refreshToken: string): Promise<string | null> {
   try {
     const res = await fetch(apiUrl("/auth/refresh"), {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {
+        "Content-Type": "application/json",
+        ...deviceHeaders(),
+      },
+      body: JSON.stringify({ refresh_token: refreshToken }),
     });
     if (!res.ok) {
-      // 401: the session is over (expired or displaced by another login).
       if (res.status === 401) clearToken();
       return null;
     }
     const data = (await res.json()) as TokenResponse;
     setToken(data.access_token);
+    setRefreshToken(data.refresh_token);
     return data.access_token;
   } catch {
     // Network error: keep the current token, it is still valid for a while.
@@ -380,17 +429,57 @@ async function requestRefresh(token: string): Promise<string | null> {
   }
 }
 
+async function requestRefreshLegacy(accessToken: string): Promise<string | null> {
+  // Old sliding-session flow for clients that upgraded from a version without
+  // refresh tokens. This path issues a refresh token and stores it.
+  try {
+    const res = await fetch(apiUrl("/auth/refresh"), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, ...deviceHeaders() },
+    });
+    if (!res.ok) {
+      if (res.status === 401) clearToken();
+      return null;
+    }
+    const data = (await res.json()) as TokenResponse;
+    setToken(data.access_token);
+    setRefreshToken(data.refresh_token);
+    return data.access_token;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Return a valid token, renewing it through `/auth/refresh` when it is about
- * to expire. Returns null when no token is stored or the session is over
- * (the user must log in again).
+ * Return a valid access token, using the stored refresh token when the access
+ * token is missing or close to expiry. Returns null when no session is stored
+ * or the session is over (the user must log in again).
  */
 export function ensureFreshToken(): Promise<string | null> {
   if (typeof window === "undefined") return Promise.resolve(null);
+
   const token = window.localStorage.getItem(TOKEN_KEY);
+  if (token) {
+    const secondsLeft = tokenSecondsLeft(token);
+    if (secondsLeft !== null && secondsLeft > REFRESH_THRESHOLD_S) {
+      return Promise.resolve(getToken());
+    }
+  }
+
+  const refreshToken = getRefreshToken();
+  if (refreshToken) {
+    if (!refreshInFlight) {
+      refreshInFlight = requestRefreshWithToken(refreshToken).finally(() => {
+        refreshInFlight = null;
+      });
+    }
+    return refreshInFlight;
+  }
+
+  // Legacy path: a valid access token can still slide while it is non-expired.
   if (!token) return Promise.resolve(null);
   const secondsLeft = tokenSecondsLeft(token);
-  if (secondsLeft === null || secondsLeft > REFRESH_THRESHOLD_S) {
+  if (secondsLeft === null) {
     return Promise.resolve(getToken());
   }
   if (secondsLeft <= 0) {
@@ -398,7 +487,7 @@ export function ensureFreshToken(): Promise<string | null> {
     return Promise.resolve(null);
   }
   if (!refreshInFlight) {
-    refreshInFlight = requestRefresh(token).finally(() => {
+    refreshInFlight = requestRefreshLegacy(token).finally(() => {
       refreshInFlight = null;
     });
   }
@@ -419,12 +508,33 @@ async function apiFetch(path: string, options: ApiFetchOptions = {}): Promise<Re
   const headers: Record<string, string> = {
     ...(fetchOptions.headers as Record<string, string> ?? {}),
     ...authHeaders(token),
+    ...deviceHeaders(),
   };
   const res = await fetch(apiUrl(path), {
     ...fetchOptions,
     headers,
   });
-  if (res.status === 401) {
+
+  // Try one silent refresh on 401, then replay the request. Only log out if
+  // the refresh also fails, so transient session mismatches do not kick users
+  // back to the login screen.
+  if (res.status === 401 && !path.startsWith("/auth/")) {
+    const refreshed = await ensureFreshToken();
+    if (refreshed) {
+      const retryHeaders: Record<string, string> = {
+        ...(fetchOptions.headers as Record<string, string> ?? {}),
+        ...authHeaders(token),
+        ...deviceHeaders(),
+      };
+      const retry = await fetch(apiUrl(path), {
+        ...fetchOptions,
+        headers: retryHeaders,
+      });
+      if (retry.status === 401) {
+        clearToken();
+      }
+      return retry;
+    }
     clearToken();
   }
   return res;
@@ -444,7 +554,9 @@ export async function login(username: string, password: string): Promise<TokenRe
     const detail = await safeDetail(res);
     throw new Error(detail ?? `Échec de connexion (${res.status})`);
   }
-  return (await res.json()) as TokenResponse;
+  const data = (await res.json()) as TokenResponse;
+  setRefreshToken(data.refresh_token);
+  return data;
 }
 
 export async function register(
@@ -466,7 +578,9 @@ export async function register(
     const detail = await safeDetail(res);
     throw new Error(detail ?? `Échec de l'inscription (${res.status})`);
   }
-  return (await res.json()) as TokenResponse;
+  const data = (await res.json()) as TokenResponse;
+  setRefreshToken(data.refresh_token);
+  return data;
 }
 
 export async function me(token?: string | null): Promise<UserProfile> {

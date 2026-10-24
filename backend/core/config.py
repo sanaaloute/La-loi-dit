@@ -112,9 +112,10 @@ class Settings(BaseSettings):
     # --- auth / security ---
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60
+    jwt_refresh_expire_days: int = 30
     rate_limit_per_minute: int = 10_000  # dev: effectively unlimited; tighten at deployment
     rate_limit_per_second: int = 5  # per-user/IP per-second burst cap
-    single_session_per_user: bool = True  # invalidate previous tokens on new login
+    single_session_per_user: bool = True  # invalidate previous tokens on the same device
     # Comma-separated browser origins allowed to call the API directly (CORS).
     # Needed for real-time SSE: bypassing the Next.js /backend-api proxy with
     # NEXT_PUBLIC_API_URL requires the API to accept cross-origin requests.
@@ -415,7 +416,11 @@ class Settings(BaseSettings):
     planner_max_sub_question_tasks: int = 6  # cap on sub-question keyword tasks added to the plan
     # response generator / confidence
     answer_llm_timeout_seconds: float = 300.0
-    answer_max_tokens: int = 2000
+    # Reasoning models count hidden reasoning against this budget: at 2000 the
+    # response generator intermittently got an empty completion (whole budget
+    # eaten by reasoning) and fell back to the unavailability message despite
+    # good evidence. 4096 keeps headroom for reasoning + the cited answer.
+    answer_max_tokens: int = 4096
     answer_max_excerpt_chars: int = 1000  # per-excerpt char cap; response_generator also hard-caps at 1000
     answer_child_preview_chars: int = 200  # child-chunk preview length inside a parent excerpt
     confidence_citation_weight: float = 0.6  # weight of citation accuracy in the aggregate confidence

@@ -33,6 +33,8 @@ from fastapi.responses import StreamingResponse
 from langchain_core.callbacks import AsyncCallbackHandler
 from pydantic import BaseModel, ValidationError
 
+from backend.agents.query_router import is_direct_shortcut
+from backend.agents.response_generator import response_generator_node
 from backend.api.deps import get_ctx, get_graph, require_user
 from backend.core import stt
 from backend.core.answer_cache import AnswerCache, cache_identity, is_cacheable
@@ -317,6 +319,97 @@ def _cached_response(cached: dict[str, Any], state: GraphState) -> ChatResponse:
     return response
 
 
+async def _direct_fast_path(
+    ctx: Any,
+    state: GraphState,
+    payload: ChatRequest,
+    user: TokenPayload,
+    *,
+    usage_before: Optional[dict[str, int]] = None,
+    answer_cache: Optional[AnswerCache] = None,
+    model_id: str = "",
+) -> Optional[ChatResponse]:
+    """Single-LLM shortcut for greetings/thanks/meta questions.
+
+    Returns a ChatResponse without entering the LangGraph when the query is a
+    deterministic direct shortcut. The existing graph nodes remain available for
+    every other query.
+    """
+    if not is_direct_shortcut(state.get("query", "")):
+        return None
+
+    fast_state = {**state, "route": "direct"}
+    started = time.perf_counter()
+    result = await response_generator_node(fast_state, ctx)
+    latency_ms = (time.perf_counter() - started) * 1000
+    answer: FinalAnswer = result["final_answer"]
+    trace = [*result.get("trace", []), "direct_fast_path: served"]
+
+    # Persist the turn exactly like a normal graph run.
+    received_at = datetime.now(timezone.utc)
+    if ctx.memory is not None:
+        try:
+            await ctx.memory.append_turn(
+                state.get("session_id", ""),
+                state.get("user_id", "anonymous"),
+                [
+                    ChatMessage(role="user", content=state.get("original_query") or state.get("query", ""), created_at=received_at),
+                    ChatMessage(role="assistant", content=answer.model_dump_json()),
+                ],
+            )
+            from backend.memory.summarizer import maybe_summarize
+
+            await maybe_summarize(
+                ctx.memory,
+                state.get("session_id", ""),
+                llm=state.get("llm") or ctx.llm,
+                user_id=state.get("user_id", "anonymous"),
+            )
+        except Exception:
+            pass
+
+    # Meter token usage for DB-backed users.
+    llm = state.get("llm") or getattr(ctx, "llm", None)
+    if user.user_id and ctx.user_store is not None and usage_before is not None and llm is not None:
+        tokens_in = llm.usage_totals["tokens_in"] - usage_before.get("tokens_in", 0)
+        tokens_out = llm.usage_totals["tokens_out"] - usage_before.get("tokens_out", 0)
+        if tokens_in <= 0 and tokens_out <= 0:
+            tokens_in = LLMClient._estimate_tokens(payload.query)
+            tokens_out = LLMClient._estimate_tokens(answer.answer)
+        try:
+            await ctx.user_store.record_usage(user.user_id, tokens_in, tokens_out)
+        except Exception:
+            pass
+
+    response = ChatResponse(
+        session_id=state.get("session_id", ""),
+        answer=answer,
+        trace=trace,
+        latency_ms=round(latency_ms, 1),
+    )
+
+    if answer_cache is not None and is_cacheable(response.model_dump(mode="json"), ctx.settings):
+        cache_payload = response.model_dump(mode="json")
+        cache_payload["trace"] = []
+        await answer_cache.set(payload.query, model_id, cache_payload)
+
+    return response
+
+
+async def _direct_stream_events(
+    response: ChatResponse,
+    include_trace: bool = False,
+) -> AsyncIterator[str]:
+    """Synthetic SSE sequence for a direct fast-path answer."""
+    update: dict[str, Any] = {"node": "direct_fast_path", "update": {}}
+    if include_trace:
+        update["update"] = {"trace": response.trace or []}
+    yield f"data: {json.dumps({'type': 'update', **update}, ensure_ascii=False, default=str)}\n\n"
+    async for _delta in _answer_deltas(response.answer.answer):
+        yield f"data: {json.dumps({'type': 'delta', 'text': _delta}, ensure_ascii=False)}\n\n"
+    yield f"data: {json.dumps({'type': 'final', 'response': response.model_dump(mode='json')}, ensure_ascii=False)}\n\n"
+
+
 async def _meter(
     ctx: Any,
     user: TokenPayload,
@@ -414,6 +507,23 @@ async def chat(
             feature="chat",
             settings=settings,
         ) as (trace_id, trace, handler):
+            # Fast path for greetings/thanks/meta questions: one LLM call, no graph.
+            fast_response = await _direct_fast_path(
+                ctx,
+                state,
+                payload,
+                user,
+                usage_before=usage_before,
+                answer_cache=answer_cache if use_cache else None,
+                model_id=model_id,
+            )
+            if fast_response is not None:
+                fast_response.trace_id = trace_id
+                update_trace_output(trace, _trace_output_from_response(fast_response), settings=settings)
+                if not has_role(user.role, Role.ADMIN):
+                    fast_response.trace = []
+                return fast_response
+
             run_task = asyncio.create_task(run_query(graph, ctx, state, config=_graph_config(handler)))
             await _register_run(state.get("session_id", ""), run_task, ctx, uuid.uuid4().hex)
             # Wall-clock time the question arrived: the persisted prompt is
@@ -598,7 +708,7 @@ async def _stream_events(
     graph: Any,
     state: GraphState,
     payload: ChatRequest,
-    user_sub: str,
+    user: TokenPayload,
     settings: Settings,
     memory: Any = None,
     user_store: Any = None,
@@ -627,7 +737,7 @@ async def _stream_events(
 
     async with traced_chat_run(
         payload.query,
-        user_id=payload.user_id or user_sub,
+        user_id=payload.user_id or user.sub,
         session_id=payload.session_id,
         feature="chat-stream",
         settings=settings,
@@ -639,6 +749,27 @@ async def _stream_events(
         turn_started_at = datetime.now(timezone.utc)
         merged: dict[str, Any] = {}
         metrics.chat_requests_total.inc()
+
+        # Fast path for greetings/thanks/meta questions: one LLM call, no graph.
+        fast_response = await _direct_fast_path(
+            ctx,
+            state,
+            payload,
+            user,
+            usage_before=usage_before,
+            answer_cache=answer_cache,
+            model_id=model_id,
+        )
+        if fast_response is not None:
+            fast_response.trace_id = trace_id
+            metrics.chat_latency_seconds.observe((time.perf_counter() - started) / 1000.0)
+            update_trace_output(trace, _trace_output_from_response(fast_response), settings=settings)
+            if not include_trace:
+                fast_response.trace = []
+            async for frame in _direct_stream_events(fast_response, include_trace):
+                yield frame
+            return
+
         queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
         session_id = state.get("session_id", "")
         run_id = uuid.uuid4().hex
@@ -903,7 +1034,7 @@ async def chat_stream(
             get_graph(request),
             state,
             payload,
-            user.sub,
+            user,
             settings,
             memory=ctx.memory,
             user_store=ctx.user_store,
@@ -983,6 +1114,35 @@ async def ws_chat(ws: WebSocket) -> None:
             config = _graph_config(handler)
 
             metrics.chat_requests_total.inc()
+
+            # Fast path for greetings/thanks/meta questions: one LLM call, no graph.
+            ws_user = TokenPayload(
+                sub=user_sub,
+                role=user_role,
+                exp=0,
+                user_id=user_sub if user_sub != "anonymous" else None,
+            )
+            fast_response = await _direct_fast_path(
+                ctx,
+                state,
+                payload,
+                ws_user,
+                usage_before=None,
+                answer_cache=None,
+                model_id="",
+            )
+            if fast_response is not None:
+                fast_response.trace_id = trace_id
+                update_trace_output(trace, _trace_output_from_response(fast_response), settings=settings)
+                if not include_trace:
+                    fast_response.trace = []
+                await ws.send_json({"type": "update", "node": "direct_fast_path", "update": {}})
+                async for _delta in _answer_deltas(fast_response.answer.answer):
+                    await ws.send_json({"type": "delta", "text": _delta})
+                await ws.send_json({"type": "final", "response": fast_response.model_dump(mode="json")})
+                await ws.close()
+                return
+
             try:
                 async for event in stream_query(get_graph(ws), state, config=config):  # type: ignore[arg-type]
                     update = event.get("update")

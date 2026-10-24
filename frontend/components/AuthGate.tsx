@@ -6,7 +6,7 @@ import { Scale } from "lucide-react";
 import AuthCard from "@/components/AuthCard";
 import PersonaOnboarding from "@/components/PersonaOnboarding";
 import { useAuthToken } from "@/lib/useAuth";
-import { ensureFreshToken } from "@/lib/api";
+import { ensureFreshToken, getRefreshToken } from "@/lib/api";
 
 // How often an open session checks (and renews) its token.
 const REFRESH_CHECK_MS = 60 * 1000;
@@ -30,14 +30,36 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     setHydrated(true);
   }, []);
 
+  // If the access token is gone (expired) but a refresh token is still stored,
+  // recover the session silently on startup instead of showing the login card.
+  useEffect(() => {
+    if (token) return;
+    if (getRefreshToken()) {
+      void ensureFreshToken();
+    }
+  }, [token]);
+
   // Keep the session alive: renew the token before it expires while the app
   // is open (e.g. idle tab), so the user is not kicked out mid-work.
   useEffect(() => {
     if (!token) return;
-    const timer = window.setInterval(() => {
+    const tick = () => {
       void ensureFreshToken();
-    }, REFRESH_CHECK_MS);
-    return () => window.clearInterval(timer);
+    };
+    const timer = window.setInterval(tick, REFRESH_CHECK_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    const onOnline = () => {
+      tick();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", onOnline);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", onOnline);
+    };
   }, [token]);
 
   // Public pages render without any auth check (the API endpoint is public).

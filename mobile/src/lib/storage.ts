@@ -4,7 +4,12 @@
 import * as SecureStore from "expo-secure-store";
 
 const TOKEN_KEY = "yawoto.token";
+const REFRESH_TOKEN_KEY = "yawoto.refresh_token";
 const SESSION_KEY = "yawoto.session_id";
+
+// Allow a small amount of client clock skew so a token is not discarded the
+// instant its server-issued `exp` is reached.
+const CLOCK_SKEW_LEEWAY_MS = 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // JWT helpers (no atob in Hermes: manual base64url decoding)
@@ -47,7 +52,7 @@ export function parseJwtPayload(token: string): { exp?: number } | null {
 export function isTokenExpired(token: string): boolean {
   const payload = parseJwtPayload(token);
   if (!payload?.exp) return false;
-  return payload.exp * 1000 < Date.now();
+  return payload.exp * 1000 < Date.now() + CLOCK_SKEW_LEEWAY_MS;
 }
 
 export function tokenSecondsLeft(token: string): number | null {
@@ -80,6 +85,7 @@ function notifyAuthChange(): void {
 // ---------------------------------------------------------------------------
 
 let tokenCache: string | null = null;
+let refreshTokenCache: string | null = null;
 let sessionCache: string | null = null;
 
 async function safeGet(key: string): Promise<string | null> {
@@ -101,9 +107,14 @@ function safeSet(key: string, value: string | null): void {
 
 /** Load persisted values into memory. Call once at app startup. */
 export async function loadStoredAuth(): Promise<string | null> {
-  const [token, sessionId] = await Promise.all([safeGet(TOKEN_KEY), safeGet(SESSION_KEY)]);
+  const [token, refreshToken, sessionId] = await Promise.all([
+    safeGet(TOKEN_KEY),
+    safeGet(REFRESH_TOKEN_KEY),
+    safeGet(SESSION_KEY),
+  ]);
   tokenCache = token && !isTokenExpired(token) ? token : null;
   if (token && !tokenCache) safeSet(TOKEN_KEY, null);
+  refreshTokenCache = refreshToken || null;
   sessionCache = sessionId;
   return tokenCache;
 }
@@ -134,6 +145,19 @@ export function clearToken(): void {
   setToken(null);
 }
 
+export function getRefreshToken(): string | null {
+  return refreshTokenCache;
+}
+
+export function setRefreshToken(token: string | null): void {
+  refreshTokenCache = token;
+  safeSet(REFRESH_TOKEN_KEY, token);
+}
+
+export function clearRefreshToken(): void {
+  setRefreshToken(null);
+}
+
 export function getSessionId(): string | null {
   return sessionCache;
 }
@@ -146,5 +170,6 @@ export function setSessionId(sessionId: string | null): void {
 /** Wipe all persisted auth state (logout / account deletion). */
 export function clearAll(): void {
   setToken(null);
+  setRefreshToken(null);
   setSessionId(null);
 }

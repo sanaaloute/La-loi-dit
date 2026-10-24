@@ -18,7 +18,7 @@ import secrets
 import time
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Body, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from backend.core.config import Settings
@@ -26,16 +26,25 @@ from backend.core import catalog
 from backend.core.exceptions import AuthenticationError, UserAlreadyExistsError
 from backend.core.mailer import send_email
 from backend.core.models import Role
-from backend.security.jwt import TokenPayload, create_access_token, decode_access_token
+from backend.security.jwt import (
+    TokenPayload,
+    create_access_token,
+    create_refresh_token,
+    decode_access_token,
+    decode_refresh_token,
+)
 from backend.security.passwords import hash_password, verify_password
 from backend.security.sessions import (
     activate_session,
     device_fingerprint,
     generate_jti,
     revoke_all_sessions,
+    revoke_refresh_tokens,
     revoke_session,
-    session_scope,
+    session_device_id,
+    store_refresh_token,
     verify_active_session,
+    verify_refresh_token,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,9 +62,14 @@ class TokenRequest(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     expires_in: int  # seconds
     role: Role
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
 
 
 class RegisterRequest(BaseModel):
@@ -152,27 +166,45 @@ async def _token_response(
     user_id: Optional[str],
     tier: str,
 ) -> TokenResponse:
-    """Issue a JWT and, when enabled, bind it as the single active session."""
+    """Issue an access token, a refresh token and bind them to this device."""
     from backend.api.deps import get_ctx
 
+    session_user = user_id or record_id
+    device_id = session_device_id(request)
     jti = generate_jti()
-    token = create_access_token(email or record_id, role, settings, user_id=user_id, tier=tier, jti=jti)
-    expires_at = int(time.time()) + settings.jwt_expire_minutes * 60
+    access_token = create_access_token(
+        email or record_id, role, settings, user_id=user_id, tier=tier, jti=jti, device_id=device_id
+    )
+    access_expires_at = int(time.time()) + settings.jwt_expire_minutes * 60
 
+    refresh_jti = generate_jti()
+    refresh_token = create_refresh_token(
+        email or record_id, role, settings, jti=refresh_jti, user_id=user_id, tier=tier, device_id=device_id
+    )
+    refresh_expires_at = int(time.time()) + settings.jwt_refresh_expire_days * 24 * 3600
+
+    ctx = get_ctx(request)
+    cache = getattr(ctx, "cache", None)
     if settings.single_session_per_user:
-        ctx = get_ctx(request)
-        cache = getattr(ctx, "cache", None)
         await activate_session(
-            user_id or record_id,
+            session_user,
             jti,
             device_fingerprint(request),
-            expires_at,
+            access_expires_at,
             cache,
-            scope=session_scope(request),
+            device_id=device_id,
         )
+    await store_refresh_token(
+        session_user,
+        refresh_jti,
+        device_id,
+        refresh_expires_at,
+        cache,
+    )
 
     return TokenResponse(
-        access_token=token,
+        access_token=access_token,
+        refresh_token=refresh_token,
         expires_in=settings.jwt_expire_minutes * 60,
         role=role,
     )
@@ -252,47 +284,129 @@ async def issue_token(payload: TokenRequest, request: Request) -> TokenResponse:
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(request: Request) -> TokenResponse:
-    """Exchange a valid, non-expired JWT for a fresh one (sliding session).
+async def refresh_token(
+    request: Request,
+    payload: Optional[RefreshRequest] = None,
+) -> TokenResponse:
+    """Exchange a refresh token for a new access token.
 
-    The renewed token keeps the same ``jti`` so single-session enforcement is
-    preserved and refreshing never kicks out the session. Expired or displaced
-    tokens get a 401 — the user must log in again.
+    The preferred flow sends the long-lived ``refresh_token`` in the JSON body;
+    the legacy flow (for old clients) sends a still-valid access token in the
+    ``Authorization`` header as a sliding session. Either way, a new access
+    token is issued and bound to the device identified by ``X-Device-Id``.
     """
     from backend.api.deps import get_ctx
 
     ctx = get_ctx(request)
     settings = ctx.settings
+    cache = getattr(ctx, "cache", None)
+    device_id = session_device_id(request)
+
+    # --- preferred refresh-token flow ---
+    if payload is not None and payload.refresh_token:
+        try:
+            refresh_payload = decode_refresh_token(payload.refresh_token, settings)
+        except AuthenticationError:
+            raise AuthenticationError("invalid refresh token")
+        if refresh_payload.sub == "anonymous":
+            raise AuthenticationError("authentication required")
+
+        session_user = refresh_payload.user_id or refresh_payload.sub
+        if not await verify_refresh_token(
+            session_user, refresh_payload.jti or "", device_id, cache
+        ):
+            raise AuthenticationError("session no longer active")
+        # Re-bind to the current device if the client moved to a new browser/app
+        # installation without invalidating the old token (defence in depth).
+        if device_id and refresh_payload.device_id and refresh_payload.device_id != device_id:
+            raise AuthenticationError("device mismatch")
+
+        access_jti = generate_jti()
+        access_token = create_access_token(
+            session_user,
+            refresh_payload.role,
+            settings,
+            user_id=refresh_payload.user_id,
+            tier=refresh_payload.tier,
+            jti=access_jti,
+            device_id=device_id,
+        )
+        access_expires_at = int(time.time()) + settings.jwt_expire_minutes * 60
+        if settings.single_session_per_user:
+            await activate_session(
+                session_user,
+                access_jti,
+                device_fingerprint(request),
+                access_expires_at,
+                cache,
+                device_id=device_id,
+            )
+        return TokenResponse(
+            access_token=access_token,
+            refresh_token=payload.refresh_token,
+            expires_in=settings.jwt_expire_minutes * 60,
+            role=refresh_payload.role,
+        )
+
+    # --- legacy sliding-session flow (access token in Authorization header) ---
     header = request.headers.get("authorization", "")
     scheme, _, raw = header.partition(" ")
     if scheme.lower() != "bearer" or not raw.strip():
-        raise AuthenticationError("missing bearer token")
-    payload = decode_access_token(raw.strip(), settings)
-    if payload.sub == "anonymous":
+        raise AuthenticationError("missing refresh token")
+    access_payload = decode_access_token(raw.strip(), settings)
+    if access_payload.sub == "anonymous":
         raise AuthenticationError("authentication required")
 
-    session_user = payload.user_id or payload.sub
-    cache = getattr(ctx, "cache", None)
-    scope = session_scope(request)
+    session_user = access_payload.user_id or access_payload.sub
     if settings.single_session_per_user and not await verify_active_session(
-        session_user, payload.jti, cache, scope=scope
+        session_user, access_payload.jti, cache, device_id=device_id
     ):
         raise AuthenticationError("session no longer active")
 
-    jti = payload.jti or generate_jti()
-    token = create_access_token(
-        session_user, payload.role, settings, user_id=payload.user_id, tier=payload.tier, jti=jti
+    access_jti = generate_jti()
+    access_token = create_access_token(
+        session_user,
+        access_payload.role,
+        settings,
+        user_id=access_payload.user_id,
+        tier=access_payload.tier,
+        jti=access_jti,
+        device_id=device_id,
     )
-    expires_at = int(time.time()) + settings.jwt_expire_minutes * 60
+    access_expires_at = int(time.time()) + settings.jwt_expire_minutes * 60
+    refresh_jti = generate_jti()
+    refresh_token = create_refresh_token(
+        session_user,
+        access_payload.role,
+        settings,
+        jti=refresh_jti,
+        user_id=access_payload.user_id,
+        tier=access_payload.tier,
+        device_id=device_id,
+    )
+    refresh_expires_at = int(time.time()) + settings.jwt_refresh_expire_days * 24 * 3600
     if settings.single_session_per_user:
         await activate_session(
-            session_user, jti, device_fingerprint(request), expires_at, cache, scope=scope
+            session_user,
+            access_jti,
+            device_fingerprint(request),
+            access_expires_at,
+            cache,
+            device_id=device_id,
         )
+    await store_refresh_token(
+        session_user,
+        refresh_jti,
+        device_id,
+        refresh_expires_at,
+        cache,
+    )
 
     return TokenResponse(
-        access_token=token,
+        access_token=access_token,
+        refresh_token=refresh_token,
         expires_in=settings.jwt_expire_minutes * 60,
-        role=payload.role,
+        role=access_payload.role,
     )
 
 
@@ -343,21 +457,21 @@ async def whoami(request: Request) -> MeResponse:
 
 @router.post("/logout", status_code=204)
 async def logout(request: Request) -> Response:
-    """Revoke the caller's active session for this device class.
+    """Revoke the caller's active session and refresh tokens.
 
-    Clients must also discard their token; this endpoint makes the discard
-    server-side effective immediately (the old token 401s on next use).
+    Clients must also discard their tokens locally; this endpoint makes the
+    discard server-side effective immediately.
     """
     from backend.api.deps import get_ctx, require_user
 
     user: TokenPayload = await require_user(request)
     ctx = get_ctx(request)
+    session_user = user.user_id or user.sub
+    cache = getattr(ctx, "cache", None)
+    device_id = session_device_id(request)
     if ctx.settings.single_session_per_user:
-        await revoke_session(
-            user.user_id or user.sub,
-            getattr(ctx, "cache", None),
-            scope=session_scope(request),
-        )
+        await revoke_session(session_user, cache, device_id=device_id)
+    await revoke_refresh_tokens(session_user, cache)
     return Response(status_code=204)
 
 

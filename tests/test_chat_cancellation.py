@@ -12,8 +12,12 @@ from backend.api.routers.chat import (
 )
 from backend.core.cache import InMemoryCache
 from backend.core.config import Settings
-from backend.core.models import ChatRequest, FinalAnswer
+from backend.core.models import ChatRequest, FinalAnswer, Role
+from backend.security.jwt import TokenPayload
 from backend.workflows.graph import initial_state
+
+
+_ANON = TokenPayload(sub="anonymous", role=Role.USER, exp=0, user_id=None)
 
 
 def _ctx(cache, timeout=60.0):
@@ -90,7 +94,7 @@ def test_stream_timeout_is_an_error_not_a_user_cancellation():
             SlowGraph(),
             initial_state("slow"),
             ChatRequest(query="slow"),
-            "anonymous",
+            _ANON,
             ctx.settings,
             ctx=ctx,
         ):
@@ -137,7 +141,7 @@ def test_terminal_update_emits_final_without_waiting_for_stream_cleanup():
                     TerminalThenSlowCleanupGraph(),
                     initial_state("terminal", session_id="terminal-session"),
                     ChatRequest(query="terminal", session_id="terminal-session"),
-                    "anonymous",
+                    _ANON,
                     ctx.settings,
                     memory=memory,
                     ctx=ctx,

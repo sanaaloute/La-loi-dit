@@ -7,9 +7,12 @@ import Constants from "expo-constants";
 import { File } from "expo-file-system";
 import { getDeviceId } from "./device";
 import {
+  clearRefreshToken,
   clearToken,
+  getRefreshToken,
   getToken,
   getTokenUnchecked,
+  setRefreshToken,
   setToken,
   tokenSecondsLeft,
 } from "./storage";
@@ -111,6 +114,7 @@ export interface ChatResponse {
 
 export interface TokenResponse {
   access_token: string;
+  refresh_token: string;
   token_type: string;
   expires_in: number;
   role: string;
@@ -346,7 +350,7 @@ export async function safeDetail(res: Response): Promise<string | null> {
 }
 
 // ---------------------------------------------------------------------------
-// Token renewal (sliding session via POST /auth/refresh)
+// Token renewal (refresh-token flow via POST /auth/refresh)
 // ---------------------------------------------------------------------------
 
 // Renew the token when it has less than this many seconds left.
@@ -354,19 +358,26 @@ const REFRESH_THRESHOLD_S = 5 * 60;
 
 let refreshInFlight: Promise<string | null> | null = null;
 
-async function requestRefresh(token: string): Promise<string | null> {
+async function requestRefreshWithToken(refreshToken: string): Promise<string | null> {
   try {
-    const res = await apiFetch("/auth/refresh", {
+    const res = await fetch(apiUrl("/auth/refresh"), {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Device-Id": await getDeviceId(),
+      },
+      body: JSON.stringify({ refresh_token: refreshToken }),
     });
     if (!res.ok) {
-      // 401: the session is over (expired or displaced by another login).
-      if (res.status === 401) clearToken();
+      if (res.status === 401) {
+        clearToken();
+        clearRefreshToken();
+      }
       return null;
     }
     const data = (await res.json()) as TokenResponse;
     setToken(data.access_token);
+    setRefreshToken(data.refresh_token);
     return data.access_token;
   } catch {
     // Network error: keep the current token, it is still valid for a while.
@@ -374,16 +385,59 @@ async function requestRefresh(token: string): Promise<string | null> {
   }
 }
 
+async function requestRefreshLegacy(accessToken: string): Promise<string | null> {
+  try {
+    const res = await fetch(apiUrl("/auth/refresh"), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "X-Device-Id": await getDeviceId(),
+      },
+    });
+    if (!res.ok) {
+      if (res.status === 401) {
+        clearToken();
+        clearRefreshToken();
+      }
+      return null;
+    }
+    const data = (await res.json()) as TokenResponse;
+    setToken(data.access_token);
+    setRefreshToken(data.refresh_token);
+    return data.access_token;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Return a valid token, renewing it through `/auth/refresh` when it is about
- * to expire. Returns null when no token is stored or the session is over
- * (the user must log in again). Single in-flight promise, like the web app.
+ * Return a valid access token, using the stored refresh token when the access
+ * token is missing or close to expiry. Returns null when no session is stored
+ * or the session is over (the user must log in again).
  */
 export function ensureFreshToken(): Promise<string | null> {
   const token = getTokenUnchecked();
+  if (token) {
+    const secondsLeft = tokenSecondsLeft(token);
+    if (secondsLeft !== null && secondsLeft > REFRESH_THRESHOLD_S) {
+      return Promise.resolve(getToken());
+    }
+  }
+
+  const refreshToken = getRefreshToken();
+  if (refreshToken) {
+    if (!refreshInFlight) {
+      refreshInFlight = requestRefreshWithToken(refreshToken).finally(() => {
+        refreshInFlight = null;
+      });
+    }
+    return refreshInFlight;
+  }
+
+  // Legacy path: a valid access token can still slide while it is non-expired.
   if (!token) return Promise.resolve(null);
   const secondsLeft = tokenSecondsLeft(token);
-  if (secondsLeft === null || secondsLeft > REFRESH_THRESHOLD_S) {
+  if (secondsLeft === null) {
     return Promise.resolve(getToken());
   }
   if (secondsLeft <= 0) {
@@ -391,7 +445,7 @@ export function ensureFreshToken(): Promise<string | null> {
     return Promise.resolve(null);
   }
   if (!refreshInFlight) {
-    refreshInFlight = requestRefresh(token).finally(() => {
+    refreshInFlight = requestRefreshLegacy(token).finally(() => {
       refreshInFlight = null;
     });
   }
@@ -430,8 +484,28 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}): Pro
     ...fetchOptions,
     headers,
   });
-  if (res.status === 401) {
+
+  // Try one silent refresh on 401, then replay the request. Only log out if
+  // the refresh also fails.
+  if (res.status === 401 && !path.startsWith("/auth/")) {
+    const refreshed = await ensureFreshToken();
+    if (refreshed) {
+      const retryHeaders: Record<string, string> = {
+        ...(await baseHeaders(token)),
+        ...((fetchOptions.headers as Record<string, string> | undefined) ?? {}),
+      };
+      const retry = await fetch(apiUrl(path), {
+        ...fetchOptions,
+        headers: retryHeaders,
+      });
+      if (retry.status === 401) {
+        clearToken();
+        clearRefreshToken();
+      }
+      return retry;
+    }
     clearToken();
+    clearRefreshToken();
   }
   return res;
 }
@@ -450,7 +524,9 @@ export async function login(username: string, password: string): Promise<TokenRe
     const detail = await safeDetail(res);
     throw new Error(detail ?? `Échec de connexion (${res.status})`);
   }
-  return (await res.json()) as TokenResponse;
+  const data = (await res.json()) as TokenResponse;
+  setRefreshToken(data.refresh_token);
+  return data;
 }
 
 export async function register(
@@ -472,7 +548,9 @@ export async function register(
     const detail = await safeDetail(res);
     throw new Error(detail ?? `Échec de l'inscription (${res.status})`);
   }
-  return (await res.json()) as TokenResponse;
+  const data = (await res.json()) as TokenResponse;
+  setRefreshToken(data.refresh_token);
+  return data;
 }
 
 export async function me(token?: string | null): Promise<UserProfile> {

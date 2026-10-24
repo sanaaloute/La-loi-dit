@@ -9,6 +9,7 @@ import LoadingState from "@/components/ui/LoadingState";
 import PageShell from "@/components/ui/PageShell";
 import { useAuthToken } from "@/lib/useAuth";
 import {
+  clearRefreshToken,
   deleteAccount,
   logout,
   me,
@@ -139,9 +140,10 @@ export default function ComptePage() {
                       type="button"
                       onClick={() => {
                         // Revoke the server-side session (best effort), then
-                        // discard the local token: the gate shows the login.
+                        // discard the local tokens: the gate shows the login.
                         void logout(token).catch(() => {});
                         setToken(null);
+                        clearRefreshToken();
                       }}
                       className="flex items-center gap-1.5 rounded-lg border border-red-700/30 bg-red-700/10 px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-700/20"
                     >

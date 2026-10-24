@@ -9,10 +9,10 @@ import React, {
   useState,
   type ReactNode,
 } from "react";
-import { deleteAccount as apiDeleteAccount, logout as apiLogout, me, type TokenResponse, type UserProfile } from "./api";
+import { deleteAccount as apiDeleteAccount, ensureFreshToken, logout as apiLogout, me, type TokenResponse, type UserProfile } from "./api";
 import { chatEngine } from "./chat";
 import { unregisterPushToken } from "./push";
-import { clearAll, loadStoredAuth, onAuthChange, setToken } from "./storage";
+import { clearAll, getRefreshToken, loadStoredAuth, onAuthChange, setRefreshToken, setToken } from "./storage";
 
 type AuthStatus = "loading" | "signedIn" | "signedOut";
 
@@ -39,8 +39,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    void loadStoredAuth().then((stored) => {
+    void loadStoredAuth().then(async (stored) => {
       if (cancelled) return;
+      // If the access token expired but a refresh token is still present,
+      // silently recover the session instead of showing the login screen.
+      if (!stored && getRefreshToken()) {
+        const recovered = await ensureFreshToken();
+        if (recovered) {
+          setTokenState(recovered);
+          setStatus("signedIn");
+          return;
+        }
+      }
       setTokenState(stored);
       setStatus(stored ? "signedIn" : "signedOut");
     });
@@ -82,6 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = useCallback(async (response: TokenResponse) => {
     setToken(response.access_token);
+    setRefreshToken(response.refresh_token);
   }, []);
 
   const signOut = useCallback(async () => {

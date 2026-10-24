@@ -131,7 +131,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if user_id and jti and settings.single_session_per_user:
             from backend.security.sessions import (
                 device_fingerprint,
-                session_scope,
+                session_device_id,
                 verify_active_session,
             )
 
@@ -140,7 +140,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 jti,
                 cache,
                 fingerprint=device_fingerprint(request),
-                scope=session_scope(request),
+                device_id=session_device_id(request),
             )
             if not session_ok:
                 return _session_violation_response()
