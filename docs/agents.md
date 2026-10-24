@@ -51,7 +51,11 @@ The assignments come from measured accuracy on the repo's benchmark suite
 models previously caused regressions or became unavailable on the provider
 (gemma4-e4b mis-routed concrete legal questions to GENERAL; nemotron-3-nano
 stalled during synthesis; gpt-oss-20b was removed from Afrikia), so the safe
-working configuration keeps every structured role on qwen2.5-7b.
+working configuration keeps every structured role on qwen2.5-7b. Re-benchmarked
+on 2026-10-25 over all three provider models: qwen2.5-7b is the only one at
+3/3 grounded synthesis (and the fastest); gemma4-e4b reaches 2/3 at 4-5× the
+latency; nemotron-3-nano scores 0/3 on synthesis and 7/14 on routing. A model
+upgrade requires new capacity on the provider, not a config change.
 Users cannot select models, and environment role overrides or runtime catalog
 changes cannot replace these assignments. There is no external chat failover;
 daily quotas and anti-abuse rate limits still cover all role calls. The
@@ -250,10 +254,15 @@ abstaining answers are excluded from the answer cache.
 
 Final policy gate. Performs unsafe-output checks, then replaces any non-refused
 retrieval answer below confidence 0.55 with a localized insufficient-information
-message (citations/evidence are cleared and `low_confidence_fallback` is set) —
-EXCEPT partial answers flagged `abstention_partial`: those keep their body
-because they still answer part of the question and their sub-0.55 badge is
-honest; wholesale replacement would discard usable content.
+message (citations/evidence are cleared and `low_confidence_fallback` is set).
+Two exemptions keep verified content instead of the wholesale fallback:
+partial answers flagged `abstention_partial` (they still answer part of the
+question), and **contradiction salvage** (`salvage_contradicted_claims_enabled`):
+when only SOME claims contradict the sources (and the corrective redraft already
+failed upstream), the contradicted sentences are stripped, a caution note is
+appended, confidence is pinned between `human_review_threshold` and 0.54, and
+the verified remainder is served with `salvaged_contradiction` metadata — an
+answer that was ALL contradiction still gets the fallback.
 Safety refusals take precedence; direct/general routes are not subject to that
 retrieval-confidence fallback. Sufficiently grounded answers receive the
 appropriate legal disclaimer (French/English). When claim verification flagged
