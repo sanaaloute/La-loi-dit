@@ -91,7 +91,6 @@ def cache_identity(
         "app_version": settings.app_version,
         "llm_provider": settings.llm_provider,
         "llm_temperature": settings.llm_temperature,
-        "ollama_think_enabled": settings.ollama_think_enabled,
         "fast_lane_enabled": settings.fast_lane_enabled,
         "fast_lane_min_coverage": settings.fast_lane_min_coverage,
         "confidence_citation_weight": settings.confidence_citation_weight,

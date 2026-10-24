@@ -10,7 +10,7 @@ from backend.ingestion.versioning import VersionStore
 
 def _identity(settings, **overrides):
     kwargs = {
-        "model_id": "ollama/gemma4:12b",
+        "model_id": "afrikia/gpt-oss-20b",
         "language": "fr",
         "scenario_date": None,
         "user_id": "user-1",
@@ -27,7 +27,7 @@ def test_cache_identity_isolates_answer_changing_context(tmp_path):
     assert _identity(settings, language="en") != base
     assert _identity(settings, scenario_date=date(2020, 1, 1)) != base
     assert _identity(settings, user_id="user-2") != base
-    assert _identity(settings, model_id="ollama/other") != base
+    assert _identity(settings, model_id="afrikia/other") != base
 
     VersionStore(tmp_path).commit_version("doc-1", "hash", 1)
     assert _identity(settings) != base

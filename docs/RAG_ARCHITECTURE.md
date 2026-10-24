@@ -97,19 +97,22 @@ strips an unverifiable marker, the claim keeps its recorded support level. Both
 nodes sync their verdicts back into the `FinalAnswer` (warnings, confidence,
 `requires_human_review`).
 
-### Fixed local role models
+### Fixed role models
 
-Every node is wrapped by `bind()`; nodes with an LLM role resolve a fixed local
-Ollama client through `resolve_role_llm` (`backend/core/model_roles.py`). Legacy
+Every node is wrapped by `bind()`; nodes with an LLM role resolve a fixed
+client for the private Afrikia provider (OpenAI-compatible, bearer key
+`AFRIKIA_API_KEY`, base URL `https://afrikia.neobytech.net/v1`) through
+`resolve_role_llm` (`backend/core/model_roles.py`). Legacy
 request `model` inputs are ignored, so callers cannot select a model or provider.
 The assignments are fixed in `backend/core/llm.py`:
 
-- **Qwen 2.5 3B** (`qwen2.5:3b`): language routing, query
+- **Qwen 2.5 7B** (`qwen2.5-7b`): language routing, query
   routing, planning, claim refinement, ingestion classification, and optional
   LLM rerank scoring (`classification` / `planner` roles).
-- **Gemma 4 12B** (`gemma4:12b`): reasoning/reflection (`analysis`), direct,
+- **gpt-oss 20B** (`gpt-oss-20b`): reasoning/reflection (`analysis`), direct,
   general and grounded synthesis (`synthesis`), drafting enrichment, and memory
-  summaries.
+  summaries. Analysis and synthesis calls pass `reasoning_effort=low` because
+  reasoning models count hidden reasoning against `max_tokens`.
 
 No environment role override or runtime catalog replacement can change this
 mapping, and there is no external chat failover or query-dependent cheap-model
@@ -123,14 +126,17 @@ it is not a production failover.
 Agents depend on ports, never on SDKs (`backend/core/ports.py`); `AppContext`
 (`backend/core/context.py`) wires the concrete adapters once per process.
 
-- **LLM** — `backend/core/llm.py`: `LLMClient` over LiteLLM for keyless local
-  Ollama, plus the deterministic `mock` test/development provider. JSON mode has
+- **LLM** — `backend/core/llm.py`: `LLMClient` over LiteLLM for the
+  OpenAI-compatible Afrikia provider, plus the deterministic `mock`
+  test/development provider. JSON mode has
   one corrective retry (`complete_json`), tool calling has native/manual
   fallback (`complete_tools`), and token metering is cumulative. Production chat
-  uses only the two fixed local role models described above.
+  uses only the two fixed role models described above.
 - **Embeddings** — `backend/core/embeddings.py`: separately configured
-  `LiteLLMEmbeddings` (batched at 200), using keyless local Ollama in the
-  approved setup, otherwise deterministic `HashEmbeddings`
+  `LiteLLMEmbeddings` (batched at 200), using the same Afrikia provider
+  (`qwen3-embedding-8b`, 4096 dimensions) in the approved setup — the existing
+  Milvus corpus was embedded with the same Qwen3-Embedding-8B weights, so no
+  re-ingestion is required — otherwise deterministic `HashEmbeddings`
   (bag-of-hashed-tokens) so vector search, memory and tests run fully offline.
 - **Vector store** — `backend/vectorstore/`: `MilvusVectorStore` (HNSW/COSINE,
   native scalar filters on `document_id`/`article`/`status`/`document_type`,
@@ -143,7 +149,7 @@ Agents depend on ports, never on SDKs (`backend/core/ports.py`); `AppContext`
   credentials) or `ApiCrossEncoderReranker` (Cohere-style `/rerank` endpoint,
   batched, one retry, falls back to heuristic on any failure). Selected by
   `reranker_provider`; `api` without full credentials degrades to heuristic.
-  This cross-encoder capability is separate from the optional Qwen 2.5 LLM
+  This cross-encoder capability is separate from the optional Qwen 2.5 7B LLM
   rescoring pass.
 - **Legal knowledge graph** — `backend/knowledge/` (`LegalGraphStore`,
   spec §19/§34): a relational store (SQLAlchemy Core, `database_url` with a
@@ -181,9 +187,9 @@ is library code; wiring it into the planner/tool loop for
 
 External infrastructure degrades to a working in-process substitute where
 supported; node functions record incidents in `state["errors"]` instead of
-raising. Production chat does not fail over to another provider when local
-Ollama is unavailable: deterministic node fallbacks run where implemented, and
-LLM-only steps can fail the run.
+raising. Production chat does not fail over to another provider when the
+Afrikia endpoint is unavailable: deterministic node fallbacks run where
+implemented, and LLM-only steps can fail the run.
 
 | Dependency | Fallback |
 |---|---|
@@ -197,8 +203,9 @@ LLM-only steps can fail the run.
 | Graph store database | SQLite fallback `data/legal_graph_fallback.db`; when unreachable the graph degrades to no-op writes / empty reads |
 
 The whole pipeline — planner, retrieval, reasoning, synthesis, verification —
-runs end-to-end with zero API keys. Production uses keyless local Ollama; the
-offline evaluation runner and test suite can use the deterministic mock.
+runs end-to-end against the deterministic mock with no external calls.
+Production uses the Afrikia provider with its bearer key; the offline
+evaluation runner and test suite use the mock.
 
 ## Request lifecycle
 

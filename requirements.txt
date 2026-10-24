@@ -12,7 +12,6 @@ langchain-core>=0.3.26,<0.4.0
 # LLM gateway (OpenAI-compatible, multi-provider)
 litellm==1.53.1
 httpx==0.28.1
-ollama>=0.4.0
 
 # Vector store / lexical search
 # Production vector store: the standalone Milvus server (compose service

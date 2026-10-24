@@ -29,7 +29,8 @@ Operational tasks for users with the `admin` (and where noted,
 
 - All features are free for every user. Legacy `gratuit` / `pro` / `cabinet`
   values remain in old rows and tokens but no longer change access. The two
-  local Ollama role models are fixed by the server; users cannot select models.
+  role models (served by the private Afrikia provider) are fixed by the server;
+  users cannot select models.
 - Every account shares the same default daily budget: **30 requests and
   5 000 000 tokens** (`backend/core/catalog.py`). Per-minute/per-second
   anti-abuse limits still apply.

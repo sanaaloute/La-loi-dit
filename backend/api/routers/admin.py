@@ -558,7 +558,7 @@ async def patch_daily_budgets(
 @router.get("/providers", response_model=ProvidersResponse)
 async def providers_overview(request: Request) -> ProvidersResponse:
     """Provider configuration status; API keys are NEVER exposed in full."""
-    from backend.core.llm import default_ollama_api_base
+    from backend.core.llm import default_llm_api_base
 
     ctx = get_ctx(request)
     settings = ctx.settings
@@ -580,13 +580,14 @@ async def providers_overview(request: Request) -> ProvidersResponse:
             )
 
     providers: list[ProviderInfo] = []
+    afrikia_key = settings.llm_api_key or settings.afrikia_api_key
     for provider in catalog._ALL_PROVIDERS:
         providers.append(
             ProviderInfo(
                 provider=provider,
                 configured=True,
-                api_base=settings.llm_api_base or default_ollama_api_base(),
-                key_suffix=None,
+                api_base=settings.llm_api_base or default_llm_api_base(),
+                key_suffix=afrikia_key[-4:] if afrikia_key else None,
                 models=models_by_provider.get(provider, []),
             )
         )

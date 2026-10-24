@@ -1,4 +1,4 @@
-"""Fixed local-model descriptors and shared daily usage budgets.
+"""Fixed Afrikia-model descriptors and shared daily usage budgets.
 
 Users cannot select models or replace this catalog at runtime. Legacy tier
 names remain only for old tokens and database rows; daily quotas and anti-abuse
@@ -31,13 +31,13 @@ class ModelEntry(BaseModel):
     label: str = ""
 
 
-_ALL_PROVIDERS = ["ollama"]
+_ALL_PROVIDERS = ["afrikia"]
 _ALL_MODELS: list[dict[str, str]] = [
-    {"id": f"ollama/{SYNTHESIS_MODEL}", "provider": "ollama", "label": "Local synthesis model"},
+    {"id": f"afrikia/{SYNTHESIS_MODEL}", "provider": "afrikia", "label": "Afrikia synthesis model"},
     {
-        "id": f"ollama/{CLASSIFICATION_MODEL}",
-        "provider": "ollama",
-        "label": "Local structured-role model",
+        "id": f"afrikia/{CLASSIFICATION_MODEL}",
+        "provider": "afrikia",
+        "label": "Afrikia structured-role model",
     },
 ]
 
@@ -230,12 +230,12 @@ def find_model(tier: Optional[str], model_id: str, *, settings: Optional[Setting
 
 
 def default_model(tier: Optional[str], *, settings: Optional[Settings] = None) -> str:
-    """The shared default model, preferring Ollama then the configured provider."""
+    """The shared default model, preferring Afrikia then the configured provider."""
     models = allowed_models(None, settings=settings)
     if not models:
         return ""
     for entry in models:
-        if entry.provider == "ollama":
+        if entry.provider == "afrikia":
             return entry.id
     provider = (settings.llm_provider if settings is not None else "").strip().lower()
     if provider:

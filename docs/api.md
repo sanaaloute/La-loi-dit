@@ -252,7 +252,7 @@ The `faster-whisper` package is import-guarded: without it, the local
 provider reports unavailable (503) and the rest of the platform is
 unaffected.
 
-Note: an Ollama chat setup cannot serve Whisper transcriptions. Use
+Note: the Afrikia chat endpoint cannot serve Whisper transcriptions. Use
 `LEGAL_AI_STT_PROVIDER=faster-whisper` (local) or point
 `LEGAL_AI_STT_API_BASE`/`LEGAL_AI_STT_API_KEY` at a transcription-capable
 endpoint (OpenAI `whisper-1`, Groq `groq/whisper-large-v3`, …). Voice notes
@@ -386,8 +386,8 @@ sender: `backend/core/push.py`; dead tokens pruned on DeviceNotRegistered).
 ## Models and usage (`backend/api/routers/models.py`, `usage.py`)
 
 `GET /api/v1/models` is a read-only compatibility/status endpoint for the two
-fixed local Ollama role models: `ollama/qwen2.5:3b` and
-`ollama/gemma4:12b`. Its response includes `"selectable": false`. Users cannot
+fixed Afrikia role models: `afrikia/qwen2.5-7b` and
+`afrikia/gpt-oss-20b`. Its response includes `"selectable": false`. Users cannot
 select models, and legacy `model` request fields or query parameters are
 ignored; the server always applies its fixed role assignments.
 

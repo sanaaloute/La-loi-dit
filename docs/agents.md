@@ -38,12 +38,14 @@ flowchart LR
     ref --> a
 ```
 
-## Fixed local role models
+## Fixed role models
 
-Production LLM calls use keyless local Ollama with server-fixed assignments:
-**Qwen 2.5 3B** (`qwen2.5:3b`) for language routing, query
+Production LLM calls use the private Afrikia provider (OpenAI-compatible,
+bearer key `AFRIKIA_API_KEY`, base URL `https://afrikia.neobytech.net/v1`) with
+server-fixed assignments:
+**Qwen 2.5 7B** (`qwen2.5-7b`) for language routing, query
 routing, planning, claim refinement, ingestion classification, and optional LLM
-rerank scoring; **Gemma 4 12B** (`gemma4:12b`) for reasoning/reflection,
+rerank scoring; **gpt-oss 20B** (`gpt-oss-20b`) for reasoning/reflection,
 direct/general/grounded synthesis, drafting enrichment, and memory summaries.
 Users cannot select models, and environment role overrides or runtime catalog
 changes cannot replace these assignments. There is no external chat failover;
@@ -51,9 +53,10 @@ daily quotas and anti-abuse rate limits still cover all role calls. The
 `mock` provider is reserved for deterministic tests/development.
 
 `ROLE_MODEL_CONFIGS` (`backend/core/llm.py`) is the single source for model IDs
-and role defaults: 16K context for classification, 8K for planning, and 32K for
-analysis/synthesis, with hidden thinking disabled and role-specific token and
-temperature limits. Analysis is capped at 120 seconds and 2,048 tokens per call;
+and role defaults: role-specific token and temperature limits, with
+`reasoning_effort=low` on the analysis/synthesis roles (reasoning models count
+hidden reasoning against `max_tokens`). Analysis is capped at 120 seconds and
+2,048 tokens per call;
 synthesis keeps the larger answer budget. The public model catalog derives its
 IDs from the same constants.
 

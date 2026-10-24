@@ -1,4 +1,4 @@
-"""Benchmark local candidate models on classification and generation tasks.
+"""Benchmark candidate Afrikia models on classification and generation tasks.
 
 Measures accuracy and latency through the exact production code path
 (``LLMClient.complete`` + the real prompts from the registry):
@@ -8,17 +8,17 @@ Measures accuracy and latency through the exact production code path
    detection + French translation
 3. planning and grounded synthesis
 
-Candidate models are served only by the keyless host Ollama service
-(http://localhost:11434). Run with the project venv:
+Candidate models must be served by the Afrikia provider (see /v1/models); the
+bearer key comes from AFRIKIA_API_KEY in .env. Run with the project venv:
 
     .venv/bin/python scripts/benchmark_role_models.py \
-        --local qwen2.5:3b gemma4:12b
+        --models qwen2.5-7b gpt-oss-20b
 
-For thinking-capable models, retain the production-path comparison above and
-add a separate native Ollama run with hidden reasoning disabled:
+For reasoning models, cap the hidden reasoning effort so it does not burn the
+completion budget on classification-style tasks:
 
     .venv/bin/python scripts/benchmark_role_models.py \
-        --local qwen2.5:3b --no-think-local
+        --models gpt-oss-20b --effort low
 """
 
 from __future__ import annotations
@@ -262,30 +262,6 @@ def _extract_json(raw: str) -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
-class OllamaNoThinkClient:
-    """Direct Ollama /api/chat with think=False — same .complete() shape as
-    LLMClient, for thinking-capable models whose reasoning otherwise burns the
-    whole completion budget on classification-style tasks."""
-
-    def __init__(self, model: str, host: str = "http://localhost:11434"):
-        self._model = model
-        self._host = host
-
-    async def complete(self, system: str, user: str, temperature=None) -> str:
-        from ollama import AsyncClient
-
-        resp = await AsyncClient(host=self._host).chat(
-            model=self._model,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            think=False,
-            options={"temperature": temperature if temperature is not None else 0.0},
-        )
-        return resp.message.content or ""
-
-
 async def bench_model(label: str, llm: LLMClient) -> dict:
     # Warmup: model load time must not pollute the latencies.
     try:
@@ -331,31 +307,30 @@ async def bench_model(label: str, llm: LLMClient) -> dict:
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--local", nargs="*", default=[], help="candidate model names on the host Ollama")
+    parser.add_argument("--models", nargs="*", default=[], help="candidate model ids on the Afrikia provider")
     parser.add_argument(
-        "--no-think-local",
-        action="store_true",
-        help="call local models via native Ollama chat with think=False (thinking models)",
+        "--effort",
+        choices=["low", "medium", "high"],
+        default=None,
+        help="reasoning_effort for reasoning-capable candidates (dropped for the rest)",
     )
     parser.add_argument("--out", help="optional JSON report path")
     args = parser.parse_args()
 
     settings = get_settings()
     reports = []
-    for model in args.local:
-        if args.no_think_local:
-            reports.append(await bench_model(f"local-nothink:{model}", OllamaNoThinkClient(model)))
-        else:
-            reports.append(await bench_model(
-                f"local:{model}",
-                LLMClient(
-                    settings,
-                    provider="ollama",
-                    model=model,
-                    api_key="",
-                    api_base="http://localhost:11434",
-                ),
-            ))
+    for model in args.models:
+        role_options = {"reasoning_effort": args.effort} if args.effort else None
+        label = f"afrikia:{model}" + (f" effort={args.effort}" if args.effort else "")
+        reports.append(await bench_model(
+            label,
+            LLMClient(
+                settings,
+                provider="afrikia",
+                model=model,
+                role_options=role_options,
+            ),
+        ))
     if args.out:
         payload = {"generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "models": reports}
         with open(args.out, "w", encoding="utf-8") as handle:

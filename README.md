@@ -29,7 +29,7 @@ or escalated for human review.
 | Durable conversations | Temporal workflows survive restarts; memory buffer is persisted |
 | Security | JWT + RBAC, input/output guardrails, rate limiting, sandboxed tools, audit logging |
 | Observability | Prometheus metrics, Grafana dashboards, Langfuse traces, OpenTelemetry |
-| Offline-first | Production chat and embeddings use keyless local Ollama; deterministic mock chat and in-process infrastructure substitutes support tests/development without external credentials |
+| Private LLM provider | Production chat and embeddings run on the private Afrikia provider (OpenAI-compatible, bearer key); deterministic mock chat and in-process infrastructure substitutes support tests/development without external credentials |
 
 ## Architecture
 
@@ -73,72 +73,63 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-### 2. Prepare keyless local Ollama
+### 2. Configure the Afrikia provider
 
-Production chat uses only Ollama running locally, without an API key. Two role
-models are fixed by the server:
+Production chat and embeddings run on the private Afrikia provider, an
+OpenAI-compatible endpoint authenticated by a bearer key (see
+`client-guide.md`). Two role models are fixed by the server:
 
-- **Qwen 2.5 3B** (`qwen2.5:3b`) handles language routing,
+- **Qwen 2.5 7B** (`qwen2.5-7b`) handles language routing,
   query routing, planning, claim refinement, ingestion classification, and
   optional LLM rerank scoring.
-- **Gemma 4 12B** (`gemma4:12b`) handles reasoning/reflection,
-  direct/general/grounded synthesis, drafting enrichment, and memory summaries.
+- **gpt-oss 20B** (`gpt-oss-20b`) handles reasoning/reflection,
+  direct/general/grounded synthesis, drafting enrichment, and memory summaries
+  (called with `reasoning_effort=low` so hidden reasoning does not consume the
+  answer budget).
 
 Users cannot select models, and environment role overrides or runtime catalog
 replacement do not change these assignments. Daily quotas and anti-abuse rate
 limits still apply.
 
-Install and start Ollama on the host, then pull the chat models and the separate
-embedding model:
+Set the provider key and endpoints in `.env` (copy `.env.example` first):
 
-```bash
-ollama pull qwen2.5:3b
-ollama pull gemma4:12b
-ollama pull nomic-embed-text
+```ini
+AFRIKIA_API_KEY=sk-...
+LEGAL_AI_LLM_PROVIDER=afrikia
+LEGAL_AI_LLM_API_BASE=https://afrikia.neobytech.net/v1
+LEGAL_AI_EMBEDDING_MODEL=qwen3-embedding-8b
+LEGAL_AI_EMBEDDING_DIMENSION=4096
+LEGAL_AI_EMBEDDING_API_BASE=https://afrikia.neobytech.net/v1
+LEGAL_AI_STT_PROVIDER=faster-whisper
 ```
 
-For an API process running directly on the host, start it with local endpoints:
-
-```bash
-LEGAL_AI_LLM_PROVIDER=ollama \
-LEGAL_AI_LLM_API_BASE=http://localhost:11434 \
-LEGAL_AI_EMBEDDING_MODEL=ollama/nomic-embed-text \
-LEGAL_AI_EMBEDDING_DIMENSION=768 \
-LEGAL_AI_EMBEDDING_API_BASE=http://localhost:11434 \
-LEGAL_AI_STT_PROVIDER=faster-whisper \
-uvicorn backend.api.main:app --host 0.0.0.0 --port 8000
-```
-
-To persist configuration, copy `.env.example` to `.env` and edit it. `.env` is
-the single configuration file; it is gitignored and should never be committed.
-The deterministic `mock` chat provider is reserved for tests/development, not as
-a production failover.
+`.env` is the single configuration file; it is gitignored and should never be
+committed. The deterministic `mock` chat provider is reserved for
+tests/development, not as a production failover.
 
 ### 3. Full stack with Docker Compose
 
-The containers use the same keyless Ollama service on the Docker host for chat
-and embeddings. Copy the production template and fill in your secrets:
+The containers reach the same Afrikia provider over HTTPS for chat and
+embeddings. Copy the production template and fill in your secrets:
 
 ```bash
 cp .env.example .env
 ```
 
-The template already sets the required local AI configuration:
+The template already sets the required provider configuration:
 
 ```ini
-LEGAL_AI_LLM_PROVIDER=ollama
-LEGAL_AI_LLM_API_BASE=http://host.docker.internal:11434
-LEGAL_AI_LLM_API_KEY=
-LEGAL_AI_EMBEDDING_MODEL=ollama/nomic-embed-text
-LEGAL_AI_EMBEDDING_DIMENSION=768
-LEGAL_AI_EMBEDDING_API_BASE=http://host.docker.internal:11434
-LEGAL_AI_EMBEDDING_API_KEY=
+AFRIKIA_API_KEY=sk-...
+LEGAL_AI_LLM_PROVIDER=afrikia
+LEGAL_AI_LLM_API_BASE=https://afrikia.neobytech.net/v1
+LEGAL_AI_EMBEDDING_MODEL=qwen3-embedding-8b
+LEGAL_AI_EMBEDDING_DIMENSION=4096
+LEGAL_AI_EMBEDDING_API_BASE=https://afrikia.neobytech.net/v1
 LEGAL_AI_STT_PROVIDER=faster-whisper
 ```
 
-Keep both API base values on `host.docker.internal` for containers; use
-`localhost` only for host-run processes. Set strong application and database
-secrets in `.env`. There is no external chat failover.
+Set strong application and database secrets in `.env`. There is no external
+chat failover.
 
 Start the core stack:
 

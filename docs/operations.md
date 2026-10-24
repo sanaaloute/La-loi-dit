@@ -57,16 +57,16 @@ Official sources go stale. `backend/ingestion/freshness.py`
 saved state, and emits a `ChangeEvent` when a source publishes something
 newer — wire its `on_change` callback to queue a re-ingestion.
 
-## Local Ollama
+## Afrikia LLM provider
 
-Production chat requires the keyless Ollama service on the Docker host and the
-fixed `qwen2.5:3b` and `gemma4:12b` role models. Containers reach it at
-`http://host.docker.internal:11434`; host-run processes use
-`http://localhost:11434`. The configured local embedding model is pulled and
-checked separately. Use `ollama ps` to inspect loaded models and
-`curl http://localhost:11434/api/tags` from the host to verify availability.
-Startup warmup preloads both chat models when
-`LEGAL_AI_OLLAMA_WARMUP_ON_STARTUP=true`.
+Production chat and embeddings use the private Afrikia provider — an
+OpenAI-compatible endpoint at `https://afrikia.neobytech.net/v1`, bearer-guarded
+by `AFRIKIA_API_KEY` — with the fixed `qwen2.5-7b` and `gpt-oss-20b` role
+models. Containers and host-run processes alike reach it over HTTPS; no local
+model service runs on the Docker host (for offline development there is a local
+gateway at `http://127.0.0.1:4010/v1`). `GET /ready` and
+`docker compose logs api` show provider outages; confirm reachability and key
+validity from the host when they do.
 
 ## Common failure modes
 
@@ -74,13 +74,13 @@ Startup warmup preloads both chat models when
 |---|---|---|
 | **Vector store issue** | Milvus Lite is embedded in the api process; on connection failure `get_vector_store` falls back to the in-memory store (cold start = empty) — re-run `scripts/reindex.sh` | `GET /ready` reports milvus degraded; `docker compose logs api` shows the fallback notice |
 | **Redis down** | Cache falls back to the process-local `InMemoryCache`; chat still works | `GET /ready`; latency may rise (no shared cache) |
-| **Local Ollama unavailable** | No external chat failover occurs. Nodes with deterministic fallbacks (for example planning/reflection) degrade locally; LLM-only steps can fail the run instead of switching providers | `GET /ready` and `docker compose logs api`; check `curl http://localhost:11434/api/tags` and `ollama ps` on the host |
+| **Afrikia provider unavailable** | No external chat failover occurs. Nodes with deterministic fallbacks (for example planning/reflection) degrade locally; LLM-only steps can fail the run instead of switching providers | `GET /ready` and `docker compose logs api`; check that the host and containers can reach `https://afrikia.neobytech.net/v1` and that `AFRIKIA_API_KEY` is set |
 | **Postgres down** | API `/ready` fails; chat answers still returned but memory persistence is skipped (best-effort) | `GET /ready` → 503; `docker compose logs postgres` |
 | **Nginx rate limit hit** | 429 responses for the offending IP only | `docker compose logs nginx` |
 
 After fixing a dependency, `docker compose restart api` re-wires the
-adapters on boot. Restoring Ollama does not switch any role to a different
-model; the same fixed local assignments resume.
+adapters on boot. Restoring Afrikia connectivity does not switch any role to a
+different model; the same fixed assignments resume.
 
 ## Health endpoints
 

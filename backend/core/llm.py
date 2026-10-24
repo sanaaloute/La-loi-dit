@@ -1,8 +1,10 @@
-"""Local Ollama and deterministic mock chat clients built on LiteLLM.
+"""Afrikia (OpenAI-compatible) and deterministic mock chat clients on LiteLLM.
 
-Production chat uses only keyless local Ollama models. The mock provider stays
-available for offline tests and development. Embeddings and transcription use
-separate adapters; their configuration is intentionally outside this module.
+Production chat uses the private Afrikia LLM provider: an OpenAI-compatible
+chat-completions endpoint guarded by a bearer key (AFRIKIA_API_KEY). The mock
+provider stays available for offline tests and development. Embeddings and
+transcription use separate adapters; their configuration is intentionally
+outside this module.
 """
 
 from __future__ import annotations
@@ -10,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from pathlib import Path
 from typing import Any, Optional, Type, TypeVar
 
 import litellm
@@ -24,56 +25,54 @@ T = TypeVar("T", bound=BaseModel)
 
 litellm.drop_params = True
 
+# LiteLLM route per configured provider. Afrikia speaks the OpenAI
+# chat-completions protocol, so its models go through LiteLLM's openai route
+# against the Afrikia base URL.
 PROVIDER_PREFIXES = {
-    "ollama": "ollama/",
+    "afrikia": "openai/",
     "mock": "mock/",
 }
 
 PROVIDER_DEFAULT_API_BASES = {
-    "ollama": "http://localhost:11434",
+    "afrikia": "https://afrikia.neobytech.net/v1",
 }
 
-CLASSIFICATION_MODEL = "qwen2.5:3b"
-SYNTHESIS_MODEL = "gemma4:12b"
+CLASSIFICATION_MODEL = "qwen2.5-7b"
+SYNTHESIS_MODEL = "gpt-oss-20b"
 
 ROLE_MODEL_CONFIGS: dict[str, dict[str, Any]] = {
     "classification": {
         "model": CLASSIFICATION_MODEL,
-        "think_enabled": False,
-        "num_ctx": 16384,
         "max_tokens": 2048,
         "temperature": 0.0,
     },
     "planner": {
         "model": CLASSIFICATION_MODEL,
-        "think_enabled": False,
-        "num_ctx": 8192,
         "max_tokens": 2048,
         "temperature": 0.5,
     },
     "analysis": {
         "model": SYNTHESIS_MODEL,
-        "think_enabled": False,
-        "num_ctx": 32768,
         "max_tokens": 2048,
         "temperature": 0.5,
         "timeout_seconds": 120.0,
+        # Reasoning models count hidden reasoning against max_tokens; "low"
+        # keeps headroom for the answer itself. LiteLLM drops the parameter
+        # for models that do not support it (litellm.drop_params = True).
+        "reasoning_effort": "low",
     },
     "synthesis": {
         "model": SYNTHESIS_MODEL,
-        "think_enabled": False,
-        "num_ctx": 32768,
         "max_tokens": 4096,
         "temperature": 0.7,
+        "reasoning_effort": "low",
     },
 }
 
 
-def default_ollama_api_base() -> str:
-    """Use the Mac host's Ollama from Docker, localhost otherwise."""
-    if Path("/.dockerenv").exists():
-        return "http://host.docker.internal:11434"
-    return PROVIDER_DEFAULT_API_BASES["ollama"]
+def default_llm_api_base() -> str:
+    """Public Afrikia endpoint, reachable from the host and from Docker."""
+    return PROVIDER_DEFAULT_API_BASES["afrikia"]
 
 
 class LLMClient:
@@ -100,8 +99,11 @@ class LLMClient:
         self.model = f"{PROVIDER_PREFIXES[self.provider]}{raw_model}"
         self.api_key = settings.llm_api_key if api_key is None else api_key
         self.api_base = api_base if api_base is not None else settings.llm_api_base
-        if not self.api_base and self.provider == "ollama":
-            self.api_base = default_ollama_api_base()
+        if self.provider == "afrikia":
+            if not self.api_key:
+                self.api_key = settings.afrikia_api_key
+            if not self.api_base:
+                self.api_base = default_llm_api_base()
         self.role_options = dict(role_options or {})
         self.timeout_seconds = self.role_options.get("timeout_seconds", settings.llm_timeout_seconds)
         # Cumulative token metering across calls on this instance. Read as a
@@ -113,17 +115,6 @@ class LLMClient:
     def _estimate_tokens(text: str) -> int:
         """Offline heuristic (~4 chars/token) used for mock/usage-less calls."""
         return max(1, len(text) // 4) if text else 0
-
-    @staticmethod
-    def _clean_channel_content(content: str) -> str:
-        lowered = content.lower()
-        final_marker = "<|channel>final"
-        final_index = lowered.find(final_marker)
-        if final_index >= 0:
-            return content[final_index + len(final_marker):].strip()
-        if lowered.lstrip().startswith("<|channel>thought"):
-            return ""
-        return content
 
     def _record_usage(self, system: str, user: str, completion: str, usage: Any) -> None:
         """Accumulate one call's tokens (provider usage when available)."""
@@ -144,70 +135,23 @@ class LLMClient:
             self.usage_totals["tokens_in"] += self._estimate_tokens(system) + self._estimate_tokens(user)
             self.usage_totals["tokens_out"] += self._estimate_tokens(completion)
 
-    def _think_enabled(self) -> bool:
-        return bool(self.role_options.get("think_enabled", self.settings.ollama_think_enabled))
-
-    def _generation_options(
+    def _generation_kwargs(
         self,
         temperature: Optional[float],
         max_tokens: Optional[int],
     ) -> dict[str, Any]:
-        options: dict[str, Any] = {
+        kwargs: dict[str, Any] = {
             "temperature": (
                 self.role_options.get("temperature", self.settings.llm_temperature)
                 if temperature is None
                 else temperature
             ),
-            "num_predict": max_tokens or self.role_options.get("max_tokens", self.settings.llm_max_tokens),
+            "max_tokens": max_tokens or self.role_options.get("max_tokens", self.settings.llm_max_tokens),
         }
-        num_ctx = self.role_options.get("num_ctx")
-        if num_ctx:
-            options["num_ctx"] = int(num_ctx)
-        return options
-
-    async def _ollama_complete(
-        self,
-        system: str,
-        user: str,
-        *,
-        temperature: Optional[float],
-        max_tokens: Optional[int],
-        timeout_seconds: float,
-    ) -> str:
-        from ollama import AsyncClient
-
-        host = self.api_base or PROVIDER_DEFAULT_API_BASES["ollama"]
-        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
-        client = AsyncClient(host=host, headers=headers, timeout=timeout_seconds)
-        model = self.model
-        if model.startswith("ollama/"):
-            model = model[len("ollama/"):]
-        try:
-            response = await asyncio.wait_for(
-                client.chat(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
-                    stream=False,
-                    keep_alive=self.settings.ollama_keep_alive,
-                    think=self._think_enabled(),
-                    options=self._generation_options(temperature, max_tokens),
-                ),
-                timeout=timeout_seconds,
-            )
-        except asyncio.TimeoutError as exc:
-            raise LLMError(f"Ollama call timed out after {timeout_seconds}s ({self.model})") from exc
-        except Exception as exc:
-            raise LLMError(f"Ollama call failed ({self.model}): {exc}") from exc
-        content = self._clean_channel_content(response.message.content or "")
-        usage = {
-            "prompt_tokens": getattr(response, "prompt_eval_count", None),
-            "completion_tokens": getattr(response, "eval_count", None),
-        }
-        self._record_usage(system, user, content, usage)
-        return content
+        effort = self.role_options.get("reasoning_effort")
+        if effort:
+            kwargs["reasoning_effort"] = effort
+        return kwargs
 
     # ------------------------------------------------------------------
     async def complete(
@@ -224,43 +168,26 @@ class LLMClient:
             self._record_usage(system, user, result, None)
             return result
         request_timeout = self.timeout_seconds if timeout_seconds is None else timeout_seconds
-        if self.provider == "ollama":
-            return await self._ollama_complete(
-                system,
-                user,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                timeout_seconds=request_timeout,
-            )
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            "temperature": self.settings.llm_temperature if temperature is None else temperature,
-            "max_tokens": max_tokens or self.settings.llm_max_tokens,
             "timeout": request_timeout,
             "num_retries": 0,
             "metadata": litellm_trace_metadata(),
+            **self._generation_kwargs(temperature, max_tokens),
         }
         if self.api_key:
             kwargs["api_key"] = self.api_key
         if self.api_base:
             kwargs["api_base"] = self.api_base
-        extra_headers: dict[str, str] = {}
-        if self.provider == "ollama":
-            kwargs["keep_alive"] = self.settings.ollama_keep_alive
-            kwargs["think"] = self.settings.ollama_think_enabled
-            if self.api_key:
-                extra_headers["Authorization"] = f"Bearer {self.api_key}"
-        if extra_headers:
-            kwargs["extra_headers"] = extra_headers
         try:
             resp = await asyncio.wait_for(
                 litellm.acompletion(**kwargs), timeout=request_timeout
             )
-            content = self._clean_channel_content(resp.choices[0].message.content or "")
+            content = resp.choices[0].message.content or ""
             self._record_usage(system, user, content, getattr(resp, "usage", None))
             return content
         except Exception as exc:  # provider/network errors
@@ -310,15 +237,15 @@ class LLMClient:
     ) -> "LLMClient.ToolCallResponse":
         """Ask the LLM to either use a tool or return final text.
 
-        Local Ollama native tool calling is attempted first; manual JSON mode
-        remains the deterministic fallback for models without native support.
+        Native OpenAI-compatible tool calling is attempted first; manual JSON
+        mode remains the deterministic fallback if the native call fails.
         """
         if self.provider == "mock":
             return self._mock_complete_tools(messages, tools)
 
         if tools:
             try:
-                return await self._ollama_tools(messages, tools, temperature, max_tokens)
+                return await self._native_tools(messages, tools, temperature, max_tokens)
             except Exception:
                 pass
 
@@ -383,47 +310,52 @@ class LLMClient:
             return self.ToolCallResponse(tool_calls=payload, raw=raw)
         return self.ToolCallResponse(final_text=raw, raw=raw)
 
-    async def _ollama_tools(
+    async def _native_tools(
         self,
         messages: list[dict[str, str]],
         tools: list[dict[str, Any]],
         temperature: Optional[float],
         max_tokens: Optional[int],
     ) -> "LLMClient.ToolCallResponse":
-        from ollama import AsyncClient
-
-        host = self.api_base or PROVIDER_DEFAULT_API_BASES["ollama"]
-        headers = {}
+        """Native OpenAI-compatible tool calling via LiteLLM."""
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "tools": tools,
+            "tool_choice": "auto",
+            "timeout": self.timeout_seconds,
+            "num_retries": 0,
+            "metadata": litellm_trace_metadata(),
+            **self._generation_kwargs(temperature, max_tokens),
+        }
         if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-        client = AsyncClient(host=host, headers=headers, timeout=self.timeout_seconds)
-        model = self.model
-        if model.startswith("ollama/"):
-            model = model[len("ollama/"):]
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
         try:
             response = await asyncio.wait_for(
-                client.chat(
-                    model=model,
-                    messages=messages,
-                    tools=tools,
-                    stream=False,
-                    keep_alive=self.settings.ollama_keep_alive,
-                    think=self._think_enabled(),
-                    options=self._generation_options(temperature, max_tokens),
-                ),
+                litellm.acompletion(**kwargs),
                 timeout=self.timeout_seconds,
             )
         except asyncio.TimeoutError as exc:
             raise LLMError(
-                f"Ollama tool call timed out after {self.timeout_seconds}s ({self.model})"
+                f"LLM tool call timed out after {self.timeout_seconds}s ({self.model})"
             ) from exc
         except Exception as exc:
-            raise LLMError(f"Ollama tool call failed ({self.model}): {exc}") from exc
-        message = response.message
+            raise LLMError(f"LLM tool call failed ({self.model}): {exc}") from exc
+        message = response.choices[0].message
         if getattr(message, "tool_calls", None):
             calls = []
             for tc in message.tool_calls:
-                calls.append({"name": tc.function.name, "arguments": tc.function.arguments})
+                # OpenAI-style arguments are a JSON string; tool execution
+                # validates them as a mapping, so parse here.
+                arguments = getattr(tc.function, "arguments", "")
+                if isinstance(arguments, str):
+                    try:
+                        arguments = json.loads(arguments) if arguments.strip() else {}
+                    except ValueError:
+                        arguments = {}
+                calls.append({"name": tc.function.name, "arguments": arguments})
             return self.ToolCallResponse(tool_calls=calls, raw=str(message))
         content = message.content or ""
         return self.ToolCallResponse(final_text=content, raw=content)
@@ -611,9 +543,6 @@ def get_llm(settings: Settings) -> LLMClient:
         return LLMClient(settings)
     return LLMClient(
         settings,
-        provider="ollama",
         model=SYNTHESIS_MODEL,
-        api_key="",
-        api_base=settings.llm_api_base,
         role_options=ROLE_MODEL_CONFIGS["synthesis"],
     )

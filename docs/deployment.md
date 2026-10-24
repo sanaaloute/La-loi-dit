@@ -69,14 +69,18 @@ overrides service addresses). Key groups:
 
 - **App**: `LEGAL_AI_ENV`, `LEGAL_AI_SECRET_KEY`, `LEGAL_AI_DATA_DIR`,
   `LEGAL_AI_LOG_LEVEL`
-- **Local LLM**: `LEGAL_AI_LLM_PROVIDER=ollama`, `LEGAL_AI_LLM_API_BASE`,
-  `LEGAL_AI_LLM_TEMPERATURE`, `LEGAL_AI_LLM_MAX_TOKENS`, and the local Ollama
-  keep-alive/think/warmup settings. Leave `LEGAL_AI_LLM_API_KEY` empty.
-- **Embeddings**: `LEGAL_AI_EMBEDDING_MODEL`, `LEGAL_AI_EMBEDDING_DIMENSION`,
-  and an explicit local `LEGAL_AI_EMBEDDING_API_BASE`; this is a separate
+- **LLM (Afrikia)**: `LEGAL_AI_LLM_PROVIDER=afrikia`,
+  `LEGAL_AI_LLM_API_BASE` (`https://afrikia.neobytech.net/v1`, or the local
+  dev gateway `http://127.0.0.1:4010/v1`), `LEGAL_AI_LLM_TEMPERATURE`,
+  `LEGAL_AI_LLM_MAX_TOKENS`. Bearer auth uses the plain `AFRIKIA_API_KEY`
+  env var (no `LEGAL_AI_` prefix).
+- **Embeddings**: `LEGAL_AI_EMBEDDING_MODEL=qwen3-embedding-8b`,
+  `LEGAL_AI_EMBEDDING_DIMENSION=4096`, and an explicit
+  `LEGAL_AI_EMBEDDING_API_BASE` (same Afrikia provider); this is a separate
   capability from the chat role models.
 - **STT**: `LEGAL_AI_STT_PROVIDER=faster-whisper` for the approved local setup;
-  transcription is independent of Ollama chat.
+  transcription is independent of the chat provider (the Afrikia chat endpoint
+  cannot serve Whisper).
 - **Stores**: `LEGAL_AI_DATABASE_URL`, `LEGAL_AI_REDIS_URL` /
   `LEGAL_AI_REDIS_ENABLED`, `LEGAL_AI_MILVUS_HOST` /
   `LEGAL_AI_MILVUS_PORT` / `LEGAL_AI_MILVUS_ENABLED`
@@ -93,18 +97,19 @@ overrides service addresses). Key groups:
   `NPM_REGISTRY` select base-image/package mirrors. Backend Python packages
   are installed with uv, using local wheels offline-first when available.
 
-For containers, set both Ollama API base values to
-`http://host.docker.internal:11434`; for a host-run API, use
-`http://localhost:11434`. Pull `qwen2.5:3b`, `gemma4:12b`, and the
-configured embedding model on that host before startup.
+For containers and host-run processes alike, point both API base values at
+`https://afrikia.neobytech.net/v1` and set `AFRIKIA_API_KEY`; no local model
+service is involved. The `mock` provider stays available for offline tests.
 
-### Fixed local role models
+### Fixed role models
 
-The server assigns **Qwen 2.5 3B** (`qwen2.5:3b`) to language
+The server assigns **Qwen 2.5 7B** (`qwen2.5-7b`) to language
 routing, query routing, planning, claim refinement, ingestion classification,
-and optional LLM rerank scoring. **Gemma 4 12B** (`gemma4:12b`) handles
+and optional LLM rerank scoring. **gpt-oss 20B** (`gpt-oss-20b`) handles
 reasoning/reflection, direct/general/grounded synthesis, drafting enrichment,
-and memory summaries. These IDs are fixed in `backend/core/llm.py`.
+and memory summaries (called with `reasoning_effort=low` because reasoning
+models count hidden reasoning against `max_tokens`). These IDs are fixed in
+`backend/core/llm.py`.
 
 Users cannot select models. Environment role overrides and runtime catalog
 replacement are not supported, and chat never fails over to an external
@@ -147,7 +152,7 @@ changes the contract:
 ## Usage limits
 
 All users have access to every feature; legacy JWT/DB tier values no longer
-change entitlements. The two local role models are fixed by the server and are
+change entitlements. The two role models are fixed by the server and are
 not user-selectable. Anti-abuse per-minute/per-second limits from the shared
 catalog remain active, while `LEGAL_AI_RATE_LIMIT_PER_MINUTE` is the
 **anonymous/IP** default. Invalid or expired tokens also fall back to that

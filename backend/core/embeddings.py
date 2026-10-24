@@ -16,6 +16,7 @@ from typing import Optional, Protocol
 
 import litellm
 from backend.core.config import Settings
+from backend.core.llm import PROVIDER_DEFAULT_API_BASES
 
 # LiteLLM is chatty when an embedding model is not in its internal cost map;
 # these calls succeed against OpenAI-compatible endpoints, so keep the logs useful
@@ -55,36 +56,35 @@ class LiteLLMEmbeddings:
             # ("No valid embedding model args passed in"); OpenRouter exposes an
             # OpenAI-compatible /embeddings, so route through the openai provider.
             embed_model = "openai/" + embed_model[len("openrouter/"):]
+        elif "/" not in embed_model:
+            # Bare model id on an OpenAI-compatible endpoint (Afrikia): route
+            # through LiteLLM's openai provider against the custom base URL.
+            embed_model = "openai/" + embed_model
         kwargs = {"model": embed_model, "input": texts}
         if model.startswith("openrouter/"):
             # NVIDIA embedding models reject LiteLLM's default base64 encoding.
             kwargs["encoding_format"] = "float"
         # Dedicated embedding credentials first, then provider-specific keys,
-        # then the main LLM key (single-provider setups).
+        # then the main LLM/Afrikia key (single-provider setups).
         if self.settings.embedding_api_key:
             kwargs["api_key"] = self.settings.embedding_api_key
         elif model.startswith("openrouter/") and self.settings.openrouter_api_key:
             kwargs["api_key"] = self.settings.openrouter_api_key
         elif self.settings.llm_api_key:
             kwargs["api_key"] = self.settings.llm_api_key
+        elif self.settings.afrikia_api_key:
+            kwargs["api_key"] = self.settings.afrikia_api_key
         if self.settings.embedding_api_base:
             kwargs["api_base"] = self.settings.embedding_api_base
         elif model.startswith("openrouter/"):
             kwargs["api_base"] = "https://openrouter.ai/api/v1"
         elif self.settings.llm_api_base:
             kwargs["api_base"] = self.settings.llm_api_base
+        elif self.settings.llm_provider == "afrikia":
+            kwargs["api_base"] = PROVIDER_DEFAULT_API_BASES["afrikia"]
         # Auth/attribution headers LiteLLM does not add on its own:
-        # - Ollama Cloud requires the API key as a Bearer token (same special
-        #   case as the chat client in core/llm.py).
         # - OpenRouter accepts optional rankings headers.
         extra_headers: dict[str, str] = {}
-        if model.startswith("ollama/"):
-            # Keep the model loaded between calls so Ollama does not unload it
-            # from memory and force a slow reload (often timing out) on the next
-            # request. The value is passed through LiteLLM to Ollama's API.
-            kwargs["keep_alive"] = self.settings.ollama_keep_alive
-            if kwargs.get("api_key"):
-                extra_headers["Authorization"] = f"Bearer {kwargs['api_key']}"
         if model.startswith("openrouter/"):
             # HTTP headers must be ASCII; the configured app name may not be.
             safe_app_name = self.settings.app_name.encode("ascii", "ignore").decode("ascii")
@@ -97,9 +97,9 @@ class LiteLLMEmbeddings:
         # the whole ingestion run; a bounded failure marks the document
         # failed — re-ingestable — and the run continues with the next one.
         kwargs["timeout"] = self.settings.llm_timeout_seconds
-        # Bounded retries with backoff: the embedding server (Ollama under
-        # memory pressure in particular) occasionally drops a connection
-        # mid-request; one transient hiccup must not fail a whole document.
+        # Bounded retries with backoff: the embedding provider occasionally
+        # drops a connection mid-request; one transient hiccup must not fail
+        # a whole document.
         transient = (
             litellm.APIConnectionError,
             litellm.Timeout,
@@ -143,12 +143,13 @@ class HashEmbeddings:
 
 def get_embedder(settings: Settings) -> EmbeddingProvider:
     # Use a real embedding model when either a dedicated embedding endpoint is
-    # configured or a provider key exists (single-provider setups, Ollama
-    # Cloud, or an OpenRouter-served embedding model).
+    # configured or a provider key exists (single-provider setups: Afrikia, or
+    # an OpenRouter-served embedding model).
     if (
         settings.embedding_api_base
         or settings.embedding_api_key
         or (settings.llm_api_key and settings.llm_provider != "mock")
+        or (settings.afrikia_api_key and settings.llm_provider != "mock")
         or (settings.embedding_model.startswith("openrouter/") and settings.openrouter_api_key)
     ):
         return LiteLLMEmbeddings(settings)

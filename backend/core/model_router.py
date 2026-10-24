@@ -1,8 +1,8 @@
-"""Fixed local-model resolution and shared daily-budget enforcement.
+"""Fixed Afrikia-model resolution and shared daily-budget enforcement.
 
-The default request model is Gemma. Structured graph roles are assigned by
-``backend.core.model_roles``. Caller-supplied model IDs are ignored: there is
-no catalog selection, cheap-model routing, or external provider failover.
+The default request model is gpt-oss-20b. Structured graph roles are assigned
+by ``backend.core.model_roles``. Caller-supplied model IDs are ignored: there
+is no catalog selection, cheap-model routing, or external provider failover.
 Offline mock processes keep ``ctx.llm`` for deterministic tests.
 """
 
@@ -27,7 +27,7 @@ def resolve_model_entry(
     """Return the fixed synthesis model; legacy selection inputs are inert."""
     _ = (user, requested_model, query)
     settings: Settings = ctx.settings
-    return catalog.find_model(None, f"ollama/{SYNTHESIS_MODEL}", settings=settings)
+    return catalog.find_model(None, f"afrikia/{SYNTHESIS_MODEL}", settings=settings)
 
 
 def resolve_llm(
@@ -36,20 +36,14 @@ def resolve_llm(
     requested_model: Optional[str] = None,
     query: Optional[str] = None,
 ) -> LLMClient:
-    """Build the fixed Gemma client, or preserve the injected mock client."""
+    """Build the fixed synthesis client, or preserve the injected mock client."""
     settings: Settings = ctx.settings
     if settings.llm_provider.lower() == "mock":
         return ctx.llm
     entry = resolve_model_entry(ctx, user, requested_model, query=query)
     if entry is None:
         return ctx.llm
-    return LLMClient(
-        settings,
-        provider="ollama",
-        model=entry.id,
-        api_key="",
-        api_base=settings.llm_api_base,
-    )
+    return LLMClient(settings, model=entry.id)
 
 
 async def check_budget(user_store: Any, user: Any, settings: Settings) -> None:

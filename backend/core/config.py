@@ -6,7 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 #: Dependency names /ready reports on; ``strict_critical_components`` is
@@ -62,23 +62,21 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     audit_log_cap: int = 1000
 
-    # --- Local Ollama chat and test-only mock ---------------------------------
-    # provider: ollama | mock. Production role models are fixed in core.llm.
+    # --- Afrikia chat and test-only mock --------------------------------------
+    # provider: afrikia | mock. Production role models are fixed in core.llm.
     llm_provider: str = "mock"
     llm_api_key: str = ""
     llm_api_base: str = ""
     llm_temperature: float = 0.1
     llm_max_tokens: int = 4096
     llm_timeout_seconds: float = 180.0
+    # Bearer key for the private Afrikia provider. Set as plain AFRIKIA_API_KEY
+    # (no LEGAL_AI_ prefix) in .env; chat and embeddings fall back to it when
+    # the more specific keys above are empty.
+    afrikia_api_key: str = Field(default="", validation_alias="AFRIKIA_API_KEY")
     # Used only by embedding adapters that still support OpenRouter; chat never
     # reads provider-specific credentials or falls back to an external model.
     openrouter_api_key: str = ""
-    # Keep local Ollama models loaded between requests to avoid reload latency.
-    ollama_keep_alive: str = "24h"
-    # Disable hidden reasoning on short structured tasks by default.
-    ollama_think_enabled: bool = False
-    # Pre-load local Ollama embedding and chat models at API startup.
-    ollama_warmup_on_startup: bool = True
     # Optional legacy JSON used only for per-tier rate-limit and daily-quota
     # overrides. Provider and model entries in this document are ignored.
     tier_catalog_json: str = ""

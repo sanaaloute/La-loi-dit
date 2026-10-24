@@ -4,25 +4,25 @@ from backend.core.model_roles import resolve_role_llm
 
 
 def test_role_clients_have_independent_generation_defaults(tmp_path):
-    settings = Settings(llm_provider="ollama", data_dir=tmp_path, llm_api_base="http://localhost:11434")
+    settings = Settings(llm_provider="afrikia", data_dir=tmp_path, llm_api_base="https://afrikia.neobytech.net/v1")
     base = get_llm(settings)
 
     structured = resolve_role_llm("classification", base, settings)
     synthesis = resolve_role_llm("synthesis", base, settings)
 
-    assert structured.model == "ollama/qwen2.5:3b"
-    assert structured.role_options["num_ctx"] == 16384
-    assert structured.role_options["think_enabled"] is False
-    assert structured._generation_options(None, None)["num_predict"] == 2048
+    assert structured.model == "openai/qwen2.5-7b"
+    assert structured._generation_kwargs(None, None)["max_tokens"] == 2048
+    assert "reasoning_effort" not in structured._generation_kwargs(None, None)
     assert synthesis is base
-    assert synthesis.model == "ollama/gemma4:12b"
-    assert synthesis.role_options["num_ctx"] == 32768
+    assert synthesis.model == "openai/gpt-oss-20b"
+    assert synthesis._generation_kwargs(None, None)["reasoning_effort"] == "low"
     analysis = resolve_role_llm("analysis", base, settings)
     assert analysis.timeout_seconds == 120.0
-    assert analysis._generation_options(None, None)["num_predict"] == 2048
+    assert analysis._generation_kwargs(None, None)["max_tokens"] == 2048
+    assert analysis._generation_kwargs(None, None)["reasoning_effort"] == "low"
     assert structured.usage_totals is base.usage_totals
 
-    override = structured._generation_options(0.2, 99)
+    override = structured._generation_kwargs(0.2, 99)
     assert override["temperature"] == 0.2
-    assert override["num_predict"] == 99
-    assert override["num_ctx"] == ROLE_MODEL_CONFIGS["classification"]["num_ctx"]
+    assert override["max_tokens"] == 99
+    assert ROLE_MODEL_CONFIGS["planner"]["model"] == "qwen2.5-7b"

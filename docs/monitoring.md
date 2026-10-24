@@ -53,6 +53,6 @@ migrations into the `langfuse` schema of the postgres service).
 | `rate(errors_total[5m])` | > 0.1/s sustained | subsystem failing behind fallbacks |
 | `rate(retries_total[5m])` | sustained above baseline | retrieval quality dropping (budget is max 1 — high usage = evidence gaps) |
 | `rate(cache_hits_total[5m])` | drops to ~0 | Redis down or cache-key regression |
-| `llm_latency_seconds` p95 | > `LEGAL_AI_LLM_TIMEOUT_SECONDS` (60 s) | local Ollama stalling; there is no external chat failover, so inspect node fallbacks/errors and LLM-only step failures |
+| `llm_latency_seconds` p95 | > `LEGAL_AI_LLM_TIMEOUT_SECONDS` (60 s) | Afrikia provider stalling; there is no external chat failover, so inspect node fallbacks/errors and LLM-only step failures |
 | `/ready` failing | 2 consecutive scrapes | backend dependency down |
 | Postgres disk usage | > 80% | message/memory growth |

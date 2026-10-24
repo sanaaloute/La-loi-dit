@@ -42,13 +42,6 @@ milvus, etcd, minio) ship arm64 images.
 # Docker runtime (OrbStack is lighter than Docker Desktop):
 brew install orbstack && open -a OrbStack
 
-# Ollama natively (Metal acceleration), with the fixed chat role models and
-# the separate local embedding model:
-brew install ollama && brew services start ollama
-ollama pull qwen2.5:3b
-ollama pull gemma4:12b
-ollama pull nomic-embed-text
-
 # cloudflared:
 brew install cloudflared
 cloudflared login          # opens the browser, writes ~/.cloudflared/cert.pem
@@ -64,19 +57,17 @@ git clone <your-repo> yawoto && cd yawoto
 cp .env.example .env
 ```
 
-Verify the local AI settings in `.env` (the template already uses these values):
+Verify the Afrikia provider settings in `.env` (the template already uses these values):
 
 ```ini
 LEGAL_AI_WEB_WORKERS=3                                       # 32 GB: fine
-LEGAL_AI_LLM_PROVIDER=ollama
-LEGAL_AI_LLM_API_BASE=http://host.docker.internal:11434
-LEGAL_AI_LLM_API_KEY=
-LEGAL_AI_EMBEDDING_MODEL=ollama/nomic-embed-text
-LEGAL_AI_EMBEDDING_DIMENSION=768
-LEGAL_AI_EMBEDDING_API_BASE=http://host.docker.internal:11434
-LEGAL_AI_EMBEDDING_API_KEY=
+LEGAL_AI_LLM_PROVIDER=afrikia
+LEGAL_AI_LLM_API_BASE=https://afrikia.neobytech.net/v1
+AFRIKIA_API_KEY=<your Afrikia key>        # bearer key, plain name (no LEGAL_AI_ prefix)
+LEGAL_AI_EMBEDDING_MODEL=qwen3-embedding-8b
+LEGAL_AI_EMBEDDING_DIMENSION=4096
+LEGAL_AI_EMBEDDING_API_BASE=https://afrikia.neobytech.net/v1
 LEGAL_AI_STT_PROVIDER=faster-whisper
-LEGAL_AI_OLLAMA_WARMUP_ON_STARTUP=true
 API_PROXY_TARGET=http://api:8000
 # Standalone Milvus server (compose services etcd+minio+milvus), shared by
 # every api worker — do NOT point this at the embedded Lite file:
@@ -87,13 +78,20 @@ LEGAL_AI_MILVUS_URI=            # empty -> http://milvus:19530
 # Also replace the POSTGRES_* and application secret placeholders.
 ```
 
-Qwen 2.5 3B handles language/query routing, planning, claim refinement,
-ingestion classification, and optional LLM rerank scoring. Gemma 4 12B handles
-reasoning/reflection, direct/general/grounded synthesis, drafting enrichment,
-and memory summaries. Users cannot select models or override these roles through
-the environment; there is no external chat failover. Daily quotas and anti-abuse
-rate limits remain active. Embeddings, STT, OCR, semantic guardrails, and
-cross-encoder reranking remain separate capabilities.
+Chat and embeddings are served by the private **Afrikia** provider
+(OpenAI-compatible, bearer-authenticated via `AFRIKIA_API_KEY`); containers
+reach it over HTTPS — no model service runs on the Mac. `qwen2.5-7b` handles
+language/query routing, planning, claim refinement, ingestion classification,
+and optional LLM rerank scoring. `gpt-oss-20b` handles reasoning/reflection,
+direct/general/grounded synthesis, drafting enrichment, and memory summaries
+(called with `reasoning_effort=low`, since reasoning models count hidden
+reasoning against `max_tokens`). Users cannot select models or override these
+roles through the environment; there is no external chat failover. Daily quotas
+and anti-abuse rate limits remain active. Embeddings (`qwen3-embedding-8b`,
+4096 dimensions) come from the same provider — an existing Milvus corpus
+embedded with the same Qwen3-Embedding-8B weights needs no re-ingestion. STT,
+OCR, semantic guardrails, and cross-encoder reranking remain separate local
+capabilities (the Afrikia chat endpoint cannot serve Whisper).
 
 The frontend binds **127.0.0.1:3100** (see `docker-compose.yml`) — the
 tunnel reaches it on localhost, and nothing is exposed on the LAN. Port 3100
@@ -227,8 +225,7 @@ The apex `neobytech.net` stays a plain DNS record (company site) — only the
   to the EAS project (Expo dashboard → Credentials → Android → FCM) — without
   it, push works in Expo Go only.
 - Mac Mini: System Settings → Energy → prevent sleep + start up after power
-  failure; OrbStack, Ollama (`brew services`) and both LaunchAgents start at
-  login.
+  failure; OrbStack and both LaunchAgents start at login.
 - Backups: nightly `pg_dump` + copy of `data/` to an external disk or offsite
   storage (there is no longer an EC2 to rsync to).
 

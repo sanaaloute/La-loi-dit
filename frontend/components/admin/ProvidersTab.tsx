@@ -6,13 +6,13 @@ import LoadingState from "@/components/ui/LoadingState";
 import { adminApi, type ProvidersResponse } from "@/lib/api";
 import { EmptyState, SectionCard, StatusBadge, TableShell, Td, Th, THead, formatCheckName, formatCheckValue } from "./ui";
 
-const LOCAL_MODEL_ROLES = [
+const MODEL_ROLES = [
   {
-    model: "Qwen 2.5 3B",
+    model: "Qwen 2.5 7B",
     roles: "Classification, planification et tâches utilitaires structurées",
   },
   {
-    model: "Gemma 4 12B",
+    model: "gpt-oss 20B",
     roles: "Analyse, synthèse, rédaction et mémoire",
   },
 ];
@@ -57,10 +57,10 @@ export default function ProvidersTab() {
 
   return (
     <div className="space-y-5">
-      {/* Fixed local models */}
-      <SectionCard title="Modèles locaux fixes">
+      {/* Fixed role models */}
+      <SectionCard title="Modèles fixes">
         <p className="mb-4 text-sm text-gray-500">
-          La génération s'exécute exclusivement en local avec Ollama. Les attributions de rôles sont fixes.
+          La génération s'exécute sur notre fournisseur LLM privé Afrikia. Les attributions de rôles sont fixes.
         </p>
         <TableShell>
           <THead>
@@ -72,12 +72,12 @@ export default function ProvidersTab() {
             </tr>
           </THead>
           <tbody>
-            {LOCAL_MODEL_ROLES.map((entry) => (
+            {MODEL_ROLES.map((entry) => (
               <tr key={entry.model}>
                 <Td className="font-medium text-gray-700">{entry.model}</Td>
                 <Td>{entry.roles}</Td>
-                <Td>Ollama local</Td>
-                <Td>Aucune</Td>
+                <Td>Afrikia (privé)</Td>
+                <Td>Côté serveur</Td>
               </tr>
             ))}
           </tbody>

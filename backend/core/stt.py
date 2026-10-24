@@ -204,9 +204,9 @@ async def _transcribe_litellm(settings: Settings, audio_bytes: bytes, filename: 
     }
     # Dedicated transcription credentials win; otherwise reuse the main LLM
     # credentials (same convention as the embedding provider in
-    # core/embeddings.py). NOTE: an Ollama chat setup cannot serve Whisper —
-    # point stt_api_base at a transcription-capable endpoint or switch to
-    # stt_provider=faster-whisper.
+    # core/embeddings.py). NOTE: the Afrikia chat provider does not serve
+    # Whisper — point stt_api_base at a transcription-capable endpoint or
+    # switch to stt_provider=faster-whisper.
     api_key = settings.stt_api_key or settings.llm_api_key
     api_base = settings.stt_api_base or settings.llm_api_base
     if api_key:

@@ -115,7 +115,7 @@ def get_tool_spec(fn: Callable[..., Any]) -> ToolSpec:
 
 
 def as_function_schema(spec: ToolSpec) -> dict[str, Any]:
-    """Format a ToolSpec as an OpenAI/Ollama function tool."""
+    """Format a ToolSpec as an OpenAI function tool."""
     return {
         "type": "function",
         "function": {

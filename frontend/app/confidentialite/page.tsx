@@ -38,7 +38,7 @@ const SECTIONS: { title: string; body: string[] }[] = [
   {
     title: "4. Hébergement et sous-traitants",
     body: [
-      "Les traitements sont réalisés sur les serveurs exploités par Neobytech. Les réponses et les documents sont générés par des modèles fixes exécutés localement avec Ollama, sans recours à un fournisseur externe d'intelligence artificielle.",
+      "Les traitements sont réalisés sur les serveurs exploités par Neobytech. Les réponses et les documents sont générés par des modèles fixes exécutés sur l'infrastructure IA privée de Neobytech (fournisseur Afrikia), sans recours à un fournisseur externe d'intelligence artificielle.",
       "Les notifications push sont acheminées par le service Expo Push (Expo / Expo.dev) via un jeton d'appareil, uniquement si vous l'avez autorisé.",
     ],
   },

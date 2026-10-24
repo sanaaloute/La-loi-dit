@@ -7,8 +7,8 @@ name: legal-ai-burkina
 #   - temporal + temporal-ui + celery-worker → dormant subsystems: nothing in
 #     the API/request path imported them (removed on this branch)
 #   - prometheus + grafana → optional observability; /metrics keeps working
-#   - ollama-relay → WSL-only workaround; Ollama runs natively on the Mac and
-#     is reached via host.docker.internal
+#   - ollama-relay → obsolete: chat and embeddings now run on the private
+#     Afrikia provider (https://afrikia.neobytech.net/v1, key AFRIKIA_API_KEY)
 #
 # Milvus runs as a standalone server (etcd + minio + milvus) so multiple API
 # workers can share the index — the embedded Milvus Lite alternative

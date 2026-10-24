@@ -36,8 +36,9 @@ region has that. The audit below is ordered by what kills the vision if unfixed.
 
 At the September audit, a typical run made **6 + N LLM calls** (N =
 sub-questions), strictly sequential except retrieval branches, and everything
-serialized on one Ollama model. The current implementation instead uses fixed
-local role models: Qwen 2.5 3B for structured tasks and Gemma 4 12B for
+serialized on one Ollama model. The current implementation instead uses two
+fixed role models on the Afrikia provider: `qwen2.5-7b` for structured tasks
+and `gpt-oss-20b` for
 reasoning/synthesis. The SSE "streaming" showed progress labels; the answer
 appeared at the end as a cosmetic typewriter replay (`chat.py:462-488`).
 
@@ -47,11 +48,9 @@ Env-only quick wins (no code change, deploy = restart api container):
 |---|---|
 | `LEGAL_AI_RERANK_LLM_ENABLED=false` | −N optional Qwen 2.5 LLM rescore calls (one per branch); heuristic/cross-encoder reranking is separate |
 | `LEGAL_AI_CLAIM_LLM_REFINEMENT_ENABLED=false` | −1 Qwen 2.5 call (heuristic grading stays) |
-| `LEGAL_AI_OLLAMA_KEEP_ALIVE=24h` | keeps the fixed local role models loaded between requests |
 | `LEGAL_AI_ANSWER_MAX_EXCERPT_CHARS=1000`, `LEGAL_AI_ANSWER_MAX_EVIDENCE_PER_SUBQUESTION=3`, `LEGAL_AI_REASONING_MAX_EXCERPT_CHARS=1200` | ~2–3× smaller reasoning/synthesis prompts |
 | `LEGAL_AI_LLM_MAX_TOKENS=1500` | caps worst-case generation time |
 | `LEGAL_AI_RETRIEVAL_FETCH_K=10` | halves uncached rerank embedding batch |
-| `LEGAL_AI_OLLAMA_WARMUP_ON_STARTUP=true` + `OLLAMA_NUM_PARALLEL=2+` on the Ollama server | preloads both fixed chat models; concurrent users stop queueing |
 | FAQ warm-up script hitting `/api/v1/chat` at boot | populates the exact answer cache; zero code |
 
 Expected: 160 s → 30–60 s. Structural follow-ups (code): token-level streaming
@@ -100,10 +99,12 @@ Fix plan (this is the real "reference product" work):
 
 ### 3. Concurrency & single-point-of-failure
 
-One Mac Mini serving the two fixed local Ollama role models still has a
-concurrency ceiling: simultaneous users can queue behind GPU work and blow the
-280 s run cap. Before any growth push, tune `OLLAMA_NUM_PARALLEL` and
-`web_workers=3` (docs suggest it), account for both models' memory footprint,
+One Mac Mini behind the Afrikia provider still has a
+concurrency ceiling: simultaneous users queue behind provider-side generation
+and can blow the
+280 s run cap. Before any growth push, set
+`web_workers=3` (docs suggest it), confirm the Afrikia deployment's parallel
+capacity,
 and measure latency. Do not rely on external chat failover or per-tier model
 selection. Also: the Milvus fallback never reconnects without a restart
 (observed in production) — add a periodic reconnect probe. Backups + alerting
@@ -151,8 +152,8 @@ first adds moderation/legal-liability surface with no retention engine beneath.
 
 ## Suggested sequence
 
-1. **This week** (ops only): latency env knobs + Ollama parallelism + chat-model
-   warmup + FAQ cache warm-up. Measure before/after on 5 standard questions.
+1. **This week** (ops only): latency env knobs + FAQ cache warm-up. Measure
+   before/after on 5 standard questions.
 2. **Next 2 weeks**: date extraction + dedupe/repeal pass + re-ingest; eval
    against the real corpus; corpus browser + scenario-date picker UI.
 3. **Month 2**: freshness loop live → nouveautés feed + push; shareable answers;
