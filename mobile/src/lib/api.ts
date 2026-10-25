@@ -272,7 +272,6 @@ export const PIPELINE_NODES: PipelineNode[] = [
   { id: "response_generator", label: "Génération de la réponse" },
   { id: "claim_verification", label: "Vérification des affirmations" },
   { id: "citation_verification", label: "Vérification des citations" },
-  { id: "output_guardrail", label: "Garde-fou de sortie" },
 ];
 
 /** Friendly one-line descriptions of each pipeline step (from ChatWindow). */
@@ -295,7 +294,6 @@ export const STEP_LABELS: Record<string, string> = {
   response_generator: "Rédaction de la réponse…",
   claim_verification: "Vérification des affirmations…",
   citation_verification: "Vérification des citations…",
-  output_guardrail: "Contrôle final…",
 };
 
 // ---------------------------------------------------------------------------

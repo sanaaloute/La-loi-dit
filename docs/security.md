@@ -24,9 +24,9 @@ per user).
   role-hijacking and tool-abuse detection. Blocked queries terminate in the
   `refusal` node with a bilingual explanation and are audit-logged;
   sanitizable ones continue with the sanitized query.
-- **Output** (`output_guardrail` node): unsafe-legal-advice detection,
-  confidence thresholds (warning < 0.55, human review < 0.40), mandatory
-  legal disclaimer on every answer.
+- **Output** (`output_guardrail` node — currently **not wired into the chat
+  graph**): unsafe-legal-advice detection, confidence thresholds (warning <
+  0.55, human review < 0.40), mandatory legal disclaimer on every answer.
 - **Citation verification**: fabricated citations are programmatically
   removed — the model cannot cite what was not retrieved.
 

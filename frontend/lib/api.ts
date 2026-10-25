@@ -250,7 +250,6 @@ export const PIPELINE_NODES: PipelineNode[] = [
   { id: "response_generator", label: "Génération de la réponse" },
   { id: "claim_verification", label: "Vérification des affirmations" },
   { id: "citation_verification", label: "Vérification des citations" },
-  { id: "output_guardrail", label: "Garde-fou de sortie" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -805,14 +804,20 @@ export async function submitFeedback(payload: FeedbackPayload, token?: string | 
 /** Ask the backend to stop an in-flight chat run (UI stop button). */
 export async function cancelChat(sessionId: string, token?: string | null): Promise<void> {
   try {
-    await apiFetch("/chat/cancel", {
+    const res = await apiFetch("/chat/cancel", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       token,
       body: JSON.stringify({ session_id: sessionId }),
     });
-  } catch {
+    if (!res.ok) {
+      // The run keeps going server-side when the cancel never lands — surface
+      // it instead of failing silently while the user thinks they stopped it.
+      console.warn("cancelChat failed", res.status);
+    }
+  } catch (err) {
     // Best effort: the local AbortController already stops the client side.
+    console.warn("cancelChat failed", err);
   }
 }
 

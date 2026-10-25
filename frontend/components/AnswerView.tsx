@@ -82,19 +82,14 @@ export default function AnswerView({ answer }: AnswerViewProps) {
         <ReactMarkdown>{answer.answer}</ReactMarkdown>
       </div>
 
-      {answer.warnings.length > 0 && (
-        <div className="rounded-xl border border-warn-border/60 bg-warn-bg p-3">
-          <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-warn-text">
-            <AlertTriangle className="h-3.5 w-3.5" />
-            Avertissements
-          </p>
-          <ul className="list-disc space-y-1 pl-4 text-xs text-warn-text">
-            {answer.warnings.map((w, i) => (
-              <li key={i}>{w}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {/* Generic AI disclaimer on every answer: the pipeline only surfaces
+          what it could verify, so unverified affirmations are not listed —
+          this note is the honest user-facing caveat. */}
+      <p className="text-[11px] leading-snug text-gray-400">
+        {(answer.language || "fr").startsWith("en")
+          ? "AI-generated answer — it may contain errors. Always double-check with a legal professional."
+          : "Réponse générée par une IA — elle peut contenir des erreurs. Vérifiez toujours auprès d'un professionnel du droit."}
+      </p>
 
       {answer.conflicts.length > 0 && (
         <div className="space-y-2">

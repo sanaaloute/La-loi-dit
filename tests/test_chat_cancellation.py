@@ -111,7 +111,7 @@ def test_terminal_update_emits_final_without_waiting_for_stream_cleanup():
         def astream(self, state, *, config=None, stream_mode=None):
             async def generate():
                 yield {
-                    "output_guardrail": {
+                    "citation_verification": {
                         "final_answer": FinalAnswer(answer="Réponse vérifiée").model_dump(mode="json")
                     }
                 }

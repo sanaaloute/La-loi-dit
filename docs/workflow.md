@@ -39,11 +39,10 @@ flowchart TB
     rf -->|"should_retry_retrieval AND<br/>reflection_count ≤ 1 AND<br/>retrieval_retries < 1"| rc
     rf -->|else| rg[response_generator]
 
-    rg -->|direct/general| og[output_guardrail]
+    rg -->|direct/general| END2((END))
     rg -->|retrieval| clv[claim_verification]
     clv --> cv[citation_verification]
-    cv --> og
-    og --> END2((END))
+    cv --> END2
 ```
 
 Notes on the routing functions (verbatim from `graph.py`):
@@ -52,7 +51,7 @@ Notes on the routing functions (verbatim from `graph.py`):
 - `_route_after_router` — `DIRECT` and `GENERAL` skip legal retrieval;
   everything else uses the grounded retrieval pipeline.
 - `_route_after_response` — direct/general answers skip claim/citation
-  verification but still pass through the output guardrail.
+  verification and end the run right after synthesis.
 - `_route_after_reasoning` — the reasoning agent may request one extra
   retrieval pass (`needs_more_retrieval`) as long as the shared retrieval
   retry budget is not exhausted.
@@ -99,7 +98,6 @@ sequenceDiagram
     W->>L: response_generator (grounded answer + [n] citations)
     W->>W: claim_verification (per-claim support levels)
     W->>W: citation_verification (reject fabricated citations)
-    W->>W: output_guardrail (thresholds + disclaimer)
     W-->>API: final_state (FinalAnswer, trace, errors)
     API->>M: append_turn(user msg, answer) — best effort
     API-->>U: ChatResponse {session_id, answer, trace, latency_ms}

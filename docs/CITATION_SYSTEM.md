@@ -170,8 +170,13 @@ confidence:
 
 ## Output guard checks
 
+> **Note:** the `output_guardrail` node is no longer wired into the chat
+> graph (it blocked answers at the last step too often). The checks below
+> still live in `backend/guardrails/output_guard.py` and
+> `backend/agents/output_guardrail.py`, but they do not run on chat answers.
+
 `backend/guardrails/output_guard.py` (`check_output`, invoked by the
-`output_guardrail` node) applies, in order:
+`output_guardrail` node when wired in) applies, in order:
 
 1. **Refusal policy** — zero evidence without an insufficient-evidence
    declaration → refused.
@@ -227,7 +232,8 @@ The per-dimension detail lives in `ConfidenceBreakdown`:
 
 ## Context-sensitive disclaimers (spec §33)
 
-`backend/agents/output_guardrail.py` appends, once, at the end of the answer:
+When wired in, `backend/agents/output_guardrail.py` appends, once, at the end
+of the answer (currently dormant — the node is not part of the chat graph):
 
 - the **full legal disclaimer** ("cette réponse est une aide à la recherche
   juridique… ne constitue pas un conseil juridique") for high-impact question

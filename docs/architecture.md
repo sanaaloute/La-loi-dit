@@ -39,10 +39,10 @@ flowchart TB
         ra --> rf[reflection]
         rf -->|retry retrieval<br/>max 1 iteration| fan
         rf --> rg[response_generator]
-        rg -->|direct/general| og
+        rg -->|direct/general| fin[Final answer]
         rg --> clv[claim_verification]
         clv --> cv[citation_verification]
-        cv --> og[output_guardrail]
+        cv --> fin
     end
 
     api --> graph

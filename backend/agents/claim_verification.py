@@ -367,10 +367,10 @@ class ClaimVerificationAgent(Agent):
         # "claims" from that message would only produce noise warnings.
         heuristic_levels = {c.claim_id: c.support_level for c in claims}
         claims = await refine_support_with_llm(claims, evidence, ctx)
-        # Claims the LLM refinement actually downgraded: only those carry a
-        # user-facing signal. Heuristic insufficiency alone is too noisy on
-        # paraphrased answers (small models reword heavily) — it stays a
-        # dev-side warning, exactly as before the refinement existed.
+        # Claims the LLM refinement actually downgraded: recorded in metadata
+        # for observability only. No user-facing warning is produced for
+        # unverified or deducted statements — the answer simply shows what
+        # could be verified, plus the generic AI disclaimer in the UI.
         downgraded = [
             c for c in claims if heuristic_levels.get(c.claim_id) is not c.support_level
         ]
@@ -393,22 +393,10 @@ class ClaimVerificationAgent(Agent):
             final.claims = claims
             language = final.language or state.get("language", "") or "fr"
             english = language.startswith("en")
-            if insufficient:
-                warnings.append(
-                    f"{insufficient} statement(s) could not be verified against the available sources."
-                    if english
-                    else f"Certaines affirmations n'ont pas pu être vérifiées dans les sources ({insufficient})."
-                )
             if flagged_unverified:
-                # Surfaced to the user by the output guardrail's caution note.
                 final.metadata["unverified_claims"] = [c.text[:200] for c in flagged_unverified[:3]]
             if inferred:
                 final.metadata["inferred_claims"] = [c.text[:200] for c in inferred[:3]]
-                warnings.append(
-                    f"{len(inferred)} statement(s) are deductions going beyond the cited sources."
-                    if english
-                    else f"Certaines affirmations sont des déductions allant au-delà des sources citées ({len(inferred)})."
-                )
             if contradictory:
                 # A contradicted legal statement is high-impact: always
                 # escalate for human review.

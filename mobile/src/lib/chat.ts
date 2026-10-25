@@ -130,6 +130,10 @@ export class ChatEngine {
   // Marks an abort triggered by the app-resume handler (as opposed to the
   // user pressing stop): the catch path then recovers instead of interrupting.
   private resumeRecovery = false;
+  // Set by stop(): the history-recovery polling loop checks it and exits at
+  // once — otherwise a stop during recovery kept the UI busy for minutes
+  // (the fetch it aborts is already dead by then).
+  private stopRequested = false;
   // Session id found in storage at engine creation (undefined = not read yet).
   private mountSessionId: string | null | undefined = undefined;
   private restored = false;
@@ -412,7 +416,13 @@ export class ChatEngine {
     // deliberately stays ~15 s — the backend heartbeat ticks every 10 s,
     // so a shorter watchdog would kill healthy streams mid-run.
     for (let attempt = 0; attempt < 130; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 5_000));
+      // Interruptible 5 s cadence: the stop button breaks the recovery wait
+      // at once instead of polling on for minutes after the stream died.
+      for (let waited = 0; waited < 5_000; waited += 200) {
+        if (this.stopRequested) return false;
+        await new Promise((resolve) => setTimeout(resolve, Math.min(200, 5_000 - waited)));
+      }
+      if (this.stopRequested) return false;
       try {
         const detail = await getSession(sid);
         const msgs = detail.messages;
@@ -483,8 +493,13 @@ export class ChatEngine {
   }
 
   stop(): void {
-    this.abortController?.abort();
+    // Flag first: an in-flight history-recovery loop checks it and exits.
+    this.stopRequested = true;
+    // Kill the server-side run BEFORE dropping the local stream, so the
+    // cancel lands while the run is still registered (a bare disconnect only
+    // makes the backend drain the run silently to completion).
     if (this.snapshot.sessionId) void cancelChat(this.snapshot.sessionId);
+    this.abortController?.abort();
   }
 
   // -------------------------------------------------------------------------
@@ -510,6 +525,7 @@ export class ChatEngine {
     this.abortController = controller;
     this.streamMsgId = null;
     this.resumeRecovery = false;
+    this.stopRequested = false;
 
     this.patch({
       busy: true,
@@ -579,8 +595,12 @@ export class ChatEngine {
           this.resumeRecovery = false;
           const recovered = await this.attemptRecovery(sid, sendStart, text);
           if (!recovered) {
-            this.discardStreamingMessage();
-            this.failWith("La connexion s'est interrompue. Réessayez.");
+            if (this.stopRequested) {
+              this.interrupted();
+            } else {
+              this.discardStreamingMessage();
+              this.failWith("La connexion s'est interrompue. Réessayez.");
+            }
           }
         } else {
           this.interrupted();
@@ -598,7 +618,8 @@ export class ChatEngine {
         if (runStatus?.running) {
           const recovered = await this.attemptRecovery(sid, sendStart, text);
           if (!recovered) {
-            this.failWith(err instanceof Error ? `Erreur : ${err.message}` : "Une erreur est survenue.");
+            if (this.stopRequested) this.interrupted();
+            else this.failWith(err instanceof Error ? `Erreur : ${err.message}` : "Une erreur est survenue.");
           }
         } else {
           try {
@@ -614,9 +635,12 @@ export class ChatEngine {
               // completes and persists the answer — poll the history.
               const recovered = await this.attemptRecovery(sid, sendStart, text);
               if (!recovered) {
-                this.failWith(
-                  postErr instanceof Error ? `Erreur : ${postErr.message}` : "Une erreur est survenue.",
-                );
+                if (this.stopRequested) this.interrupted();
+                else {
+                  this.failWith(
+                    postErr instanceof Error ? `Erreur : ${postErr.message}` : "Une erreur est survenue.",
+                  );
+                }
               }
             } else {
               this.failWith(
@@ -630,8 +654,12 @@ export class ChatEngine {
         // answer the backend may still be computing before declaring failure.
         const recovered = !serverFailed && (await this.attemptRecovery(sid, sendStart, text));
         if (!recovered) {
-          this.discardStreamingMessage();
-          this.failWith(err instanceof Error ? `Erreur : ${err.message}` : "Une erreur est survenue.");
+          if (this.stopRequested) {
+            this.interrupted();
+          } else {
+            this.discardStreamingMessage();
+            this.failWith(err instanceof Error ? `Erreur : ${err.message}` : "Une erreur est survenue.");
+          }
         }
       }
     } finally {

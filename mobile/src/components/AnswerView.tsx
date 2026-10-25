@@ -79,20 +79,14 @@ export default function AnswerView({ answer }: AnswerViewProps) {
 
       <Markdown>{answer.answer}</Markdown>
 
-      {answer.warnings.length > 0 && (
-        <View style={styles.warnings}>
-          <View style={styles.row}>
-            <Ionicons name="alert-circle" size={14} color={colors.warnText} />
-            <Text style={styles.warningsTitle}>Avertissements</Text>
-          </View>
-          {answer.warnings.map((w, i) => (
-            <View key={i} style={styles.warningItem}>
-              <Text style={styles.warningBullet}>•</Text>
-              <Text style={styles.warningText}>{w}</Text>
-            </View>
-          ))}
-        </View>
-      )}
+      {/* Generic AI disclaimer on every answer: the pipeline only surfaces
+          what it could verify, so unverified affirmations are not listed —
+          this note is the honest user-facing caveat. */}
+      <Text style={styles.disclaimer}>
+        {(answer.language || "fr").startsWith("en")
+          ? "AI-generated answer — it may contain errors. Always double-check with a legal professional."
+          : "Réponse générée par une IA — elle peut contenir des erreurs. Vérifiez toujours auprès d'un professionnel du droit."}
+      </Text>
 
       {answer.conflicts.length > 0 && (
         <View style={styles.conflictList}>
@@ -149,24 +143,7 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   refusedTitle: { fontSize: 14, fontWeight: "600", color: colors.danger },
   refusedBody: { fontSize: 13, color: colors.danger },
   refusedMarkdown: { marginTop: 4 },
-  warnings: {
-    borderWidth: 1,
-    borderColor: colors.warnBorder,
-    backgroundColor: colors.warnBg,
-    borderRadius: 12,
-    padding: 12,
-    gap: 4,
-  },
-  warningsTitle: {
-    fontSize: 11,
-    fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    color: colors.warnText,
-  },
-  warningItem: { flexDirection: "row", gap: 6, paddingLeft: 4 },
-  warningBullet: { fontSize: 12, color: colors.warnText },
-  warningText: { flex: 1, fontSize: 12, color: colors.warnText },
+  disclaimer: { fontSize: 11, lineHeight: 15, color: colors.muted },
   conflictList: { gap: 8 },
   conflict: { borderWidth: 1, borderRadius: 12, padding: 12 },
   conflictResolved: { borderColor: colors.border, backgroundColor: colors.surface },

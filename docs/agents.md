@@ -31,12 +31,15 @@ flowchart LR
     rf -.->|should_retry_retrieval, iteration ≤ 1| fan
     rf --> rg
     rg --> clv[claim_verification]
-    rg -->|direct/general routes| og
+    rg -->|direct/general routes| a
     clv --> cv[citation_verification]
-    cv --> og[output_guardrail]
-    og --> a[Final answer]
+    cv --> a[Final answer]
     ref --> a
 ```
+
+The `output_guardrail` agent (below) is intentionally **not wired into the
+graph** anymore — as the last step it blocked the answer too often. The node
+list above is the exact compiled pipeline.
 
 ## Fixed role models
 
@@ -192,8 +195,9 @@ auditor's discriminative terms plus a conservative number-mismatch check) and
 attaches the resulting `Claim` list to the `FinalAnswer`. Insufficiency
 declarations (« …n'est pas couverte par les extraits [1] ») are excluded from
 claims: they are status statements, not legal statements, and must not earn
-citation/support credit. Insufficient claims
-raise bilingual warnings; contradictory ones also set
+citation/support credit. Insufficient claims no longer raise user-facing
+warnings (they stay in `trace`/`metadata` for observability — the UI shows a
+generic AI disclaimer instead); contradictory ones also set
 `requires_human_review`. Recomputes
 `confidence_breakdown.legal_support_confidence` as the supported-claim
 fraction dampened by the contradicted share and (at half weight) the
@@ -212,8 +216,7 @@ overlap cannot: provisions applied to a legal mechanism they do not govern
 divorce conclusion) and inexact numbers/durations. The refinement only ever
 downgrades support and fails open to the heuristic grades. Claims the
 refinement downgrades are recorded in `FinalAnswer.metadata`
-(`inferred_claims` / `unverified_claims`) and surfaced to the user by the
-output guardrail's caution note; purely heuristic flags stay dev-side
+(`inferred_claims` / `unverified_claims`); purely heuristic flags stay dev-side
 warnings (they are too noisy on paraphrased answers to show to users).
 
 ## citation_verification (`backend/agents/citation_verification.py`)
@@ -253,6 +256,13 @@ not punished. The detection is phrase-based, accent-insensitive
 abstaining answers are excluded from the answer cache.
 
 ## output_guardrail (`backend/agents/output_guardrail.py`)
+
+**Not wired into the chat graph anymore** (removed as the terminal node: it
+replaced answers with the low-confidence fallback too often). The module —
+and its tests — remain available. What follows describes its behavior when
+used; none of it currently runs in the chat pipeline (in particular the
+confidence fallback, the disclaimer appending, and the claim-caution note no
+longer modify chat answers).
 
 Final policy gate. Performs unsafe-output checks, then replaces any non-refused
 retrieval answer below confidence 0.55 with a localized insufficient-information

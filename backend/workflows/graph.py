@@ -3,13 +3,12 @@
 Pipeline (see docs/architecture.md for the Mermaid diagram):
 
     user -> input_guardrail -> language_gate -> query_router
-         -> (direct/general) response_generator -> output_guardrail
+         -> (direct/general) response_generator
          -> (retrieval) planner -> context_agent -> memory_agent
          -> [fan-out: one retrieval_branch per sub-question, in parallel]
          -> retrieval_merge -> conflict_resolver -> evidence_ranking
          -> coverage_auditor -> reasoning_agent -> reflection_agent
          -> response_generator -> claim_verification -> citation_verification
-         -> output_guardrail
          -> final answer
 
 Bounded loops (max retry = 1 each):
@@ -23,6 +22,9 @@ verification used to run before it and always verified an empty draft).
 claim_verification runs FIRST so claims are built on the draft with its [n]
 markers (they designate the intended sources); if citation_verification then
 strips an unverifiable marker, the claim simply keeps its recorded support.
+The output_guardrail agent (backend/agents/output_guardrail.py) is kept
+available but is no longer wired into the graph: it blocked the answer at the
+last step too often.
 """
 
 from __future__ import annotations
@@ -46,7 +48,6 @@ from backend.agents import (
     input_guardrail,
     language_gate,
     memory_agent,
-    output_guardrail,
     parent_expansion,
     query_router,
     reasoning_agent,
@@ -199,7 +200,7 @@ def build_graph(ctx: AppContext):
 
     def _route_after_response(state: GraphState) -> str:
         """Direct/general answers have no evidence for claim verification."""
-        return "output_guardrail" if state.get("route") in {"direct", "general"} else "claim_verification"
+        return END if state.get("route") in {"direct", "general"} else "claim_verification"
 
     g = StateGraph(GraphState)
     g.add_node("input_guardrail", bind(input_guardrail.input_guardrail_node))
@@ -220,7 +221,6 @@ def build_graph(ctx: AppContext):
     g.add_node("citation_verification", bind(citation_verification.citation_verification_node))
     g.add_node("claim_verification", bind(claim_verification.claim_verification_node, role="classification"))
     g.add_node("response_generator", bind(response_generator.response_generator_node, role="synthesis"))
-    g.add_node("output_guardrail", bind(output_guardrail.output_guardrail_node))
 
     g.add_edge(START, "input_guardrail")
     g.add_conditional_edges("input_guardrail", _route_after_guardrail)
@@ -240,8 +240,7 @@ def build_graph(ctx: AppContext):
     g.add_conditional_edges("reflection_agent", _route_after_reflection)
     g.add_conditional_edges("response_generator", _route_after_response)
     g.add_edge("claim_verification", "citation_verification")
-    g.add_edge("citation_verification", "output_guardrail")
-    g.add_edge("output_guardrail", END)
+    g.add_edge("citation_verification", END)
     return g.compile()
 
 

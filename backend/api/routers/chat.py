@@ -133,24 +133,32 @@ async def _set_run_node(session_id: str, run_id: str, node: Optional[str], ctx: 
 
 
 async def _watch_run(session_id: str, task: "asyncio.Task[Any]", ctx: Any) -> None:
-    """Cancel the local task on a shared Stop request or the hard deadline."""
+    """Cancel the local task on a shared Stop request or the hard deadline.
+
+    A transient cache error must not kill the watcher: it is the only
+    enforcement of the run timeout and of cancel requests that landed on
+    another worker, so a single failed read just retries on the next tick.
+    """
     run_id = _run_id(task)
     deadline = time.perf_counter() + ctx.settings.chat_run_timeout_seconds
-    try:
-        while not task.done():
+    while not task.done():
+        try:
             cancelled = await ctx.cache.get(_cancel_key(session_id))
-            if isinstance(cancelled, dict) and cancelled.get("run_id") == run_id:
-                task.cancel()
-                return
-            remaining = deadline - time.perf_counter()
-            if remaining <= 0:
-                setattr(task, "_yawoto_timed_out", True)
-                logger.warning("chat run timed out", extra={"session_id": session_id})
-                task.cancel()
-                return
+        except Exception:
+            cancelled = None
+        if isinstance(cancelled, dict) and cancelled.get("run_id") == run_id:
+            task.cancel()
+            return
+        remaining = deadline - time.perf_counter()
+        if remaining <= 0:
+            setattr(task, "_yawoto_timed_out", True)
+            logger.warning("chat run timed out", extra={"session_id": session_id})
+            task.cancel()
+            return
+        try:
             await asyncio.sleep(min(_RUN_WATCH_INTERVAL_SECONDS, remaining))
-    except (asyncio.CancelledError, Exception):
-        return
+        except asyncio.CancelledError:
+            return
 
 
 async def _register_run(session_id: str, task: "asyncio.Task[Any]", ctx: Any, run_id: str) -> None:
@@ -597,7 +605,12 @@ async def chat(
     return response
 
 
-_TERMINAL_GRAPH_NODES = frozenset({"output_guardrail", "refusal"})
+# Terminal nodes per route: citation_verification ends the retrieval route,
+# response_generator ends the direct/general routes, refusal ends blocked runs.
+# Terminal nodes per route: citation_verification ends the retrieval route,
+# refusal ends blocked runs, and response_generator ends the direct/general
+# routes (the pump checks the route emitted by query_router for that one).
+_TERMINAL_GRAPH_NODES = frozenset({"citation_verification", "response_generator", "refusal"})
 
 
 async def _pump_events(
@@ -617,10 +630,19 @@ async def _pump_events(
     from backend.workflows.graph import stream_query
 
     events = stream_query(graph, state, config=config)
+    route = ""
     try:
         async for event in events:
             await queue.put(("update", event))
-            if event.get("node") in _TERMINAL_GRAPH_NODES:
+            update = event.get("update")
+            if isinstance(update, dict) and isinstance(update.get("route"), str):
+                route = update["route"]
+            node = event.get("node")
+            # response_generator is terminal only on the direct/general routes;
+            # on the retrieval route the verification nodes still follow it.
+            if node in _TERMINAL_GRAPH_NODES and (
+                node != "response_generator" or route in {"direct", "general"}
+            ):
                 break
         await queue.put(("done", None))
     except asyncio.CancelledError:
@@ -676,7 +698,7 @@ class _NodeStartHandler(AsyncCallbackHandler):
 
 
 # Final-answer streaming: the VERIFIED answer text (post claim/citation
-# verification and output guardrail) is emitted as `delta` frames just ahead
+# verification) is emitted as `delta` frames just ahead
 # of the authoritative `final` frame, so the UI types the answer out
 # progressively. Chunking is adaptive: about ANSWER_DELTA_TARGET_FRAMES frames
 # whatever the answer length, keeping playback around ~2 s.

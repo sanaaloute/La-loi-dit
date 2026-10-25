@@ -108,7 +108,6 @@ const STEP_LABELS: Record<string, string> = {
   response_generator: "Rédaction de la réponse…",
   claim_verification: "Vérification des affirmations…",
   citation_verification: "Vérification des citations…",
-  output_guardrail: "Contrôle final…",
 };
 
 /** Starter questions on the empty chat screen; the persona (chosen at
@@ -201,6 +200,10 @@ export default function ChatWindow() {
   // Marks an abort triggered by the page-resume handler (as opposed to the
   // user pressing stop): the catch path then recovers instead of interrupting.
   const resumeRecoveryRef = useRef(false);
+  // Set by the stop button: the history-recovery polling loop checks it and
+  // exits at once — otherwise a stop pressed during recovery kept the UI busy
+  // for minutes (the fetch it aborts is already dead by then).
+  const stopRequestedRef = useRef(false);
   // Session id found in localStorage at mount (undefined = not read yet).
   const mountSessionIdRef = useRef<string | null | undefined>(undefined);
   // Id of the provisional assistant message receiving `delta` frames (the
@@ -484,7 +487,13 @@ export default function ChatWindow() {
       // deliberately stays ~15 s — the backend heartbeat ticks every 10 s,
       // so a shorter watchdog would kill healthy streams mid-run.
       for (let attempt = 0; attempt < 130; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 5_000));
+        // Interruptible 5 s cadence: the stop button breaks the recovery wait
+        // at once instead of polling on for minutes after the stream died.
+        for (let waited = 0; waited < 5_000; waited += 200) {
+          if (stopRequestedRef.current) return false;
+          await new Promise((resolve) => setTimeout(resolve, Math.min(200, 5_000 - waited)));
+        }
+        if (stopRequestedRef.current) return false;
         try {
           const detail = await getSession(sid, token);
           const msgs = detail.messages;
@@ -566,8 +575,13 @@ export default function ChatWindow() {
   }, []);
 
   const stop = useCallback(() => {
-    abortRef.current?.abort();
+    // Flag first: an in-flight history-recovery loop checks it and exits.
+    stopRequestedRef.current = true;
+    // Kill the server-side run BEFORE dropping the local stream, so the
+    // cancel lands while the run is still registered (a bare disconnect only
+    // makes the backend drain the run silently to completion).
     if (sessionId) void cancelChat(sessionId, token);
+    abortRef.current?.abort();
   }, [sessionId, token]);
 
   // Send a recorded blob for transcription and insert the text into the
@@ -655,6 +669,7 @@ export default function ChatWindow() {
     abortRef.current = controller;
     streamMsgIdRef.current = null;
     resumeRecoveryRef.current = false;
+    stopRequestedRef.current = false;
 
     setInput("");
     setBusy(true);
@@ -725,8 +740,12 @@ export default function ChatWindow() {
           resumeRecoveryRef.current = false;
           const recovered = await attemptRecovery(sid, sendStart, query, streamAccepted);
           if (!recovered) {
-            discardStreamingMessage();
-            failWith("La connexion s'est interrompue. Réessayez.");
+            if (stopRequestedRef.current) {
+              interrupted();
+            } else {
+              discardStreamingMessage();
+              failWith("La connexion s'est interrompue. Réessayez.");
+            }
           }
         } else {
           interrupted();
@@ -744,7 +763,8 @@ export default function ChatWindow() {
         if (streamAccepted || runStatus?.running) {
           const recovered = await attemptRecovery(sid, sendStart, query, true);
           if (!recovered) {
-            failWith(err instanceof Error ? `Erreur : ${err.message}` : "Une erreur est survenue.");
+            if (stopRequestedRef.current) interrupted();
+            else failWith(err instanceof Error ? `Erreur : ${err.message}` : "Une erreur est survenue.");
           }
         } else {
           try {
@@ -761,9 +781,12 @@ export default function ChatWindow() {
               // still completes and persists the answer — poll the history.
               const recovered = await attemptRecovery(sid, sendStart, query);
               if (!recovered) {
-                failWith(
-                  postErr instanceof Error ? `Erreur : ${postErr.message}` : "Une erreur est survenue.",
-                );
+                if (stopRequestedRef.current) interrupted();
+                else {
+                  failWith(
+                    postErr instanceof Error ? `Erreur : ${postErr.message}` : "Une erreur est survenue.",
+                  );
+                }
               }
             } else {
               failWith(
@@ -777,8 +800,12 @@ export default function ChatWindow() {
         // answer the backend may still be computing before declaring failure.
         const recovered = !serverFailed && (await attemptRecovery(sid, sendStart, query, true));
         if (!recovered) {
-          discardStreamingMessage();
-          failWith(err instanceof Error ? `Erreur : ${err.message}` : "Une erreur est survenue.");
+          if (stopRequestedRef.current) {
+            interrupted();
+          } else {
+            discardStreamingMessage();
+            failWith(err instanceof Error ? `Erreur : ${err.message}` : "Une erreur est survenue.");
+          }
         }
       }
     } finally {
