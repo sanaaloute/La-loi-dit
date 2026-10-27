@@ -10,7 +10,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "net.neobytech.yawoto",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Yawoto utilise le micro pour dicter vos questions juridiques."
+        "NSMicrophoneUsageDescription": "Yawoto utilise le micro pour dicter vos questions juridiques.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -55,6 +56,9 @@
           "android": {
             "enableMinifyInReleaseBuilds": true,
             "enableShrinkResourcesInReleaseBuilds": true
+          },
+          "ios": {
+            "enableSceneSupport": true
           }
         }
       ]
