@@ -14,7 +14,6 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import DateTimePicker from "@react-native-community/datetimepicker";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   AudioModule,
@@ -46,7 +45,7 @@ import {
   MAX_WORDS,
   type ChatMessage,
 } from "../../src/lib/chat";
-import { formatMessageTime, localLongDate } from "../../src/lib/format";
+import { formatMessageTime } from "../../src/lib/format";
 import { suggestionsForPersona } from "../../src/lib/persona";
 import type { ThemeColors } from "../../src/theme";
 import { useTheme } from "../../src/theme-context";
@@ -63,19 +62,6 @@ const SUGGESTIONS = [
 /** Public web app origin — shared answer pages live under /partage/<token>. */
 const PUBLIC_WEB_ORIGIN = "https://yawoto.neobytech.net";
 
-/** Parse "YYYY-MM-DD" into a local Date (noon sidesteps DST edges). */
-function parseScenarioDate(value: string): Date {
-  const [year, month, day] = value.split("-").map(Number);
-  return new Date(year, month - 1, day, 12);
-}
-
-/** Format a picker Date back to the API's "YYYY-MM-DD" contract. */
-function formatScenarioDate(date: Date): string {
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${date.getFullYear()}-${month}-${day}`;
-}
-
 type PanelTab = "agents" | "citations" | "preuves";
 
 export default function ChatScreen() {
@@ -90,13 +76,6 @@ export default function ChatScreen() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [tab, setTab] = useState<PanelTab>("agents");
   const listRef = useRef<FlatList<ChatMessage>>(null);
-
-  // Scenario date ("Loi en vigueur au …"): sent as scenario_date, YYYY-MM-DD.
-  const [scenarioDate, setScenarioDate] = useState<string | null>(null);
-  const [datePickerOpen, setDatePickerOpen] = useState(false);
-  // Draft selection inside the iOS sheet (applied via "Valider"); Android's
-  // system dialog confirms atomically and never touches this.
-  const [pickerDate, setPickerDate] = useState<Date>(new Date());
 
   // Saved answers: message id -> bookmark id (local mirror of /bookmarks).
   const [savedBookmarks, setSavedBookmarks] = useState<Record<string, string>>({});
@@ -128,11 +107,6 @@ export default function ChatScreen() {
       cancelled = true;
     };
   }, [token]);
-
-  // A fresh conversation drops the scenario date along with the messages.
-  useEffect(() => {
-    if (!snapshot.sessionId && snapshot.messages.length === 0) setScenarioDate(null);
-  }, [snapshot.sessionId, snapshot.messages.length]);
 
   // Elapsed-time indicator while a run is in flight (helps spot a stuck node).
   const [elapsed, setElapsed] = useState(0);
@@ -306,14 +280,6 @@ export default function ChatScreen() {
   }, [messages]);
 
   const sendDisabled = input.trim().length === 0 || wordCount > MAX_WORDS || busy;
-
-  // -------------------------------------------------------------------------
-  // Scenario date picker (native calendar; no keyboard involved)
-  // -------------------------------------------------------------------------
-  function openDatePicker() {
-    setPickerDate(scenarioDate ? parseScenarioDate(scenarioDate) : new Date());
-    setDatePickerOpen(true);
-  }
 
   // -------------------------------------------------------------------------
   // Answer actions: bookmark toggle + public share link
@@ -514,17 +480,6 @@ export default function ChatScreen() {
         <Text style={styles.headerTitle}>Yawoto</Text>
         <View style={styles.headerActions}>
           <Pressable
-            onPress={openDatePicker}
-            style={styles.headerButton}
-            accessibilityLabel="Choisir une date de scénario (loi en vigueur au…)"
-          >
-            <Ionicons
-              name="calendar-outline"
-              size={18}
-              color={scenarioDate ? colors.accent : colors.inkSoft}
-            />
-          </Pressable>
-          <Pressable
             onPress={() => {
               setTab("agents");
               setPanelOpen(true);
@@ -536,10 +491,12 @@ export default function ChatScreen() {
           </Pressable>
           <Pressable
             onPress={() => chatEngine.newConversation()}
-            style={styles.headerButton}
-            accessibilityLabel="Nouvelle conversation"
+            style={styles.newChatButton}
+            accessibilityRole="button"
+            accessibilityLabel="Démarrer une nouvelle conversation"
           >
-            <Ionicons name="add-circle-outline" size={18} color={colors.inkSoft} />
+            <Ionicons name="chatbubble-outline" size={14} color="#fff" />
+            <Text style={styles.newChatText}>Nouvelle</Text>
           </Pressable>
           <Pressable
             onPress={toggleTheme}
@@ -620,23 +577,6 @@ export default function ChatScreen() {
             </View>
           )}
           {recError ? <Text style={styles.recError}>{recError}</Text> : null}
-          {scenarioDate && (
-            <View style={styles.scenarioChipRow}>
-              <View style={styles.scenarioChip}>
-                <Ionicons name="calendar" size={12} color={colors.accent} />
-                <Text style={styles.scenarioChipText}>
-                  Loi en vigueur au {localLongDate(scenarioDate)}
-                </Text>
-                <Pressable
-                  onPress={() => setScenarioDate(null)}
-                  accessibilityLabel="Retirer la date de scénario"
-                  hitSlop={8}
-                >
-                  <Ionicons name="close" size={14} color={colors.accent} />
-                </Pressable>
-              </View>
-            </View>
-          )}
           <View style={styles.composerRow}>
             <TextInput
               value={input}
@@ -686,7 +626,7 @@ export default function ChatScreen() {
                   onPress={() => {
                     const q = input;
                     setInput("");
-                    void chatEngine.send(q, scenarioDate);
+                    void chatEngine.send(q);
                   }}
                   disabled={sendDisabled}
                   style={[
@@ -768,74 +708,6 @@ export default function ChatScreen() {
         </View>
       </Modal>
 
-      {/* Scenario date: native calendar picker. Android shows the system
-          calendar dialog; iOS gets the inline picker inside our sheet. */}
-      {Platform.OS === "android" && datePickerOpen ? (
-        <DateTimePicker
-          value={pickerDate}
-          mode="date"
-          display="calendar"
-          onChange={(event, date) => {
-            setDatePickerOpen(false);
-            if (event.type === "set" && date) {
-              setScenarioDate(formatScenarioDate(date));
-            }
-          }}
-        />
-      ) : null}
-      {Platform.OS !== "android" ? (
-      <Modal
-        visible={datePickerOpen}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setDatePickerOpen(false)}
-      >
-        <View style={styles.modalContainer}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setDatePickerOpen(false)} />
-          <View style={styles.dateSheet}>
-            <Text style={styles.sheetTitle}>Loi en vigueur au…</Text>
-            <Text style={styles.dateHint}>
-              La réponse tiendra compte des textes en vigueur à cette date.
-            </Text>
-            <DateTimePicker
-              value={pickerDate}
-              mode="date"
-              display="inline"
-              onChange={(_event, date) => {
-                if (date) setPickerDate(date);
-              }}
-              style={styles.datePicker}
-            />
-            <View style={styles.dateActions}>
-              {scenarioDate ? (
-                <Pressable
-                  onPress={() => {
-                    setScenarioDate(null);
-                    setDatePickerOpen(false);
-                  }}
-                  style={styles.dateButton}
-                  accessibilityLabel="Retirer la date"
-                >
-                  <Text style={styles.dateRemoveText}>Retirer</Text>
-                </Pressable>
-              ) : null}
-              <Pressable onPress={() => setDatePickerOpen(false)} style={styles.dateButton}>
-                <Text style={styles.dateCancelText}>Annuler</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  setScenarioDate(formatScenarioDate(pickerDate));
-                  setDatePickerOpen(false);
-                }}
-                style={styles.dateApplyButton}
-              >
-                <Text style={styles.dateApplyText}>Valider</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
-      ) : null}
     </SafeAreaView>
   );
 }
@@ -854,8 +726,19 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
     backgroundColor: colors.surfaceElevated,
   },
   headerTitle: { fontSize: 17, fontWeight: "700", color: colors.accent },
-  headerActions: { flexDirection: "row", gap: 4 },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 4 },
   headerButton: { padding: 8, borderRadius: 8 },
+  newChatButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: colors.accent,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    marginHorizontal: 4,
+  },
+  newChatText: { fontSize: 13, fontWeight: "600", color: "#fff" },
   centerFill: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8 },
   loadingText: { fontSize: 13, color: colors.muted },
   emptyState: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
@@ -996,40 +879,6 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   roundButtonDisabled: { backgroundColor: colors.border },
   wordCount: { fontSize: 11, color: colors.faint, textAlign: "right", marginTop: 4 },
   wordCountOver: { color: colors.danger, fontWeight: "600" },
-  scenarioChipRow: { flexDirection: "row", marginBottom: 6 },
-  scenarioChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    borderWidth: 1,
-    borderColor: colors.accent,
-    backgroundColor: colors.accentLight,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  scenarioChipText: { fontSize: 12, fontWeight: "500", color: colors.accent },
-  dateSheet: {
-    backgroundColor: colors.surfaceElevated,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 16,
-    paddingBottom: 32,
-    gap: 10,
-  },
-  dateHint: { fontSize: 12, color: colors.muted },
-  datePicker: { alignSelf: "center" },
-  dateActions: { flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 4 },
-  dateButton: { paddingHorizontal: 12, paddingVertical: 10 },
-  dateCancelText: { fontSize: 14, color: colors.muted },
-  dateRemoveText: { fontSize: 14, color: colors.danger },
-  dateApplyButton: {
-    backgroundColor: colors.accent,
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  dateApplyText: { fontSize: 14, fontWeight: "600", color: "#fff" },
   modalContainer: { flex: 1, justifyContent: "flex-end" },
   modalBackdrop: {
     position: "absolute",

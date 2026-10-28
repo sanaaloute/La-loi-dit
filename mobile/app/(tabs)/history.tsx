@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  Linking,
   Pressable,
   StyleSheet,
   Text,
@@ -17,11 +16,9 @@ import {
   deleteBookmark,
   deleteSession,
   listBookmarks,
-  listFreshnessEvents,
   listSessions,
   type Bookmark,
   type ChatSessionSummary,
-  type FreshnessEvent,
 } from "../../src/lib/api";
 import { useAuth } from "../../src/lib/auth";
 import { chatEngine } from "../../src/lib/chat";
@@ -66,7 +63,6 @@ export default function HistoryScreen() {
   const [segment, setSegment] = useState<Segment>("sessions");
   const [sessions, setSessions] = useState<ChatSessionSummary[] | null>(null);
   const [bookmarks, setBookmarks] = useState<Bookmark[] | null>(null);
-  const [events, setEvents] = useState<FreshnessEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -74,11 +70,10 @@ export default function HistoryScreen() {
   const reload = useCallback(() => {
     if (!token) return;
     setLoading(true);
-    Promise.allSettled([listSessions(), listBookmarks(), listFreshnessEvents(10)])
-      .then(([s, b, e]) => {
+    Promise.allSettled([listSessions(), listBookmarks()])
+      .then(([s, b]) => {
         setSessions(s.status === "fulfilled" ? s.value.sessions : null);
         setBookmarks(b.status === "fulfilled" ? b.value : null);
-        setEvents(e.status === "fulfilled" ? e.value : []);
       })
       .finally(() => setLoading(false));
   }, [token]);
@@ -153,43 +148,6 @@ export default function HistoryScreen() {
     void chatEngine.loadSession(id).then(() => router.navigate("/"));
   }
 
-  // "Nouveautés": latest detected changes on the official sources. Hidden
-  // entirely when the feed is empty.
-  const nouveautesCard =
-    events.length === 0 ? null : (
-      <View style={styles.newsCard}>
-        <View style={styles.newsHeader}>
-          <Ionicons name="megaphone-outline" size={15} color={colors.accent} />
-          <Text style={styles.newsTitle}>Nouveautés</Text>
-        </View>
-        {events.map((event, i) => (
-          <Pressable
-            key={`${event.source_name}-${event.detected_at}-${i}`}
-            onPress={() => {
-              if (event.url) void Linking.openURL(event.url).catch(() => {});
-            }}
-            style={[styles.newsRow, i > 0 && styles.newsRowBorder]}
-            disabled={!event.url}
-          >
-            <View style={styles.newsTextBlock}>
-              <Text style={styles.newsSource} numberOfLines={1}>
-                {event.source_name}
-              </Text>
-              {event.detail ? (
-                <Text style={styles.newsDetail} numberOfLines={2}>
-                  {event.detail}
-                </Text>
-              ) : null}
-              <Text style={styles.newsDate}>{relativeDate(event.detected_at)}</Text>
-            </View>
-            {event.url ? (
-              <Ionicons name="open-outline" size={14} color={colors.faint} />
-            ) : null}
-          </Pressable>
-        ))}
-      </View>
-    );
-
   const initialLoading = loading && sessions === null && bookmarks === null;
 
   return (
@@ -229,7 +187,7 @@ export default function HistoryScreen() {
           <Text style={styles.mutedText}>Chargement…</Text>
         </View>
       ) : segment === "sessions" ? (
-        !sessions || (sessions.length === 0 && events.length === 0) ? (
+        !sessions || sessions.length === 0 ? (
           <View style={styles.centerFill}>
             <Ionicons name="time-outline" size={32} color={colors.faint} />
             <Text style={styles.mutedText}>Aucune conversation pour le moment.</Text>
@@ -241,7 +199,6 @@ export default function HistoryScreen() {
             contentContainerStyle={styles.list}
             refreshing={loading}
             onRefresh={reload}
-            ListHeaderComponent={nouveautesCard}
             renderItem={({ item }) => {
               const active = item.session_id === sessionId;
               const deleting = deletingId === item.session_id;
@@ -403,29 +360,6 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   itemTitleActive: { color: colors.ink, fontWeight: "500" },
   itemMeta: { fontSize: 11, color: colors.muted, marginTop: 2 },
   deleteButton: { padding: 12 },
-  newsCard: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceElevated,
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 6,
-    gap: 4,
-  },
-  newsHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 2 },
-  newsTitle: {
-    fontSize: 12,
-    fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    color: colors.accent,
-  },
-  newsRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6 },
-  newsRowBorder: { borderTopWidth: 1, borderTopColor: colors.border },
-  newsTextBlock: { flex: 1 },
-  newsSource: { fontSize: 13, fontWeight: "500", color: colors.ink },
-  newsDetail: { fontSize: 12, color: colors.inkSoft, marginTop: 1 },
-  newsDate: { fontSize: 10, color: colors.faint, marginTop: 2 },
   bookmarkItem: {
     flexDirection: "row",
     alignItems: "flex-start",

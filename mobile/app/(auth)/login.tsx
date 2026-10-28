@@ -34,7 +34,7 @@ export default function LoginScreen() {
   }
 
   return (
-    <AuthShell title="Se connecter" subtitle="Assistant juridique du Burkina Faso">
+    <AuthShell title="Se connecter">
       <TextField
         label="E-mail, téléphone ou nom d'utilisateur"
         value={username}

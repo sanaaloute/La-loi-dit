@@ -56,7 +56,7 @@ export default function RegisterScreen() {
   }
 
   return (
-    <AuthShell title="Créer un compte" subtitle="Un identifiant suffit : e-mail ou numéro de téléphone.">
+    <AuthShell title="Créer un compte">
       {/* E-mail XOR téléphone (même comportement que l'application web). */}
       <View style={styles.toggle}>
         {(

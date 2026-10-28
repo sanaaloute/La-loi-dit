@@ -160,3 +160,87 @@ def test_terminal_update_emits_final_without_waiting_for_stream_cleanup():
         assert [message.role for message in memory.turns] == ["user", "assistant"]
 
     asyncio.run(scenario())
+
+
+def test_disconnected_stream_drains_persists_and_pushes_owner(monkeypatch):
+    """Client drops mid-run (phone locked): the generator drains the run,
+    persists the turn, and pushes 'answer ready' to the owner's devices only."""
+
+    class QuickGraph:
+        def astream(self, state, *, config=None, stream_mode=None):
+            async def generate():
+                yield {
+                    "citation_verification": {
+                        "final_answer": FinalAnswer(answer="Réponse prête").model_dump(mode="json")
+                    }
+                }
+
+            return generate()
+
+    class Memory:
+        def __init__(self):
+            self.turns = []
+
+        async def append_turn(self, session_id, user_id, turns):
+            self.turns.extend(turns)
+
+    class UserStore:
+        def __init__(self):
+            self.tokens = {
+                "user-1": ["ExponentPushToken[owner]"],
+                "user-2": ["ExponentPushToken[stranger]"],
+            }
+
+        async def list_push_tokens_for_user(self, user_id):
+            return list(self.tokens.get(user_id, []))
+
+        async def delete_push_token_unscoped(self, token):
+            pass
+
+    async def scenario():
+        import backend.core.push as push_module
+
+        sent: list[dict] = []
+
+        async def fake_post(messages):
+            sent.extend(messages)
+            return {"data": [{"status": "ok"} for _ in messages]}
+
+        monkeypatch.setattr(push_module, "_post", fake_post)
+
+        settings = Settings(
+            llm_provider="mock",
+            chat_run_timeout_seconds=5.0,
+            chat_heartbeat_seconds=0.05,
+            langfuse_public_key="",
+            langfuse_secret_key="",
+            push_notifications_enabled=True,
+        )
+        ctx = SimpleNamespace(
+            cache=InMemoryCache(), settings=settings, user_store=UserStore()
+        )
+        memory = Memory()
+        owner = TokenPayload(sub="user-1", role=Role.USER, exp=0, user_id="user-1")
+
+        gen = _stream_events(
+            QuickGraph(),
+            initial_state("question", session_id="s-1"),
+            ChatRequest(query="question", session_id="s-1"),
+            owner,
+            settings,
+            memory=memory,
+            ctx=ctx,
+        )
+        # One frame arrives, then the connection drops like a locked phone's
+        # does: closing the generator throws GeneratorExit at the open yield.
+        first = await gen.__anext__()
+        assert first.startswith("data: ")
+        await gen.aclose()
+
+        # The drained run persisted the turn so the client can recover it...
+        assert [message.role for message in memory.turns] == ["user", "assistant"]
+        # ...and only the asking user's devices were notified.
+        assert [message["to"] for message in sent] == ["ExponentPushToken[owner]"]
+        assert sent[0]["data"] == {"kind": "chat_answer", "session_id": "s-1"}
+
+    asyncio.run(scenario())

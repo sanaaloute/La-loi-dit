@@ -358,14 +358,18 @@ let refreshInFlight: Promise<string | null> | null = null;
 
 async function requestRefreshWithToken(refreshToken: string): Promise<string | null> {
   try {
-    const res = await fetch(apiUrl("/auth/refresh"), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Device-Id": await getDeviceId(),
+    const res = await fetchWithTimeout(
+      apiUrl("/auth/refresh"),
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Device-Id": await getDeviceId(),
+        },
+        body: JSON.stringify({ refresh_token: refreshToken }),
       },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
+      REQUEST_TIMEOUT_MS,
+    );
     if (!res.ok) {
       if (res.status === 401) {
         clearToken();
@@ -385,13 +389,17 @@ async function requestRefreshWithToken(refreshToken: string): Promise<string | n
 
 async function requestRefreshLegacy(accessToken: string): Promise<string | null> {
   try {
-    const res = await fetch(apiUrl("/auth/refresh"), {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "X-Device-Id": await getDeviceId(),
+    const res = await fetchWithTimeout(
+      apiUrl("/auth/refresh"),
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "X-Device-Id": await getDeviceId(),
+        },
       },
-    });
+      REQUEST_TIMEOUT_MS,
+    );
     if (!res.ok) {
       if (res.status === 401) {
         clearToken();
@@ -454,6 +462,34 @@ export function ensureFreshToken(): Promise<string | null> {
 // Core fetch wrapper
 // ---------------------------------------------------------------------------
 
+// The production ingress is a Cloudflare tunnel whose edge connections
+// occasionally stall (a hung request used to freeze the login flow for
+// minutes). Cap every call and retry the safe ones once — a recovered tunnel
+// answers the retry in ~2 s instead of the user staring at a spinner.
+const REQUEST_TIMEOUT_MS = 25_000;
+
+/** Paths safe to replay when the first attempt dies without a response:
+ * GETs are read-only; token/refresh simply re-issue the same session. */
+const RETRYABLE_POST_PATHS = ["/auth/token", "/auth/refresh"];
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  if (init.signal) {
+    // The caller drives its own deadline (e.g. transcription's 120 s budget).
+    return fetch(url, init);
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 interface ApiFetchOptions extends RequestInit {
   token?: string | null;
 }
@@ -478,10 +514,18 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}): Pro
     ...(await baseHeaders(token)),
     ...((fetchOptions.headers as Record<string, string> | undefined) ?? {}),
   };
-  const res = await fetch(apiUrl(path), {
-    ...fetchOptions,
-    headers,
-  });
+  const url = apiUrl(path);
+  const method = (fetchOptions.method ?? "GET").toUpperCase();
+  const retryable =
+    method === "GET" || RETRYABLE_POST_PATHS.some((p) => path.startsWith(p));
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(url, { ...fetchOptions, headers }, REQUEST_TIMEOUT_MS);
+  } catch (firstErr) {
+    if (!retryable) throw firstErr;
+    // The tunnel hiccup killed the attempt before any response: replay once.
+    res = await fetchWithTimeout(url, { ...fetchOptions, headers }, REQUEST_TIMEOUT_MS);
+  }
 
   // Try one silent refresh on 401, then replay the request. Only log out if
   // the refresh also fails.
@@ -492,10 +536,11 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}): Pro
         ...(await baseHeaders(token)),
         ...((fetchOptions.headers as Record<string, string> | undefined) ?? {}),
       };
-      const retry = await fetch(apiUrl(path), {
-        ...fetchOptions,
-        headers: retryHeaders,
-      });
+      const retry = await fetchWithTimeout(
+        url,
+        { ...fetchOptions, headers: retryHeaders },
+        REQUEST_TIMEOUT_MS,
+      );
       if (retry.status === 401) {
         clearToken();
         clearRefreshToken();
@@ -639,7 +684,9 @@ export async function getSession(sessionId: string, token?: string | null): Prom
   const res = await apiFetch(`/chat/sessions/${encodeURIComponent(sessionId)}`, { token });
   if (!res.ok) {
     const detail = await safeDetail(res);
-    throw new Error(detail ?? `Échec du chargement de la conversation (${res.status})`);
+    // ApiError (not a plain Error) so callers can tell a real 404 (session
+    // gone) from a transient failure worth retrying.
+    throw new ApiError(detail ?? `Échec du chargement de la conversation (${res.status})`, res.status);
   }
   return (await res.json()) as ChatSessionDetail;
 }

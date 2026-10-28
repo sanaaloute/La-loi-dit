@@ -198,6 +198,12 @@ Failures surface as `{"type": "error", "detail": "…"}` frames; a user stop
 surfaces as `{"type": "cancelled"}`. Responses carry `Cache-Control: no-cache`
 and `X-Accel-Buffering: no`.
 
+If the client disconnects mid-run (mobile screen lock, network drop), the
+server keeps the run alive, persists the completed turn in the session
+history, and pushes a "Réponse prête" notification to the user's devices
+(see Push). Clients recover the answer by polling
+`GET /chat/sessions/{session_id}` on resume.
+
 ### POST /api/v1/chat/cancel
 
 Stops an in-flight run: body `{"session_id": "…"}`. Cancelling raises
@@ -368,9 +374,16 @@ app. Snapshots outlive history deletion but die with the author's account.
 
 ## Push (`backend/api/routers/push.py`)
 
-Device tokens for "Nouveautés juridiques" alerts, delivered via the Expo Push
-API when the freshness loop detects a change (`LEGAL_AI_PUSH_NOTIFICATIONS_ENABLED=true`,
-sender: `backend/core/push.py`; dead tokens pruned on DeviceNotRegistered).
+Device tokens for two alert kinds, delivered via the Expo Push API
+(`LEGAL_AI_PUSH_NOTIFICATIONS_ENABLED=true`, sender: `backend/core/push.py`;
+dead tokens pruned on DeviceNotRegistered):
+
+- "Nouveautés juridiques" broadcasts to every registered device when the
+  freshness loop detects a change;
+- "Réponse prête" (`data: {kind: "chat_answer", session_id}`) to the asking
+  user's devices only, when a chat run completes after the client
+  disconnected (locked phone, app killed). The answer text never appears in
+  the notification; the app loads it from the session history on tap.
 
 ### POST /api/v1/push/token
 

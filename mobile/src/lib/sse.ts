@@ -69,14 +69,42 @@ export async function streamChat(
   let buffer = "";
   let sawFinal = false;
 
+  // Aborting a suspended fetch does NOT reliably reject a pending body read
+  // (expo/fetch keeps it hanging once headers are in), so every read races
+  // the abort signal explicitly — the app-resume handler aborts the stream
+  // when the OS killed the socket while the phone was locked, and a hung
+  // read here is what made the answer never come back.
+  const abortRead = (cancel: () => void, reject: (err: Error) => void) => () => {
+    cancel();
+    const err = new Error("Flux interrompu (application suspendue).");
+    err.name = "AbortError";
+    reject(err);
+  };
+
   let silenceTimer: ReturnType<typeof setTimeout> | undefined;
   const readChunk = (): Promise<ReadableStreamReadResult<Uint8Array>> =>
     new Promise((resolve, reject) => {
+      const onAbort = abortRead(() => void reader.cancel().catch(() => {}), reject);
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
       silenceTimer = setTimeout(() => {
+        signal?.removeEventListener("abort", onAbort);
         void reader.cancel().catch(() => {});
         reject(new Error("La connexion au serveur s'est interrompue (aucune donnée reçue)."));
       }, SILENCE_TIMEOUT_MS);
-      reader.read().then(resolve, reject);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      reader.read().then(
+        (result) => {
+          signal?.removeEventListener("abort", onAbort);
+          resolve(result);
+        },
+        (err: unknown) => {
+          signal?.removeEventListener("abort", onAbort);
+          reject(err instanceof Error ? err : new Error(String(err)));
+        },
+      );
     });
 
   try {

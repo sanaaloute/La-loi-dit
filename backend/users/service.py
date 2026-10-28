@@ -626,6 +626,23 @@ class UserStore:
             rows = (await session.execute(select(t.c.token))).all()
         return [r.token for r in rows]
 
+    async def list_push_tokens_for_user(self, user_id: str) -> list[str]:
+        """Expo push tokens of one user ([] when DB down).
+
+        Private events (a chat answer ready after the app was suspended) must
+        reach only the asking user's devices — never the whole fleet.
+        """
+        if not user_id or not await self._ensure_db():
+            return []
+        from sqlalchemy import select
+
+        t = TABLES["push_tokens"]
+        async with self._session_factory() as session:
+            rows = (
+                await session.execute(select(t.c.token).where(t.c.user_id == user_id))
+            ).all()
+        return [r.token for r in rows]
+
     # ------------------------------------------------------------------
     # Token metering (per-day usage rows)
     # ------------------------------------------------------------------

@@ -1,8 +1,10 @@
-// Push notifications for legal-news alerts ("Nouveautés juridiques").
-// The Expo push token is registered with the backend (POST /push/token) once
-// signed in and unregistered (DELETE /push/token) on logout. Everything is
-// best-effort: missing permissions, a simulator without push support, or an
-// unreachable backend must never crash or block the app.
+// Push notifications: legal-news alerts ("Nouveautés juridiques") and
+// answer-ready alerts for chat runs that finished while the phone was
+// locked. The Expo push token is registered with the backend
+// (POST /push/token) once signed in and unregistered (DELETE /push/token)
+// on logout. Everything is best-effort: missing permissions, a simulator
+// without push support, or an unreachable backend must never crash or
+// block the app.
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
@@ -20,8 +22,10 @@ Notifications.setNotificationHandler({
   }),
 });
 
-// Android channel carrying the legal-news alerts.
-const ANDROID_CHANNEL_ID = "nouveautes";
+// Android channels: legal-news alerts and answer-ready alerts (a chat run
+// that finished while the phone was locked).
+const ANDROID_NEWS_CHANNEL_ID = "nouveautes";
+const ANDROID_ANSWERS_CHANNEL_ID = "reponses";
 
 // Last token sent to the backend, kept so logout can delete it without
 // re-fetching (permissions may have been revoked in the meantime).
@@ -34,8 +38,12 @@ let currentToken: string | null = null;
  */
 export async function registerForPushNotifications(): Promise<string | null> {
   if (Platform.OS === "android") {
-    await Notifications.setNotificationChannelAsync(ANDROID_CHANNEL_ID, {
+    await Notifications.setNotificationChannelAsync(ANDROID_NEWS_CHANNEL_ID, {
       name: "Nouveautés juridiques",
+      importance: Notifications.AndroidImportance.HIGH,
+    });
+    await Notifications.setNotificationChannelAsync(ANDROID_ANSWERS_CHANNEL_ID, {
+      name: "Réponses",
       importance: Notifications.AndroidImportance.HIGH,
     });
   }

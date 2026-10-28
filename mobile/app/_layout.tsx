@@ -1,5 +1,5 @@
 import React from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Linking, StyleSheet, Text, View } from "react-native";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -7,6 +7,7 @@ import * as Notifications from "expo-notifications";
 import { useEffect, useMemo } from "react";
 import { AuthProvider, useAuth } from "../src/lib/auth";
 import { getPreferences } from "../src/lib/api";
+import { chatEngine } from "../src/lib/chat";
 import { hasOnboarded } from "../src/lib/persona";
 import { syncPushToken } from "../src/lib/push";
 import type { ThemeColors } from "../src/theme";
@@ -43,11 +44,27 @@ function AuthGate() {
     void syncPushToken().catch(() => {});
   }, [status]);
 
-  // A tap on a notification (including the one that cold-started the app)
-  // opens the History tab, where the "Nouveautés" card lives.
+  // A tap on a notification (including the one that cold-started the app):
+  // an answer-ready push opens its conversation on the chat tab; a legal-news
+  // alert opens the source article.
   useEffect(() => {
-    const redirect = () => router.push("/history");
-    if (Notifications.getLastNotificationResponse()) redirect();
+    const redirect = (response: Notifications.NotificationResponse | null) => {
+      if (!response) return;
+      const data = response.notification.request.content.data as Record<string, unknown>;
+      if (data?.kind === "chat_answer" && typeof data.session_id === "string") {
+        // loadSession is a no-op while a run is busy (the resume recovery is
+        // already polling this very session); the navigation alone lands the
+        // user on the chat tab either way.
+        void chatEngine.loadSession(data.session_id).then(() => router.navigate("/"));
+        return;
+      }
+      if (typeof data?.url === "string" && data.url) {
+        void Linking.openURL(data.url).catch(() => {});
+        return;
+      }
+      router.push("/history");
+    };
+    redirect(Notifications.getLastNotificationResponse());
     const subscription = Notifications.addNotificationResponseReceivedListener(redirect);
     return () => subscription.remove();
   }, [router]);

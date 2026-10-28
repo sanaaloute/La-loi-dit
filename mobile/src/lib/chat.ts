@@ -353,7 +353,12 @@ export class ChatEngine {
     try {
       const detail = await getSession(id);
       setSessionId(detail.session_id);
-      this.patch({ messages: mapHistoryMessages(detail), sessionId: detail.session_id });
+      this.patch({
+        messages: mapHistoryMessages(detail),
+        sessionId: detail.session_id,
+        historyLoading: false,
+      });
+      await this.reconnectIfRunInFlight(detail.session_id, detail);
     } catch (err) {
       this.failWith(err instanceof Error ? `Erreur : ${err.message}` : "Une erreur est survenue.");
     } finally {
@@ -365,8 +370,11 @@ export class ChatEngine {
    * Restore the active conversation after an app restart: the session id
    * survives in the secure store but the messages live only in the backend.
    * Only the conversation found in storage at engine creation may be
-   * reloaded — never a session created later by the user. A session that
-   * cannot be read (deleted elsewhere, expired run…) is dropped silently.
+   * reloaded — never a session created later by the user. A 404 (session
+   * deleted elsewhere) drops the id silently; a transient read failure keeps
+   * it so the next launch retries. When the restored history ends on an
+   * unanswered question — the app was killed mid-run — the engine reconnects
+   * to the still-running backend job and polls until the answer lands.
    */
   async restoreSession(): Promise<void> {
     if (this.mountSessionId === undefined) {
@@ -379,12 +387,53 @@ export class ChatEngine {
     this.patch({ historyLoading: true });
     try {
       const detail = await getSession(sid);
-      this.patch({ messages: mapHistoryMessages(detail) });
-    } catch {
-      setSessionId(null);
-      this.patch({ sessionId: null });
+      this.patch({ messages: mapHistoryMessages(detail), historyLoading: false });
+      await this.reconnectIfRunInFlight(sid, detail);
+    } catch (err) {
+      // Only a 404 means the conversation is truly gone. A transient read
+      // failure (network not yet back after an unlock, server restart) keeps
+      // the session id: the next app launch retries the restore instead of
+      // silently dropping the conversation — and a pending answer with it.
+      if (err instanceof ApiError && err.status === 404) {
+        setSessionId(null);
+        this.patch({ sessionId: null });
+      }
     } finally {
       this.patch({ historyLoading: false });
+    }
+  }
+
+  /**
+   * Reconnect to a run that outlived the app: the OS can kill the process
+   * while the phone is locked, but the backend keeps working and persists
+   * the answer. A restored history ending on an unanswered user turn means
+   * exactly that — show the busy state again and poll until the answer
+   * lands, instead of leaving the question hanging forever.
+   */
+  private async reconnectIfRunInFlight(sid: string, detail: ChatSessionDetail): Promise<void> {
+    const msgs = detail.messages;
+    const last = msgs[msgs.length - 1];
+    if (!last || last.role !== "user" || this.stopRequested) return;
+    this.abortController = null;
+    this.resumeRecovery = false;
+    this.inFlight = { sid, sendStart: Date.now(), query: last.content };
+    this.patch({ busy: true, statuses: emptyStatuses() });
+    this.startProgressPoll();
+    try {
+      const recovered = await this.attemptRecovery(sid, Date.now(), last.content);
+      if (!recovered) {
+        if (this.stopRequested) {
+          this.interrupted();
+        } else {
+          this.failWith(
+            "La réponse n'a pas pu être récupérée (le traitement a été interrompu côté serveur). Relancez votre question.",
+          );
+        }
+      }
+    } finally {
+      this.inFlight = null;
+      this.stopProgressPoll();
+      this.patch({ busy: false });
     }
   }
 
@@ -440,10 +489,14 @@ export class ChatEngine {
           // differ from the client clock, so the text match wins).
           (preceding.content === query || Date.parse(last.created_at) >= sendStart - 5000)
         ) {
-          // The run completed server-side while we were disconnected:
-          // adopt the server history wholesale.
-          this.patch({ messages: mapHistoryMessages(detail) });
-          this.markAllDone();
+          // The run completed server-side while we were disconnected: adopt
+          // the server history wholesale — unless the user has since opened
+          // another conversation, which must never be clobbered by the old
+          // session's messages (the history list still refreshes).
+          if (this.snapshot.sessionId === sid) {
+            this.patch({ messages: mapHistoryMessages(detail) });
+            this.markAllDone();
+          }
           this.patch({ historyRefresh: this.snapshot.historyRefresh + 1 });
           return true;
         }
@@ -587,7 +640,9 @@ export class ChatEngine {
       );
       if (cancelled) this.interrupted();
     } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
+      // Classify on the signal, not the error name: fetch implementations do
+      // not all reject aborts with an "AbortError"-named error.
+      if (controller.signal.aborted || (err instanceof Error && err.name === "AbortError")) {
         if (this.resumeRecovery) {
           // Aborted by the app-resume handler: the OS killed the socket while
           // the app was suspended, but the backend drains and persists the

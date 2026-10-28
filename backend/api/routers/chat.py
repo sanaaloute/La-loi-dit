@@ -197,14 +197,40 @@ async def _cancel_run(session_id: str, ctx: Any) -> bool:
     return True
 
 
-async def _drain_run(session_id: str, task: "asyncio.Task[Any]", ctx: Any) -> None:
+async def _push_answer_ready(ctx: Any, user_id: Optional[str], session_id: str) -> None:
+    """Notify a disconnected client that its answer landed in the history.
+
+    This is the locked-phone path: the OS suspended the app, the run kept
+    going server-side and was persisted, so the user's devices get a push
+    instead of the answer dying with the stream. Never raises.
+    """
+    from backend.core.push import send_push_to_user
+
+    await send_push_to_user(
+        ctx,
+        user_id,
+        "Réponse prête",
+        "Yawoto a terminé le traitement de votre question. Touchez pour l'afficher.",
+        {"kind": "chat_answer", "session_id": session_id},
+        channel="reponses",
+    )
+
+
+async def _drain_run(
+    session_id: str, task: "asyncio.Task[Any]", ctx: Any, user_id: Optional[str] = None
+) -> None:
     """Keep a disconnected POST run registered until it finishes."""
     try:
-        await task
+        response = await task
     except asyncio.CancelledError:
         pass
     except Exception:
         logger.warning("chat run failed after client disconnect", exc_info=True)
+    else:
+        # run_query persisted the turn during the drain: the suspended client
+        # recovers it from the session history — the push tells it to look.
+        if getattr(response, "answer", None) is not None:
+            await _push_answer_ready(ctx, user_id, session_id)
     finally:
         await _unregister_run(session_id, task, ctx)
 
@@ -585,7 +611,7 @@ async def chat(
                     extra={"session_id": state.get("session_id", "")},
                 )
                 keep_registered = True
-                asyncio.ensure_future(_drain_run(state.get("session_id", ""), run_task, ctx))
+                asyncio.ensure_future(_drain_run(state.get("session_id", ""), run_task, ctx, user.user_id))
                 raise
             finally:
                 if not keep_registered:
@@ -912,6 +938,7 @@ async def _stream_events(
                 response.trace = []
             metrics.chat_latency_seconds.observe(response.latency_ms / 1000.0)
             update_trace_output(trace, _trace_output_from_response(response), settings=settings)
+            answer_persisted = False
             if memory is not None and merged.get("final_answer") is not None:
                 try:
                     await memory.append_turn(
@@ -923,6 +950,7 @@ async def _stream_events(
                             ChatMessage(role="assistant", content=response.answer.model_dump_json()),
                         ],
                     )
+                    answer_persisted = True
                     # Same long-term-memory hook as run_query (see graph.py).
                     from backend.memory.summarizer import maybe_summarize
 
@@ -954,11 +982,15 @@ async def _stream_events(
                     await answer_cache.set(payload.query, model_id, cache_payload)
             if disconnected:
                 # The run completed and was persisted after the client left;
-                # nothing more can be sent on the dead stream.
+                # nothing more can be sent on the dead stream. The suspended
+                # client (locked phone) recovers the answer from the session
+                # history on resume — the push is what tells it to look.
                 logger.info(
                     "chat stream done after client disconnect",
                     extra={"session_id": session_id, "latency_ms": response.latency_ms},
                 )
+                if answer_persisted:
+                    await _push_answer_ready(ctx, user.user_id, session_id)
                 return
             # Verified-answer playback: `delta` frames type the text out in
             # the UI; the `final` frame stays the authoritative payload.
