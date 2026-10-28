@@ -234,8 +234,10 @@ file: <audio blob>  (webm, ogg, mp3, wav, m4a, mp4 — extension or content-type
 one request (0 tokens) on the caller's daily usage.
 
 Errors: `400` unsupported format or empty file, `413` audio larger than
-`LEGAL_AI_STT_MAX_AUDIO_BYTES` (25 MB default), `503` STT not available on
-this server, `502` transcription provider failure.
+`LEGAL_AI_STT_MAX_AUDIO_BYTES` (25 MB default), `422` no usable speech in
+the clip (silent or noise-floor-only capture — the client should ask the
+user to re-record), `503` STT not available on this server, `502`
+transcription provider failure.
 
 Configuration (`backend/core/config.py`). The approved deployment explicitly
 sets `LEGAL_AI_STT_PROVIDER=faster-whisper`; STT is a separate capability and

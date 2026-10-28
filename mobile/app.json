@@ -44,6 +44,13 @@
           "microphonePermission": "Yawoto utilise le micro pour dicter vos questions juridiques."
         }
       ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Yawoto utilise le micro pour dicter vos questions juridiques.",
+          "speechRecognitionPermission": "Yawoto utilise la reconnaissance vocale pour dicter vos questions juridiques."
+        }
+      ],
       "expo-sharing",
       "expo-status-bar",
       "expo-font",

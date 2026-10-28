@@ -29,7 +29,7 @@ from typing import Any
 import litellm
 
 from backend.core.config import Settings, get_settings
-from backend.core.exceptions import STTError
+from backend.core.exceptions import NoSpeechError, STTError
 
 logger = logging.getLogger(__name__)
 
@@ -168,10 +168,22 @@ def _load_whisper_model(settings: Settings) -> Any:
     return _WHISPER_MODEL
 
 
+# Peak amplitude below which a clip is treated as silent: 1e-3 ≈ -60 dBFS.
+# Any real microphone recording — even a quiet one — sits far above this;
+# only a broken capture (no input route, lost audio session) stays under it.
+# Without the gate, Whisper "transcribes" digital silence into invented
+# subtitle credits ("Sous-titres réalisés par la communauté d'Amara.org").
+_SILENCE_PEAK = 1e-3
+
+
 def _transcribe_local(settings: Settings, audio_bytes: bytes, filename: str) -> str:
     """Blocking faster-whisper transcription (runs in a worker thread)."""
     global _WHISPER_LAST_USED
-    model = _load_whisper_model(settings)
+    # Imported here, not at module level: the whole provider is import-guarded
+    # so the platform runs unchanged when faster-whisper is not installed.
+    import numpy as np
+    from faster_whisper.audio import decode_audio
+
     # faster-whisper accepts a path (a file-like only in newer versions); a
     # temp file works across all versions and lets the decoder sniff the
     # container format from the extension. delete=False + the try/finally
@@ -182,12 +194,30 @@ def _transcribe_local(settings: Settings, audio_bytes: bytes, filename: str) -> 
     try:
         tmp.write(audio_bytes)
         tmp.close()
-        segments, _info = model.transcribe(str(tmp_path), language=settings.stt_language)
-        return "".join(segment.text for segment in segments).strip()
+        # Decode once (16 kHz mono float32): the array feeds both the silence
+        # gate and the model, so the extra pass costs nothing. The gate runs
+        # first: no point loading a hundreds-of-MB model to reject silence.
+        pcm = decode_audio(str(tmp_path))
+        if pcm.size == 0 or float(np.abs(pcm).max()) < _SILENCE_PEAK:
+            raise NoSpeechError("audio clip is effectively silent")
+        model = _load_whisper_model(settings)
+        # vad_filter drops non-speech spans (music, street noise) before
+        # decoding — the other classic trigger for invented subtitle text.
+        # The silero model is bundled in the faster-whisper wheel, so this
+        # stays fully offline.
+        segments, _info = model.transcribe(
+            pcm, language=settings.stt_language, vad_filter=True
+        )
+        text = "".join(segment.text for segment in segments).strip()
     finally:
         _WHISPER_LAST_USED = time.monotonic()
         tmp.close()
         tmp_path.unlink(missing_ok=True)
+    if not text:
+        # Audio the model could not read is the same outcome for the user as
+        # silence: nothing usable was heard — say so instead of returning "".
+        raise NoSpeechError("transcription came back empty")
+    return text
 
 
 async def _transcribe_litellm(settings: Settings, audio_bytes: bytes, filename: str) -> str:

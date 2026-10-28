@@ -33,6 +33,15 @@ class STTError(LegalAIError):
     """Audio transcription failed or the STT provider is misconfigured."""
 
 
+class NoSpeechError(STTError):
+    """The uploaded clip carries no usable speech (silence, noise floor only).
+
+    A distinct subclass so the API can answer 422 with guidance instead of a
+    generic 502 — and so Whisper never gets to hallucinate subtitle credits
+    out of digital silence.
+    """
+
+
 class AuthenticationError(LegalAIError):
     """JWT / credentials invalid."""
 

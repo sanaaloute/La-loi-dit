@@ -39,7 +39,7 @@ from backend.api.deps import get_ctx, get_graph, require_user
 from backend.core import stt
 from backend.core.answer_cache import AnswerCache, cache_identity, is_cacheable
 from backend.core.config import Settings
-from backend.core.exceptions import STTError
+from backend.core.exceptions import NoSpeechError, STTError
 from backend.core.model_router import check_budget, resolve_llm, resolve_model_entry
 from backend.core.llm import LLMClient
 from backend.core.models import ChatMessage, ChatRequest, ChatResponse, FinalAnswer, Role, parse_answer_json
@@ -1312,6 +1312,13 @@ async def chat_transcribe(
         )
     try:
         text = await stt.transcribe_audio(audio, file.filename or f"audio{ext or '.webm'}")
+    except NoSpeechError as exc:
+        # The clip held no usable speech (silent/broken capture): actionable
+        # 422, not a 502 — the fix is on the user's side, not the server's.
+        raise HTTPException(
+            status_code=422,
+            detail="Aucune voix détectée dans l'enregistrement. Parlez plus près du micro et réessayez.",
+        ) from exc
     except STTError as exc:
         raise HTTPException(
             status_code=502,
