@@ -6,7 +6,9 @@ import {
   AlertTriangle,
   ArrowUp,
   Bot,
+  Brain,
   Calendar,
+  ChevronRight,
   History,
   Loader2,
   Menu,
@@ -58,6 +60,8 @@ interface Message {
   ts?: string;
   response?: ChatResponse;
   streaming?: boolean;
+  /** Live chain-of-thought accumulated from reasoning_delta frames. */
+  thinking?: string;
   error?: boolean;
   quota?: boolean;
   feedback?: "thumbs-up" | "thumbs-down";
@@ -87,6 +91,37 @@ function emptyStatuses(): Record<string, NodeStatus> {
   const statuses: Record<string, NodeStatus> = {};
   for (const node of PIPELINE_NODES) statuses[node.id] = "pending";
   return statuses;
+}
+
+/** Collapsible chain-of-thought panel (DeepSeek/ChatGPT pattern): open while
+ * the reasoning streams in live, auto-collapses once the answer starts, and
+ * stays available — collapsed behind a tap — above the final answer. */
+function ThinkingBlock({ text, live = false }: { text: string; live?: boolean }) {
+  const [open, setOpen] = useState(live);
+  useEffect(() => {
+    if (!live) setOpen(false);
+  }, [live]);
+  return (
+    <div className="mb-2 rounded-lg border border-gray-200 bg-gray-50">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        className="flex w-full items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-500"
+      >
+        <Brain className="h-3.5 w-3.5 text-gray-400" />
+        Réflexion
+        <ChevronRight className={`h-3 w-3 transition-transform ${open ? "rotate-90" : ""}`} />
+      </button>
+      {open && (
+        <div className="max-h-48 overflow-y-auto whitespace-pre-wrap px-3 pb-2 text-xs italic leading-relaxed text-gray-500">
+          {text}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** Friendly one-line description of the step currently shown to the user. */
@@ -193,6 +228,10 @@ export default function ChatWindow() {
   // Onboarding persona: picks the starter questions of the empty screen.
   const [persona, setPersona] = useState<PersonaKey | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Auto-scroll pinning: the stream is followed only while the user stays near
+  // the bottom; scrolling up releases the follow so they can read undisturbed.
+  const pinnedRef = useRef(true);
   const abortRef = useRef<AbortController | null>(null);
   // The in-flight run (set while a question is being processed): lets the
   // page-resume handler know a stream is open and worth recovering.
@@ -209,6 +248,9 @@ export default function ChatWindow() {
   // Id of the provisional assistant message receiving `delta` frames (the
   // verified-answer playback), replaced by the full message on `final`.
   const streamMsgIdRef = useRef<string | null>(null);
+  // Chain-of-thought accumulated from reasoning_delta frames for the in-flight
+  // run; carried onto the final message so it stays readable above the answer.
+  const streamThinkingRef = useRef("");
 
   // Voice input: MediaRecorder -> POST /chat/transcribe -> text inserted into
   // the composer (never auto-sent; the user reviews it first).
@@ -281,9 +323,38 @@ export default function ChatWindow() {
     };
   }, [token]);
 
+  const prevBusyRef = useRef(false);
   useEffect(() => {
+    // Follow the streaming text instantly while pinned to the bottom; when the
+    // run finishes, bring the START of the final answer into view instead of
+    // leaving the user at the tail of the stream.
+    const justFinished = prevBusyRef.current && !busy;
+    prevBusyRef.current = busy;
+    if (busy) {
+      if (pinnedRef.current) {
+        bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+      }
+      return;
+    }
+    if (justFinished) {
+      const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+      if (lastAssistant) {
+        const target = `msg-${lastAssistant.id}`;
+        // Wait for the final answer layout to settle before scrolling.
+        setTimeout(() => {
+          document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 100);
+      }
+      return;
+    }
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, busy]);
+
+  const handleChatScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }, []);
 
   // Elapsed-time indicator while a run is in flight (helps spot a stuck node).
   const [elapsed, setElapsed] = useState(0);
@@ -358,12 +429,17 @@ export default function ChatWindow() {
     markAllDone();
     setSessionId(response.session_id);
     setSessionIdState(response.session_id);
+    // The accumulated chain-of-thought carries over to the final message so it
+    // stays readable (collapsed) above the authoritative answer.
+    const thinking = streamThinkingRef.current;
+    streamThinkingRef.current = "";
     const msg: Message = {
       id: nextId(),
       role: "assistant",
       text: response.answer.answer,
       ts: new Date().toISOString(),
       response,
+      ...(thinking ? { thinking } : {}),
     };
     // Delta playback: the provisional streaming message is REPLACED by the
     // authoritative one (no duplicate bubble).
@@ -393,8 +469,35 @@ export default function ChatWindow() {
     );
   }, []);
 
+  // Live chain-of-thought: reasoning_delta frames accumulate in the same
+  // provisional bubble (ThinkingBlock above the answer text) and in the ref
+  // that carries them onto the final message.
+  const appendReasoning = useCallback((text: string) => {
+    streamThinkingRef.current += text;
+    let id = streamMsgIdRef.current;
+    if (!id) {
+      id = nextId();
+      streamMsgIdRef.current = id;
+    }
+    const msgId = id;
+    setMessages((prev) =>
+      prev.some((m) => m.id === msgId)
+        ? prev.map((m) => (m.id === msgId ? { ...m, thinking: (m.thinking ?? "") + text } : m))
+        : [...prev, { id: msgId, role: "assistant", text: "", thinking: text, ts: new Date().toISOString(), streaming: true }],
+    );
+  }, []);
+
+  // A corrective pass rewrote the streamed draft: clear the provisional
+  // answer text (the accumulated thinking stays) so the rewrite re-streams.
+  const resetDelta = useCallback(() => {
+    const id = streamMsgIdRef.current;
+    if (!id) return;
+    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, text: "" } : m)));
+  }, []);
+
   const discardStreamingMessage = useCallback(() => {
     const id = streamMsgIdRef.current;
+    streamThinkingRef.current = "";
     if (!id) return;
     streamMsgIdRef.current = null;
     setMessages((prev) => prev.filter((m) => m.id !== id));
@@ -668,6 +771,7 @@ export default function ChatWindow() {
     const controller = new AbortController();
     abortRef.current = controller;
     streamMsgIdRef.current = null;
+    streamThinkingRef.current = "";
     resumeRecoveryRef.current = false;
     stopRequestedRef.current = false;
 
@@ -675,6 +779,7 @@ export default function ChatWindow() {
     setBusy(true);
     setStatuses(emptyStatuses());
     setTab("agents");
+    pinnedRef.current = true; // a new question re-pins the follow-the-stream scroll
     setMessages((prev) => [...prev, { id: nextId(), role: "user", text: query, ts: new Date().toISOString() }]);
 
     const request = {
@@ -706,10 +811,17 @@ export default function ChatWindow() {
             // Node started executing: show it as running in real time.
             streamed = true;
             markNodeRunning(event.node);
+          } else if (event.type === "reasoning_delta") {
+            // Live chain-of-thought from the reasoning-capable agents.
+            streamed = true;
+            appendReasoning(event.text);
           } else if (event.type === "delta") {
-            // Verified-answer playback: type the final text out progressively.
+            // Live answer tokens (or verified-answer playback on fallbacks).
             streamed = true;
             appendDelta(event.text);
+          } else if (event.type === "delta_reset") {
+            // A corrective pass rewrote the draft: clear and re-stream.
+            resetDelta();
           } else if (event.type === "final") {
             streamed = true;
             acceptResponse(event.response, streamMsgIdRef.current);
@@ -813,7 +925,7 @@ export default function ChatWindow() {
       inFlightRef.current = null;
       setBusy(false);
     }
-  }, [input, busy, sessionId, token, scenarioDate, markNodeDone, markNodeRunning, acceptResponse, appendDelta, discardStreamingMessage, attemptRecovery, failWith, quotaReached, interrupted]);
+  }, [input, busy, sessionId, token, scenarioDate, markNodeDone, markNodeRunning, acceptResponse, appendDelta, appendReasoning, resetDelta, discardStreamingMessage, attemptRecovery, failWith, quotaReached, interrupted]);
 
   function newConversation() {
     setMessages([]);
@@ -956,7 +1068,7 @@ export default function ChatWindow() {
 
         {/* Chat column */}
         <main className="flex min-w-0 flex-1 flex-col">
-          <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+          <div ref={scrollRef} onScroll={handleChatScroll} className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
             {historyLoading ? (
               <div className="flex h-full items-center justify-center gap-2 text-sm text-gray-500">
                 <Loader2 className="h-4 w-4 animate-spin text-accent" />
@@ -994,7 +1106,7 @@ export default function ChatWindow() {
               <div className="mx-auto max-w-3xl space-y-5">
                 {messages.map((msg) =>
                   msg.role === "user" ? (
-                    <div key={msg.id} className="flex justify-end gap-3">
+                    <div key={msg.id} id={`msg-${msg.id}`} className="flex justify-end gap-3">
                       <div className="max-w-[85%] rounded-2xl rounded-br-sm border border-accent/20 bg-accent/5 px-4 py-3 text-sm text-gray-900 shadow-panel sm:max-w-[75%]">
                         {msg.text}
                         {msg.ts && (
@@ -1006,7 +1118,7 @@ export default function ChatWindow() {
                       </div>
                     </div>
                   ) : (
-                    <div key={msg.id} className="flex justify-start gap-3">
+                    <div key={msg.id} id={`msg-${msg.id}`} className="flex justify-start gap-3">
                       <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-white">
                         <Bot className="h-4 w-4" />
                       </div>
@@ -1050,11 +1162,17 @@ export default function ChatWindow() {
                             <p className="text-warn-text">{msg.text}</p>
                           </div>
                         ) : msg.response ? (
-                          <AnswerView answer={msg.response.answer} />
+                          <div>
+                            {msg.thinking && <ThinkingBlock text={msg.thinking} />}
+                            <AnswerView answer={msg.response.answer} />
+                          </div>
                         ) : msg.streaming ? (
-                          <div className="whitespace-pre-wrap text-sm text-gray-700">
-                            {msg.text}
-                            <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-gray-400 align-text-bottom" />
+                          <div className="text-sm text-gray-700">
+                            {msg.thinking && <ThinkingBlock text={msg.thinking} live={msg.text.length === 0} />}
+                            <div className="whitespace-pre-wrap">
+                              {msg.text}
+                              <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-gray-400 align-text-bottom" />
+                            </div>
                           </div>
                         ) : (
                           <div className="markdown-body text-sm text-gray-700">

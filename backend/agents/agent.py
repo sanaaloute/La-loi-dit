@@ -19,7 +19,71 @@ from typing import Any, Optional
 from backend.agents.tools.base import ToolCall, ToolResult, as_function_schema, execute_tool_calls
 from backend.agents.tools.registry import TOOL_REGISTRY
 from backend.core.context import AppContext
-from backend.core.state import GraphState
+from backend.core.exceptions import LLMError
+from backend.core.state import GraphState, emit_stream_event
+
+
+#: Answer drafts are held back until this many content chars accumulated, so a
+#: draft opening like a JSON envelope or code fence is never streamed live —
+#: the corrective passes then rewrite it before anything reaches the UI.
+_ANSWER_GUARD_CHARS = 80
+
+
+async def streamed_completion(
+    llm: Any,
+    system: str,
+    user: str,
+    state: GraphState,
+    *,
+    node: str,
+    emit_answer: bool = False,
+    **kwargs: Any,
+) -> str:
+    """Complete a prompt, streaming tokens to the API layer when possible.
+
+    On streaming runs (``state["stream_queue"]`` set by the SSE/WS layer),
+    reasoning chunks are forwarded as ``reasoning_delta`` events attributed to
+    ``node``; answer chunks are forwarded as ``delta`` events only when
+    ``emit_answer`` is set (the response generator — intermediate agents'
+    content must not leak into the answer stream). Answer content is only
+    streamed once the opening chars confirm prose: a draft starting like a
+    JSON envelope (``{`` / ```` ``` ````) is suppressed so raw structured output
+    never appears in the answer bubble. Falls back to the non-streaming
+    ``complete()`` when there is no queue, no streaming support, or the stream
+    fails mid-way (a ``delta_reset`` then tells the UI to drop the partial
+    provisional text).
+    """
+    if state.get("stream_queue") is None or not hasattr(llm, "complete_stream"):
+        return await llm.complete(system, user, **kwargs)
+    parts: list[str] = []
+    pending = ""  # answer chars held back pending the prose/JSON decision
+    json_like = False  # confirmed structured draft: never stream it live
+    try:
+        async for kind, text in llm.complete_stream(system, user, **kwargs):
+            if kind == "reasoning":
+                emit_stream_event(state, "reasoning_delta", node=node, text=text)
+                continue
+            parts.append(text)
+            if not emit_answer or json_like:
+                continue
+            pending += text
+            stripped = pending.lstrip()
+            if stripped.startswith(("{", "```")):
+                # Undecided while short; confirmed JSON-ish once past the guard.
+                if len(stripped) >= _ANSWER_GUARD_CHARS:
+                    json_like = True
+                continue
+            if pending:
+                emit_stream_event(state, "delta", text=pending)
+                pending = ""
+        # Short prose answers never crossed the guard mid-stream: flush now.
+        if emit_answer and pending and not json_like:
+            emit_stream_event(state, "delta", text=pending)
+        return "".join(parts)
+    except LLMError:
+        if emit_answer:
+            emit_stream_event(state, "delta_reset")
+        return await llm.complete(system, user, **kwargs)
 
 
 class Agent(ABC):
@@ -160,9 +224,12 @@ class CompletionAgent(Agent):
 
     async def run(self, state: GraphState, ctx: AppContext) -> dict[str, Any]:
         try:
-            completion = ctx.llm.complete(
+            completion = streamed_completion(
+                ctx.llm,
                 self.system_prompt,
                 self._build_user_message(state, ctx),
+                state,
+                node=self.name,
                 temperature=ctx.settings.llm_temperature,
             )
             if self.completion_timeout_seconds is None:

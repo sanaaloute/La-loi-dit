@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from typing import Any, Optional, Type, TypeVar
+from typing import Any, AsyncIterator, Optional, Type, TypeVar
 
 import litellm
 from pydantic import BaseModel
@@ -37,22 +37,15 @@ PROVIDER_DEFAULT_API_BASES = {
     "afrikia": "https://afrikia.neobytech.net/v1",
 }
 
-# Role-to-model assignments are driven by measured accuracy on this codebase's
-# task suites (scripts/benchmark_role_models.py), not by provider labels.
-# NOTE: in production the newer models caused regressions or became unavailable:
-#   - gemma4-e4b mis-routed concrete legal questions to GENERAL;
-#   - nemotron-3-nano hung / stalled indefinitely during synthesis;
-#   - gpt-oss-20b was removed from Afrikia and had started returning empty completions.
-# Re-benchmarked 2026-10-25 (all three provider models, production prompts):
-#   - synthesis/planning: qwen2.5-7b is the ONLY viable model (3/3 grounded,
-#     4-5x faster than gemma4-e4b; nemotron 0/3);
-#   - query routing: gemma4-e4b scores 14/14 vs qwen2.5-7b 12/14 — qwen
-#     mis-routes "Que sais-tu du droit du travail ?" / "C'est quoi l'OHADA ?"
-#     to GENERAL, producing ungrounded answers, so the router role uses gemma
-#     (p50 ~1s vs 0.7s: acceptable for one call per non-shortcut question).
+# Role-to-model assignments follow the client guide's role split (routing,
+# planning, analysis & synthesis). nemotron-3-nano and gemma4-e4b are reasoning
+# models: reasoning is ON for analysis/synthesis (its ``reasoning_content``
+# streams to the chat UI) and explicitly OFF for the router, where one
+# classification call per question must stay fast. The provider caps reasoning
+# server-side at 1024 tokens, so role max_tokens cover the final answer.
 CLASSIFICATION_MODEL = "qwen2.5-7b"
 PLANNER_MODEL = "qwen2.5-7b"
-SYNTHESIS_MODEL = "qwen2.5-7b"
+SYNTHESIS_MODEL = "nemotron-3-nano"
 ROUTER_MODEL = "gemma4-e4b"
 
 ROLE_MODEL_CONFIGS: dict[str, dict[str, Any]] = {
@@ -60,6 +53,8 @@ ROLE_MODEL_CONFIGS: dict[str, dict[str, Any]] = {
         "model": ROUTER_MODEL,
         "max_tokens": 2048,
         "temperature": 0.0,
+        # Reasoning stays on (provider default): its thinking streams to the
+        # UI like every other agent's.
     },
     "classification": {
         "model": CLASSIFICATION_MODEL,
@@ -73,14 +68,17 @@ ROLE_MODEL_CONFIGS: dict[str, dict[str, Any]] = {
     },
     "analysis": {
         "model": SYNTHESIS_MODEL,
-        "max_tokens": 2048,
+        # 1024-token server reasoning cap + room for the analysis notes.
+        "max_tokens": 4096,
         "temperature": 0.2,
         "timeout_seconds": 120.0,
     },
     "synthesis": {
         "model": SYNTHESIS_MODEL,
-        "max_tokens": 4096,
-        # Near-deterministic drafting: at 0.7 the 7B model drifted — repeating
+        # Legal answers must never be truncated; reasoning is capped
+        # server-side, so this budget is essentially all answer.
+        "max_tokens": 8192,
+        # Near-deterministic drafting: at 0.7 the model drifted — repeating
         # conversation history and varying legal statements between runs.
         "temperature": 0.2,
     },
@@ -244,6 +242,93 @@ class LLMClient:
                 if attempt == 0:
                     await asyncio.sleep(2.0)
         raise LLMError(f"LLM call failed ({self.model}): {last_exc}") from last_exc
+
+    async def complete_stream(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        timeout_seconds: Optional[float] = None,
+    ) -> AsyncIterator[tuple[str, str]]:
+        """Stream one completion as ``("reasoning" | "content", text)`` deltas.
+
+        Reasoning-capable models emit their thinking as ``reasoning_content``
+        chunks ahead of the answer; other models only yield ``content``. The
+        mock provider yields its deterministic completion as a single content
+        delta so offline runs stay byte-identical. No in-stream retry: once a
+        delta has been emitted the caller owns the partial text, and on any
+        failure it falls back to :meth:`complete`.
+        """
+        if self.provider == "mock":
+            result = self._mock_complete(system, user)
+            self._record_usage(system, user, result, None)
+            if result:
+                yield ("content", result)
+            return
+        request_timeout = self.timeout_seconds if timeout_seconds is None else timeout_seconds
+        # The OpenAI client is used directly (not litellm.acompletion): with
+        # openai>=3 installed, litellm's streaming parser drops reasoning-only
+        # chunks, so reasoning_content never reached the caller (observed with
+        # litellm 1.53.1 + openai 3.31 in the Docker image).
+        from openai import AsyncOpenAI
+
+        generation = self._generation_kwargs(temperature, max_tokens)
+        request: dict[str, Any] = {
+            "model": self.model.split("/", 1)[-1],  # strip the openai/ prefix
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "stream": True,
+            # Ask for a final usage chunk.
+            "stream_options": {"include_usage": True},
+            "temperature": generation["temperature"],
+            "max_tokens": generation["max_tokens"],
+        }
+        if generation.get("reasoning_effort"):
+            request["reasoning_effort"] = generation["reasoning_effort"]
+        client = AsyncOpenAI(
+            api_key=self.api_key or "unused",
+            base_url=self.api_base or None,
+            timeout=request_timeout,
+            max_retries=0,
+        )
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        usage: Any = None
+        try:
+            stream = await asyncio.wait_for(
+                client.chat.completions.create(**request), timeout=request_timeout
+            )
+            iterator = stream.__aiter__()
+            while True:
+                try:
+                    # Per-chunk deadline: a mid-stream stall must fail the node
+                    # the same way a hung non-streaming call would.
+                    chunk = await asyncio.wait_for(iterator.__anext__(), timeout=request_timeout)
+                except StopAsyncIteration:
+                    break
+                if getattr(chunk, "usage", None):
+                    usage = chunk.usage
+                choices = getattr(chunk, "choices", None) or []
+                if not choices:
+                    continue
+                delta = getattr(choices[0], "delta", None)
+                if delta is None:
+                    continue
+                reasoning = getattr(delta, "reasoning_content", None)
+                if reasoning:
+                    reasoning_parts.append(reasoning)
+                    yield ("reasoning", reasoning)
+                content = getattr(delta, "content", None)
+                if content:
+                    content_parts.append(content)
+                    yield ("content", content)
+        except Exception as exc:
+            raise LLMError(f"LLM stream failed ({self.model}): {exc}") from exc
+        self._record_usage(system, user, "".join(content_parts) or "".join(reasoning_parts), usage)
 
     async def complete_json(self, system: str, user: str, schema: Type[T]) -> T:
         """Ask for JSON and validate against `schema`; one corrective retry (max retry = 1)."""

@@ -1,15 +1,18 @@
 """Chat router: REST, SSE streaming and WebSocket endpoints.
 
-Streaming strategy: true token-level streaming is not exposed by the graph,
-so we stream real per-node graph updates (`stream_query`, stream_mode
-"updates") as they happen and reconstruct the final `ChatResponse` from the
-accumulated node updates — the graph runs exactly once. The verified answer
-text then streams as `delta` frames (typewriter playback of the final,
-post-verification answer), and a closing `final` event carries the full
-authoritative ChatResponse. Memory persistence happens via the REST
-endpoint's `run_query` and, for SSE, after the stream finishes successfully
-(`_stream_events` appends the same user/assistant turns); the WebSocket path
-stays unpersisted, matching `stream_query`'s original contract.)
+Streaming strategy: per-node graph updates (`stream_query`, stream_mode
+"updates") flow as they happen and the final `ChatResponse` is reconstructed
+from the accumulated node updates — the graph runs exactly once. LLM tokens
+stream live: reasoning-capable nodes emit `reasoning_delta` frames and the
+response generator emits the draft answer as `delta` frames as tokens arrive
+(a corrective rewrite emits `delta_reset` first). When a run produced no live
+deltas (cache hit, direct fast path, non-stream fallback), the verified
+answer is typed out via `_answer_deltas` playback. A closing `final` event
+always carries the full authoritative ChatResponse. Memory persistence happens
+via the REST endpoint's `run_query` and, for SSE, after the stream finishes
+successfully (`_stream_events` appends the same user/assistant turns); the
+WebSocket path stays unpersisted, matching `stream_query`'s original
+contract.)
 
 All chat entry points create a Langfuse trace per request with descriptive
 names, user/session ids, feature tags, and explicit input/output. The trace
@@ -687,6 +690,32 @@ async def _pump_events(
         _RUN_PROGRESS.pop(session_id, None)
 
 
+async def _forward_stream_queue(
+    stream_queue: "asyncio.Queue[Any]", put: Any, *, live: Optional[dict[str, bool]] = None
+) -> None:
+    """Drain per-run token events (state["stream_queue"]) into the consumer.
+
+    Nodes push ("reasoning_delta" | "delta" | "delta_reset", fields) tuples via
+    emit_stream_event; `put` is the async consumer (SSE queue or WS sender).
+    `live` tracks whether answer deltas are currently authoritative (a
+    delta_reset after a corrective rewrite disables live playback).
+    """
+    try:
+        while True:
+            item = await stream_queue.get()
+            if item is None:  # sentinel: run finished
+                return
+            kind, fields = item
+            if live is not None:
+                if kind == "delta":
+                    live["active"] = True
+                elif kind == "delta_reset":
+                    live["active"] = False
+            await put(kind, fields)
+    except asyncio.CancelledError:
+        pass
+
+
 class _NodeStartHandler(AsyncCallbackHandler):
     """LangChain async callback: pushes a queue event when a graph node STARTS.
 
@@ -825,6 +854,15 @@ async def _stream_events(
         if handler is not None:
             callbacks.insert(0, handler)
         config = {"callbacks": callbacks}
+        # Live token streaming: nodes push reasoning/answer deltas into this
+        # per-run queue; the forwarder re-queues them for the consumer loop so
+        # they interleave with node updates in emission order.
+        stream_queue: asyncio.Queue[Any] = asyncio.Queue()
+        state["stream_queue"] = stream_queue
+        live: dict[str, bool] = {"active": False}
+        forwarder = asyncio.create_task(
+            _forward_stream_queue(stream_queue, lambda k, f: queue.put((k, f)), live=live)
+        )
         pump = asyncio.create_task(_pump_events(graph, state, config, queue, session_id))
         await _register_run(session_id, pump, ctx, run_id)
         logger.info("chat stream started", extra={"session_id": session_id, "query": payload.query[:80]})
@@ -857,6 +895,12 @@ async def _stream_events(
                             _merge_update(merged, update)
                         frame = _strip_trace_frame(value, include_trace)
                         yield f"data: {json.dumps({'type': 'update', **frame}, ensure_ascii=False, default=str)}\n\n"
+                    elif kind == "reasoning_delta":
+                        yield f"data: {json.dumps({'type': 'reasoning_delta', **value}, ensure_ascii=False)}\n\n"
+                    elif kind == "delta":
+                        yield f"data: {json.dumps({'type': 'delta', 'text': value.get('text', '')}, ensure_ascii=False)}\n\n"
+                    elif kind == "delta_reset":
+                        yield f"data: {json.dumps({'type': 'delta_reset'}, ensure_ascii=False)}\n\n"
                     elif kind == "node_start":
                         yield f"data: {json.dumps({'type': 'node_start', 'node': value}, ensure_ascii=False)}\n\n"
                     elif kind == "done":
@@ -909,7 +953,9 @@ async def _stream_events(
                     elif kind == "cancelled":
                         cancelled = True
                         break
-                    elif kind != "node_start":  # "error"
+                    elif kind in ("node_start", "reasoning_delta", "delta", "delta_reset"):
+                        pass  # client is gone; token frames have nowhere to go
+                    else:  # "error"
                         drain_failed = True
                         logger.warning(
                             "chat stream run failed after client disconnect: %s",
@@ -992,10 +1038,12 @@ async def _stream_events(
                 if answer_persisted:
                     await _push_answer_ready(ctx, user.user_id, session_id)
                 return
-            # Verified-answer playback: `delta` frames type the text out in
-            # the UI; the `final` frame stays the authoritative payload.
-            async for _delta in _answer_deltas(response.answer.answer):
-                yield f"data: {json.dumps({'type': 'delta', 'text': _delta}, ensure_ascii=False)}\n\n"
+            # Verified-answer playback for runs that did NOT stream live
+            # tokens (fallbacks, non-streaming path); when the answer already
+            # streamed token-by-token, only the authoritative `final` remains.
+            if not live["active"]:
+                async for _delta in _answer_deltas(response.answer.answer):
+                    yield f"data: {json.dumps({'type': 'delta', 'text': _delta}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'type': 'final', 'response': response.model_dump(mode='json')}, ensure_ascii=False)}\n\n"
             logger.info(
                 "chat stream done",
@@ -1007,6 +1055,8 @@ async def _stream_events(
             if not disconnected:
                 yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)}, ensure_ascii=False)}\n\n"
         finally:
+            stream_queue.put_nowait(None)  # release the forwarder
+            forwarder.cancel()
             await _unregister_run(session_id, pump, ctx)
             _RUN_PROGRESS.pop(session_id, None)
             if not pump.done():
@@ -1198,18 +1248,32 @@ async def ws_chat(ws: WebSocket) -> None:
                 return
 
             try:
-                async for event in stream_query(get_graph(ws), state, config=config):  # type: ignore[arg-type]
-                    update = event.get("update")
-                    if isinstance(update, dict):
-                        _merge_update(merged, update)
-                    await ws.send_json({"type": "update", **_strip_trace_frame(event, include_trace)})
+                # Same live token streaming as the SSE path.
+                stream_queue: asyncio.Queue[Any] = asyncio.Queue()
+                state["stream_queue"] = stream_queue
+                live: dict[str, bool] = {"active": False}
+
+                async def _ws_put(kind: str, fields: dict[str, Any]) -> None:
+                    await ws.send_json({"type": kind, **fields})
+
+                forwarder = asyncio.create_task(_forward_stream_queue(stream_queue, _ws_put, live=live))
+                try:
+                    async for event in stream_query(get_graph(ws), state, config=config):  # type: ignore[arg-type]
+                        update = event.get("update")
+                        if isinstance(update, dict):
+                            _merge_update(merged, update)
+                        await ws.send_json({"type": "update", **_strip_trace_frame(event, include_trace)})
+                finally:
+                    stream_queue.put_nowait(None)
+                    forwarder.cancel()
                 response = _final_response(merged, state, started, trace_id=trace_id)
                 if not include_trace:
                     response.trace = []
                 update_trace_output(trace, _trace_output_from_response(response), settings=settings)
-                # Same verified-answer playback as the SSE path.
-                async for _delta in _answer_deltas(response.answer.answer):
-                    await ws.send_json({"type": "delta", "text": _delta})
+                # Verified-answer playback only when nothing streamed live.
+                if not live["active"]:
+                    async for _delta in _answer_deltas(response.answer.answer):
+                        await ws.send_json({"type": "delta", "text": _delta})
                 await ws.send_json(
                     {"type": "final", "response": response.model_dump(mode="json")}
                 )

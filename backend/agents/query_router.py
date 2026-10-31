@@ -142,7 +142,10 @@ class QueryRouterAgent(Agent):
     """Routes guardrail-approved queries to direct, general, or retrieval."""
 
     name = "query_router"
-    llm_timeout_seconds = 10.0
+    # Reasoning is enabled (its thinking streams to the UI), so allow more than
+    # a bare completion budget; classification failures still fall back to the
+    # safe retrieval route.
+    llm_timeout_seconds = 30.0
     # Resolved through the prompt registry (backend.core.prompts.QUERY_ROUTER_SYSTEM)
     # at every access, so Settings.prompts_dir overrides apply.
     system_prompt = PromptRef("QUERY_ROUTER_SYSTEM")
@@ -162,11 +165,16 @@ class QueryRouterAgent(Agent):
 
     async def _classify(self, state: GraphState, ctx: AppContext) -> str:
         """LLM classification; every failure mode falls back to retrieval."""
+        from backend.agents.agent import streamed_completion
+
         try:
             text = await asyncio.wait_for(
-                ctx.llm.complete(
+                streamed_completion(
+                    ctx.llm,
                     self.system_prompt,
                     f"Question: {state.get('query', '')}",
+                    state,
+                    node=self.name,
                     temperature=0.0,
                 ),
                 timeout=self.llm_timeout_seconds,

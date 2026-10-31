@@ -138,6 +138,8 @@ export interface UserProfile {
   workspace_id?: string | null;
   workspace_name: string;
   features: UserFeatures;
+  /** "/api/v1/auth/me/avatar?v=…" when a photo is set, "" otherwise. */
+  avatar_url?: string;
 }
 
 export interface ChatSessionSummary {
@@ -228,7 +230,9 @@ export interface UsageResponse {
 export type StreamEvent =
   | { type: "update"; node: string; update: Record<string, unknown> }
   | { type: "node_start"; node: string }
+  | { type: "reasoning_delta"; node: string; text: string }
   | { type: "delta"; text: string }
+  | { type: "delta_reset" }
   | { type: "final"; response: ChatResponse }
   | { type: "cancelled" }
   | { type: "error"; detail: string };
@@ -817,6 +821,63 @@ export async function transcribeAudio(
     throw new ApiError(detail ?? `La transcription a échoué (${res.status})`, res.status);
   }
   return (await res.json()) as { text: string };
+}
+
+// ---------------------------------------------------------------------------
+// Profile editing (account page)
+// ---------------------------------------------------------------------------
+
+/** Update name/phone/email; the current password gates every change. */
+export async function updateMe(
+  payload: { current_password: string; name?: string; phone?: string; email?: string },
+  token?: string | null,
+): Promise<UserProfile> {
+  const res = await apiFetch("/auth/me", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    token,
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec de la mise à jour du profil (${res.status})`, res.status);
+  }
+  return (await res.json()) as UserProfile;
+}
+
+/** Change the account password after confirming the current one (204). */
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+  token?: string | null,
+): Promise<void> {
+  const res = await apiFetch("/auth/me/password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    token,
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec du changement de mot de passe (${res.status})`, res.status);
+  }
+}
+
+/** Upload the profile photo; returns its cache-busting URL. */
+export async function uploadAvatar(
+  uri: string,
+  token?: string | null,
+): Promise<{ avatar_url: string }> {
+  const form = new FormData();
+  // Same constraint as transcribeAudio: expo/fetch FormData takes Blob-like
+  // parts; the expo-file-system File carries the photo's real filename.
+  form.append("file", new File(uri) as unknown as Blob);
+  const res = await apiFetch("/auth/me/avatar", { method: "POST", body: form, token });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec de l'envoi de la photo (${res.status})`, res.status);
+  }
+  return (await res.json()) as { avatar_url: string };
 }
 
 // ---------------------------------------------------------------------------

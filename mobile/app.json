@@ -11,6 +11,7 @@
       "bundleIdentifier": "net.neobytech.yawoto",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Yawoto utilise le micro pour dicter vos questions juridiques.",
+        "NSPhotoLibraryUsageDescription": "Yawoto utilise la photothèque pour enregistrer et partager vos documents juridiques.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -49,6 +50,12 @@
         {
           "microphonePermission": "Yawoto utilise le micro pour dicter vos questions juridiques.",
           "speechRecognitionPermission": "Yawoto utilise la reconnaissance vocale pour dicter vos questions juridiques."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Yawoto accède à votre photothèque pour définir votre photo de profil."
         }
       ],
       "expo-sharing",

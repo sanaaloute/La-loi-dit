@@ -212,7 +212,9 @@ export interface UsageResponse {
 export type StreamEvent =
   | { type: "update"; node: string; update: Record<string, unknown> }
   | { type: "node_start"; node: string }
+  | { type: "reasoning_delta"; node: string; text: string }
   | { type: "delta"; text: string }
+  | { type: "delta_reset" }
   | { type: "final"; response: ChatResponse }
   | { type: "cancelled" }
   | { type: "error"; detail: string };

@@ -15,6 +15,7 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   AudioModule,
@@ -23,7 +24,6 @@ import {
   setAudioModeAsync,
   type AudioRecorder,
 } from "expo-audio";
-import AgentTimeline from "../../src/components/AgentTimeline";
 import AnswerView from "../../src/components/AnswerView";
 import CitationPanel from "../../src/components/CitationPanel";
 import EvidenceViewer from "../../src/components/EvidenceViewer";
@@ -126,7 +126,38 @@ const SUGGESTIONS = [
 /** Public web app origin — shared answer pages live under /partage/<token>. */
 const PUBLIC_WEB_ORIGIN = "https://yawoto.neobytech.net";
 
-type PanelTab = "agents" | "citations" | "preuves";
+type PanelTab = "citations" | "preuves";
+
+/** Collapsible chain-of-thought panel (DeepSeek/ChatGPT pattern): open while
+ * the reasoning streams in live, auto-collapses once the answer starts, and
+ * stays available — collapsed behind a tap — above the final answer. */
+function ThinkingBlock({
+  text,
+  live = false,
+  colors,
+  styles,
+}: {
+  text: string;
+  live?: boolean;
+  colors: ThemeColors;
+  styles: ChatStyles;
+}) {
+  const [open, setOpen] = useState(live);
+  useEffect(() => {
+    if (!live) setOpen(false);
+  }, [live]);
+  return (
+    <View style={styles.thinkingBox}>
+      <Pressable onPress={() => setOpen((v) => !v)} style={styles.thinkingHeader}>
+        <Ionicons name="bulb-outline" size={12} color={colors.muted} />
+        <Text style={styles.thinkingTitle}>Réflexion</Text>
+        <Ionicons name={open ? "chevron-down" : "chevron-forward"} size={12} color={colors.muted} />
+      </Pressable>
+      {open ? <Text style={styles.thinkingText}>{text}</Text> : null}
+    </View>
+  );
+}
+type ChatStyles = ReturnType<typeof makeStyles>;
 
 export default function ChatScreen() {
   const { token } = useAuth();
@@ -138,8 +169,12 @@ export default function ChatScreen() {
   const [input, setInput] = useState("");
   const wordCount = countWords(input);
   const [panelOpen, setPanelOpen] = useState(false);
-  const [tab, setTab] = useState<PanelTab>("agents");
+  const [tab, setTab] = useState<PanelTab>("citations");
   const listRef = useRef<FlatList<ChatMessage>>(null);
+  // Auto-scroll pinning: the stream is followed only while the user stays near
+  // the bottom; scrolling up releases the follow so they can read undisturbed.
+  const pinnedRef = useRef(true);
+  const prevBusyRef = useRef(false);
 
   // Saved answers: message id -> bookmark id (local mirror of /bookmarks).
   const [savedBookmarks, setSavedBookmarks] = useState<Record<string, string>>({});
@@ -184,11 +219,36 @@ export default function ChatScreen() {
     return () => clearInterval(id);
   }, [busy]);
 
+  // Follow the streaming text while pinned to the bottom; when the run
+  // finishes, bring the START of the final answer into view instead of leaving
+  // the user at the tail of the stream.
   useEffect(() => {
-    if (messages.length > 0) {
-      const t = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
-      return () => clearTimeout(t);
+    const justFinished = prevBusyRef.current && !busy;
+    prevBusyRef.current = busy;
+    if (messages.length === 0) return;
+    if (busy) {
+      if (pinnedRef.current) listRef.current?.scrollToEnd({ animated: false });
+      return;
     }
+    if (justFinished) {
+      let idx = -1;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === "assistant") {
+          idx = i;
+          break;
+        }
+      }
+      if (idx >= 0) {
+        const t = setTimeout(
+          () => listRef.current?.scrollToIndex({ index: idx, viewPosition: 0, animated: true }),
+          150,
+        );
+        return () => clearTimeout(t);
+      }
+      return;
+    }
+    const t = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
+    return () => clearTimeout(t);
   }, [messages, busy]);
 
   // -------------------------------------------------------------------------
@@ -518,8 +578,15 @@ export default function ChatScreen() {
   const sendDisabled = input.trim().length === 0 || wordCount > MAX_WORDS || busy;
 
   // -------------------------------------------------------------------------
-  // Answer actions: bookmark toggle + public share link
+  // Answer actions: copy, bookmark toggle + public share link
   // -------------------------------------------------------------------------
+
+  // Copy the answer text to the clipboard (the main thing users want when
+  // tapping an answer; details stay behind the "Détails" button).
+  async function copyAnswer(text: string) {
+    await Clipboard.setStringAsync(text);
+  }
+
   async function toggleBookmark(msg: ChatMessage, response: ChatResponse) {
     if (bookmarkBusyId) return;
     const existingId = savedBookmarks[msg.id];
@@ -577,7 +644,7 @@ export default function ChatScreen() {
       return (
         <View style={styles.userRow}>
           <View style={styles.userBubble}>
-            <Text style={styles.userText}>{msg.text}</Text>
+            <Text style={styles.userText} selectable>{msg.text}</Text>
             {msg.ts ? <Text style={styles.userTime}>{formatMessageTime(msg.ts)}</Text> : null}
           </View>
         </View>
@@ -591,13 +658,7 @@ export default function ChatScreen() {
           <Ionicons name="scale" size={15} color="#fff" />
         </View>
         <Pressable
-          onPress={() => {
-            chatEngine.selectMessage(msg.id);
-            if (msg.response) {
-              setTab("citations");
-              setPanelOpen(true);
-            }
-          }}
+          onPress={() => chatEngine.selectMessage(msg.id)}
           style={[
             styles.assistantBubble,
             msg.error && styles.errorBubble,
@@ -616,11 +677,26 @@ export default function ChatScreen() {
               <Text style={styles.quotaText}>{msg.text}</Text>
             </View>
           ) : response ? (
-            <AnswerView answer={response.answer} />
+            <View>
+              {msg.thinking ? (
+                <ThinkingBlock text={msg.thinking} colors={colors} styles={styles} />
+              ) : null}
+              <AnswerView answer={response.answer} />
+            </View>
           ) : msg.streaming ? (
-            <View style={styles.streamingWrap}>
-              <Text style={styles.streamingText}>{msg.text}</Text>
-              <View style={styles.cursor} />
+            <View>
+              {msg.thinking ? (
+                <ThinkingBlock
+                  text={msg.thinking}
+                  live={msg.text.length === 0}
+                  colors={colors}
+                  styles={styles}
+                />
+              ) : null}
+              <View style={styles.streamingWrap}>
+                <Text style={styles.streamingText} selectable>{msg.text}</Text>
+                <View style={styles.cursor} />
+              </View>
             </View>
           ) : (
             <Markdown>{msg.text}</Markdown>
@@ -628,6 +704,14 @@ export default function ChatScreen() {
           {msg.ts ? <Text style={styles.assistantTime}>{formatMessageTime(msg.ts)}</Text> : null}
           {response ? (
             <View style={styles.actionsRow}>
+              <Pressable
+                onPress={() => void copyAnswer(response.answer.answer)}
+                style={styles.actionButton}
+                accessibilityLabel="Copier la réponse"
+              >
+                <Ionicons name="copy-outline" size={14} color={colors.muted} />
+                <Text style={styles.actionText}>Copier</Text>
+              </Pressable>
               <Pressable
                 onPress={() => {
                   chatEngine.selectMessage(msg.id);
@@ -716,16 +800,6 @@ export default function ChatScreen() {
         <Text style={styles.headerTitle}>Yawoto</Text>
         <View style={styles.headerActions}>
           <Pressable
-            onPress={() => {
-              setTab("agents");
-              setPanelOpen(true);
-            }}
-            style={styles.headerButton}
-            accessibilityLabel="Détails de la réponse"
-          >
-            <Ionicons name="analytics-outline" size={18} color={colors.inkSoft} />
-          </Pressable>
-          <Pressable
             onPress={() => chatEngine.newConversation()}
             style={styles.newChatButton}
             accessibilityRole="button"
@@ -786,6 +860,19 @@ export default function ChatScreen() {
             keyExtractor={(m) => m.id}
             renderItem={({ item }) => renderMessage(item)}
             contentContainerStyle={styles.messageList}
+            onScroll={(e) => {
+              const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+              pinnedRef.current =
+                contentOffset.y + layoutMeasurement.height >= contentSize.height - 100;
+            }}
+            scrollEventThrottle={100}
+            onScrollToIndexFailed={({ index }) => {
+              // Layout not ready yet: retry once after the next frames.
+              setTimeout(
+                () => listRef.current?.scrollToIndex({ index, viewPosition: 0, animated: true }),
+                300,
+              );
+            }}
             ListFooterComponent={
               busy ? (
                 <View style={styles.busyRow}>
@@ -878,6 +965,7 @@ export default function ChatScreen() {
                   onPress={() => {
                     const q = input;
                     setInput("");
+                    pinnedRef.current = true; // a new question re-pins the follow-the-stream scroll
                     void chatEngine.send(q);
                   }}
                   disabled={sendDisabled}
@@ -920,7 +1008,6 @@ export default function ChatScreen() {
           <View style={styles.sheetTabs}>
             {(
               [
-                { id: "agents", label: "Agents" },
                 { id: "citations", label: "Citations" },
                 { id: "preuves", label: "Preuves" },
               ] as { id: PanelTab; label: string }[]
@@ -940,7 +1027,6 @@ export default function ChatScreen() {
             data={[null]}
             renderItem={() => (
               <View>
-                {tab === "agents" && <AgentTimeline statuses={statuses} active={busy} />}
                 {tab === "citations" && <CitationPanel citations={selectedAnswer?.citations ?? []} />}
                 {tab === "preuves" && <EvidenceViewer evidence={selectedAnswer?.evidence ?? []} />}
                 {selectedMessage?.response && conversationItems.length > 0 && (
@@ -1068,6 +1154,16 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   quotaHint: { fontSize: 11, color: colors.warnText, opacity: 0.8 },
   streamingWrap: { flexDirection: "row", flexWrap: "wrap", alignItems: "flex-end" },
   streamingText: { fontSize: 14, color: colors.inkSoft, lineHeight: 21 },
+  thinkingBox: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    marginBottom: 6,
+    overflow: "hidden",
+  },
+  thinkingHeader: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 5 },
+  thinkingTitle: { fontSize: 11, fontWeight: "600", color: colors.muted },
+  thinkingText: { fontSize: 11, fontStyle: "italic", color: colors.muted, lineHeight: 16, paddingHorizontal: 8, paddingBottom: 6 },
   cursor: { width: 2, height: 16, backgroundColor: colors.faint, marginLeft: 2 },
   assistantTime: { fontSize: 10, color: colors.faint, marginTop: 6 },
   actionsRow: {

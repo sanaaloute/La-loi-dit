@@ -30,6 +30,8 @@ export interface ChatMessage {
   ts?: string;
   response?: ChatResponse;
   streaming?: boolean;
+  /** Live chain-of-thought accumulated from reasoning_delta frames. */
+  thinking?: string;
   error?: boolean;
   quota?: boolean;
   feedback?: "thumbs-up" | "thumbs-down";
@@ -140,6 +142,9 @@ export class ChatEngine {
   // Id of the provisional assistant message receiving `delta` frames (the
   // verified-answer playback), replaced by the full message on `final`.
   private streamMsgId: string | null = null;
+  // Chain-of-thought accumulated from reasoning_delta frames for the in-flight
+  // run; carried onto the final message so it stays readable above the answer.
+  private streamThinking = "";
   private progressPoll: ReturnType<typeof setInterval> | null = null;
   private appStateSubscription: { remove: () => void } | null = null;
 
@@ -232,12 +237,17 @@ export class ChatEngine {
   private acceptResponse(response: ChatResponse, replaceId?: string | null): void {
     this.markAllDone();
     setSessionId(response.session_id);
+    // The accumulated chain-of-thought carries over to the final message so it
+    // stays readable (collapsed) above the authoritative answer.
+    const thinking = this.streamThinking;
+    this.streamThinking = "";
     const msg: ChatMessage = {
       id: nextId(),
       role: "assistant",
       text: response.answer.answer,
       ts: new Date().toISOString(),
       response,
+      ...(thinking ? { thinking } : {}),
     };
     // Delta playback: the provisional streaming message is REPLACED by the
     // authoritative one (no duplicate bubble).
@@ -273,8 +283,47 @@ export class ChatEngine {
     this.patch({ messages });
   }
 
+  // Live chain-of-thought: reasoning_delta frames accumulate in the same
+  // provisional bubble and in the field that carries them onto the final
+  // message.
+  private appendReasoning(text: string): void {
+    this.streamThinking += text;
+    let id = this.streamMsgId;
+    if (!id) {
+      id = nextId();
+      this.streamMsgId = id;
+    }
+    const msgId = id;
+    const prev = this.snapshot.messages;
+    const messages = prev.some((m) => m.id === msgId)
+      ? prev.map((m) => (m.id === msgId ? { ...m, thinking: (m.thinking ?? "") + text } : m))
+      : [
+          ...prev,
+          {
+            id: msgId,
+            role: "assistant" as const,
+            text: "",
+            thinking: text,
+            ts: new Date().toISOString(),
+            streaming: true,
+          },
+        ];
+    this.patch({ messages });
+  }
+
+  // A corrective pass rewrote the streamed draft: clear the provisional
+  // answer text (the accumulated thinking stays) so the rewrite re-streams.
+  private resetDelta(): void {
+    const id = this.streamMsgId;
+    if (!id) return;
+    this.patch({
+      messages: this.snapshot.messages.map((m) => (m.id === id ? { ...m, text: "" } : m)),
+    });
+  }
+
   private discardStreamingMessage(): void {
     const id = this.streamMsgId;
+    this.streamThinking = "";
     if (!id) return;
     this.streamMsgId = null;
     this.patch({ messages: this.snapshot.messages.filter((m) => m.id !== id) });
@@ -341,6 +390,7 @@ export class ChatEngine {
     this.abortController?.abort();
     this.inFlight = null;
     this.streamMsgId = null;
+    this.streamThinking = "";
     this.restored = false;
     this.mountSessionId = undefined;
     this.snapshot = initialState();
@@ -577,6 +627,7 @@ export class ChatEngine {
     const controller = new AbortController();
     this.abortController = controller;
     this.streamMsgId = null;
+    this.streamThinking = "";
     this.resumeRecovery = false;
     this.stopRequested = false;
 
@@ -617,10 +668,17 @@ export class ChatEngine {
             // Node started executing: show it as running in real time.
             streamed = true;
             this.markNodeRunning(event.node);
+          } else if (event.type === "reasoning_delta") {
+            // Live chain-of-thought from the reasoning-capable agents.
+            streamed = true;
+            this.appendReasoning(event.text);
           } else if (event.type === "delta") {
-            // Verified-answer playback: type the final text out progressively.
+            // Live answer tokens (or verified-answer playback on fallbacks).
             streamed = true;
             this.appendDelta(event.text);
+          } else if (event.type === "delta_reset") {
+            // A corrective pass rewrote the draft: clear and re-stream.
+            this.resetDelta();
           } else if (event.type === "final") {
             streamed = true;
             this.acceptResponse(event.response, this.streamMsgId);

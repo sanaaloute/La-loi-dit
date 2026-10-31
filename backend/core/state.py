@@ -88,3 +88,19 @@ class GraphState(TypedDict, total=False):
     needs_more_retrieval: bool
     errors: list[str]
     trace: list[str]  # human-readable node execution trail
+
+    # --- live token streaming (optional, SSE/WS only) ---
+    # Per-run asyncio.Queue set by the streaming API layer; nodes push
+    # ("reasoning_delta" | "delta" | "delta_reset", {...}) tuples through
+    # emit_stream_event. Absent on REST runs and in tests (events dropped).
+    stream_queue: Any
+
+
+def emit_stream_event(state: GraphState, kind: str, **fields: Any) -> None:
+    """Push a live-stream event to the API layer; no-op outside streaming runs."""
+    queue = state.get("stream_queue")
+    if queue is not None:
+        try:
+            queue.put_nowait((kind, fields))
+        except Exception:
+            pass  # streaming must never break the answer path

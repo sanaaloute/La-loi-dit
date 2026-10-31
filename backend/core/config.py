@@ -416,11 +416,11 @@ class Settings(BaseSettings):
     planner_max_sub_question_tasks: int = 4  # cap on sub-question keyword tasks (doubles as retrieval branch budget: each branch is ~30-60s of embed/rerank time)
     # response generator / confidence
     answer_llm_timeout_seconds: float = 300.0
-    # Reasoning models count hidden reasoning against this budget: at 2000 the
-    # response generator intermittently got an empty completion (whole budget
-    # eaten by reasoning) and fell back to the unavailability message despite
-    # good evidence. 4096 keeps headroom for reasoning + the cited answer.
-    answer_max_tokens: int = 4096
+    # Legal answers must never be truncated. The provider caps reasoning
+    # server-side at 1024 tokens (client-guide.md), so this budget is
+    # effectively all answer; with the bounded evidence prompt (~6-7k tokens)
+    # the request stays inside the ~16k per-slot context share.
+    answer_max_tokens: int = 8192
     answer_max_excerpt_chars: int = 1000  # per-excerpt char cap; response_generator also hard-caps at 1000
     answer_child_preview_chars: int = 200  # child-chunk preview length inside a parent excerpt
     confidence_citation_weight: float = 0.6  # weight of citation accuracy in the aggregate confidence

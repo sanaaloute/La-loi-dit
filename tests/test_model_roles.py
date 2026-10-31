@@ -17,14 +17,19 @@ def test_role_clients_have_independent_generation_defaults(tmp_path):
     router = resolve_role_llm("router", base, settings)
     assert router.model == "openai/gemma4-e4b"
     assert router._generation_kwargs(None, None)["temperature"] == 0.0
+    # Reasoning stays on (provider default) so its thinking streams to the UI.
+    assert "reasoning_effort" not in router._generation_kwargs(None, None)
     assert synthesis is base
-    assert synthesis.model == "openai/qwen2.5-7b"
+    assert synthesis.model == "openai/nemotron-3-nano"
     assert synthesis._generation_kwargs(None, None)["temperature"] == 0.2
+    assert synthesis._generation_kwargs(None, None)["max_tokens"] == 8192
     assert planner.model == "openai/qwen2.5-7b"
     assert "reasoning_effort" not in planner._generation_kwargs(None, None)
     analysis = resolve_role_llm("analysis", base, settings)
+    assert analysis.model == "openai/nemotron-3-nano"
     assert analysis.timeout_seconds == 120.0
-    assert analysis._generation_kwargs(None, None)["max_tokens"] == 2048
+    assert analysis._generation_kwargs(None, None)["max_tokens"] == 4096
+    # Reasoning stays on (provider default); only the router disables it.
     assert "reasoning_effort" not in analysis._generation_kwargs(None, None)
     assert structured.usage_totals is base.usage_totals
 

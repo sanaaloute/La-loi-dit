@@ -392,10 +392,6 @@ export default function DraftScreen() {
         <Text style={styles.headerTitle}>Rédaction</Text>
       </View>
       <View style={styles.flex}>{body}</View>
-      <Text style={styles.disclaimer}>
-        Avertissement : les documents générés sont des aides à la rédaction. Ils ne constituent pas
-        un conseil juridique.
-      </Text>
     </SafeAreaView>
   );
 }
@@ -572,14 +568,4 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   },
   exportButtonText: { fontSize: 12, fontWeight: "500", color: colors.inkSoft },
   citationsCard: { padding: 0, overflow: "hidden" },
-  disclaimer: {
-    fontSize: 10,
-    color: colors.faint,
-    textAlign: "center",
-    paddingHorizontal: 24,
-    paddingVertical: 6,
-    backgroundColor: colors.surfaceElevated,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
 });

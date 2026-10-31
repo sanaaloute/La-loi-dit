@@ -1,8 +1,11 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Linking,
+  Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,19 +13,36 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
 import { useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { usageMe, type UsageResponse } from "../../src/lib/api";
+import {
+  apiUrl,
+  changePassword,
+  getPreferences,
+  putPreferences,
+  updateMe,
+  uploadAvatar,
+  usageMe,
+  type UsageResponse,
+} from "../../src/lib/api";
 import { useAuth } from "../../src/lib/auth";
 import { shortDay } from "../../src/lib/format";
-import { GOVERNMENT_DISCLAIMER, OFFICIAL_SOURCES } from "../../src/lib/legal-sources";
+import { personaLabel, PERSONA_OPTIONS, type PersonaId } from "../../src/lib/persona";
+import { getToken } from "../../src/lib/storage";
 import type { ThemeColors } from "../../src/theme";
 import { useTheme } from "../../src/theme-context";
+import { ErrorText, PasswordField, PrimaryButton, TextField } from "../../src/components/ui";
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)} M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)} k`;
   return String(n);
+}
+
+/** The backend returns avatar_url as a site-relative "/api/v1/..." path. */
+function absoluteAvatarUrl(avatarUrl: string): string {
+  return apiUrl(avatarUrl.replace(/^\/api\/v1/, ""));
 }
 
 export default function AccountScreen() {
@@ -32,6 +52,25 @@ export default function AccountScreen() {
   const [usage, setUsage] = useState<UsageResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState(false);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+
+  // Edit-profile modal
+  const [editOpen, setEditOpen] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editPersona, setEditPersona] = useState<PersonaId | null>(null);
+  const [editPassword, setEditPassword] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editBusy, setEditBusy] = useState(false);
+
+  // Password modal
+  const [pwOpen, setPwOpen] = useState(false);
+  const [pwCurrent, setPwCurrent] = useState("");
+  const [pwNew, setPwNew] = useState("");
+  const [pwConfirm, setPwConfirm] = useState("");
+  const [pwError, setPwError] = useState<string | null>(null);
+  const [pwBusy, setPwBusy] = useState(false);
 
   const reload = useCallback(() => {
     if (!token) return;
@@ -48,6 +87,17 @@ export default function AccountScreen() {
       reload();
     }, [reload]),
   );
+
+  // Current persona: shown on the card and preselected in the edit modal.
+  useEffect(() => {
+    if (!token) return;
+    getPreferences()
+      .then((res) => {
+        const p = res.persona;
+        setEditPersona(p === "etudiant" || p === "juriste" || p === "citoyen" ? p : null);
+      })
+      .catch(() => {});
+  }, [token]);
 
   // 30-day chart data: oldest first, zero-filled for display continuity.
   const chartDays = useMemo(() => {
@@ -69,6 +119,89 @@ export default function AccountScreen() {
   const maxDayTokens = Math.max(1, ...chartDays.map((d) => d.tokens));
   const todayTotal = (usage?.today.tokens_in ?? 0) + (usage?.today.tokens_out ?? 0);
   const usageRatio = usage && usage.daily_budget > 0 ? Math.min(1, todayTotal / usage.daily_budget) : 0;
+
+  const avatarUri = profile?.avatar_url ? absoluteAvatarUrl(profile.avatar_url) : null;
+  const authHeader = { Authorization: `Bearer ${getToken() ?? ""}` };
+
+  function openEdit() {
+    setEditName(profile?.name ?? "");
+    setEditPhone(profile?.phone ?? "");
+    setEditEmail(profile?.email ?? "");
+    setEditPassword("");
+    setEditError(null);
+    setEditOpen(true);
+  }
+
+  async function pickAvatar() {
+    setAvatarBusy(true);
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+      if (result.canceled || !result.assets?.[0]?.uri) return;
+      await uploadAvatar(result.assets[0].uri);
+      await refreshProfile();
+    } catch (err) {
+      Alert.alert(
+        "Photo de profil",
+        err instanceof Error ? err.message : "L'envoi de la photo a échoué.",
+      );
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
+  async function saveProfile() {
+    if (!editPassword) {
+      setEditError("Saisissez votre mot de passe actuel pour confirmer.");
+      return;
+    }
+    setEditBusy(true);
+    setEditError(null);
+    try {
+      await updateMe({
+        current_password: editPassword,
+        name: editName.trim(),
+        phone: editPhone.trim(),
+        email: editEmail.trim(),
+      });
+      await putPreferences(editPersona ? { persona: editPersona } : { persona: null });
+      await refreshProfile();
+      setEditOpen(false);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "La mise à jour a échoué.");
+    } finally {
+      setEditBusy(false);
+    }
+  }
+
+  async function savePassword() {
+    if (pwNew.length < 6) {
+      setPwError("Le nouveau mot de passe doit contenir au moins 6 caractères.");
+      return;
+    }
+    if (pwNew !== pwConfirm) {
+      setPwError("La confirmation ne correspond pas au nouveau mot de passe.");
+      return;
+    }
+    setPwBusy(true);
+    setPwError(null);
+    try {
+      await changePassword(pwCurrent, pwNew);
+      setPwOpen(false);
+      setPwCurrent("");
+      setPwNew("");
+      setPwConfirm("");
+      Alert.alert("Mot de passe", "Votre mot de passe a été modifié.");
+    } catch (err) {
+      setPwError(err instanceof Error ? err.message : "Le changement a échoué.");
+    } finally {
+      setPwBusy(false);
+    }
+  }
 
   function handleLogout() {
     Alert.alert("Se déconnecter", "Vous pourrez vous reconnecter à tout moment.", [
@@ -130,19 +263,54 @@ export default function AccountScreen() {
         {/* Profil */}
         <View style={styles.card}>
           <View style={styles.profileRow}>
-            <View style={styles.avatar}>
-              <Ionicons name="person" size={22} color="#fff" />
-            </View>
+            <Pressable
+              onPress={() => void pickAvatar()}
+              disabled={avatarBusy}
+              style={styles.avatarWrap}
+              accessibilityLabel="Changer la photo de profil"
+            >
+              {avatarUri ? (
+                <Image source={{ uri: avatarUri, headers: authHeader }} style={styles.avatarImg} />
+              ) : (
+                <View style={styles.avatar}>
+                  <Ionicons name="person" size={22} color="#fff" />
+                </View>
+              )}
+              <View style={styles.avatarBadge}>
+                {avatarBusy ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Ionicons name="camera" size={11} color="#fff" />
+                )}
+              </View>
+            </Pressable>
             <View style={styles.profileText}>
               <Text style={styles.profileName}>{profile?.name || "Sans nom"}</Text>
               <Text style={styles.profileDetail} numberOfLines={1}>
                 {profile?.email || profile?.phone || "—"}
               </Text>
               <Text style={styles.profileDetail} numberOfLines={1}>
-                {profile?.workspace_name ?? ""}
+                {personaLabel(editPersona)}
               </Text>
             </View>
+            <Pressable
+              onPress={openEdit}
+              style={styles.editButton}
+              accessibilityLabel="Modifier mes informations"
+            >
+              <Ionicons name="pencil-outline" size={16} color={colors.accent} />
+            </Pressable>
           </View>
+          <Pressable style={styles.passwordButton} onPress={() => {
+            setPwCurrent("");
+            setPwNew("");
+            setPwConfirm("");
+            setPwError(null);
+            setPwOpen(true);
+          }}>
+            <Ionicons name="key-outline" size={16} color={colors.accent} />
+            <Text style={styles.passwordButtonText}>Changer le mot de passe</Text>
+          </Pressable>
         </View>
 
         {/* Usage quotidien */}
@@ -205,23 +373,6 @@ export default function AccountScreen() {
           </Pressable>
         </View>
 
-        {/* Sources officielles et statut non gouvernemental */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Sources officielles</Text>
-          <Text style={styles.disclaimerText}>{GOVERNMENT_DISCLAIMER}</Text>
-          {OFFICIAL_SOURCES.map((source) => (
-            <Pressable
-              key={source.url}
-              style={styles.sourceRow}
-              onPress={() => void Linking.openURL(source.url).catch(() => {})}
-            >
-              <Ionicons name="link-outline" size={14} color={colors.accent} />
-              <Text style={styles.sourceLabel}>{source.label}</Text>
-              <Ionicons name="open-outline" size={12} color={colors.faint} />
-            </Pressable>
-          ))}
-        </View>
-
         {/* Actions */}
         <Pressable
           style={styles.logoutButton}
@@ -242,6 +393,97 @@ export default function AccountScreen() {
         <Text style={styles.versionText}>Yawoto pour Burkina Faso — version 1.0.1</Text>
       </ScrollView>
 
+      {/* Modification du profil */}
+      <Modal visible={editOpen} transparent animationType="slide" onRequestClose={() => setEditOpen(false)}>
+        <View style={styles.modalBackdrop}>
+          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
+            <View style={styles.sheet}>
+              <Text style={styles.sheetTitle}>Mes informations</Text>
+              <ScrollView contentContainerStyle={styles.sheetFields} keyboardShouldPersistTaps="handled">
+                <TextField label="Nom" value={editName} onChangeText={setEditName} />
+                <TextField
+                  label="Téléphone"
+                  value={editPhone}
+                  onChangeText={setEditPhone}
+                  keyboardType="phone-pad"
+                  optional
+                />
+                <TextField
+                  label="Email"
+                  value={editEmail}
+                  onChangeText={setEditEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  optional
+                />
+                <Text style={styles.fieldLabel}>Profil utilisateur</Text>
+                <View style={styles.personaRow}>
+                  {PERSONA_OPTIONS.map((option) => (
+                    <Pressable
+                      key={option.id}
+                      onPress={() => setEditPersona(option.id)}
+                      style={[styles.personaChip, editPersona === option.id && styles.personaChipActive]}
+                    >
+                      <Ionicons
+                        name={option.icon}
+                        size={13}
+                        color={editPersona === option.id ? "#fff" : colors.inkSoft}
+                      />
+                      <Text
+                        style={[
+                          styles.personaChipText,
+                          editPersona === option.id && styles.personaChipTextActive,
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <PasswordField
+                  label="Mot de passe actuel (confirmation)"
+                  value={editPassword}
+                  onChangeText={setEditPassword}
+                />
+                <ErrorText message={editError} />
+              </ScrollView>
+              <View style={styles.sheetActions}>
+                <Pressable onPress={() => setEditOpen(false)} style={styles.sheetCancel}>
+                  <Text style={styles.sheetCancelText}>Annuler</Text>
+                </Pressable>
+                <View style={styles.sheetPrimary}>
+                  <PrimaryButton title="Enregistrer" onPress={() => void saveProfile()} busy={editBusy} />
+                </View>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
+      {/* Changement de mot de passe */}
+      <Modal visible={pwOpen} transparent animationType="slide" onRequestClose={() => setPwOpen(false)}>
+        <View style={styles.modalBackdrop}>
+          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
+            <View style={styles.sheet}>
+              <Text style={styles.sheetTitle}>Changer le mot de passe</Text>
+              <View style={styles.sheetFields}>
+                <PasswordField label="Mot de passe actuel" value={pwCurrent} onChangeText={setPwCurrent} />
+                <PasswordField label="Nouveau mot de passe" value={pwNew} onChangeText={setPwNew} />
+                <PasswordField label="Confirmer le nouveau mot de passe" value={pwConfirm} onChangeText={setPwConfirm} />
+                <ErrorText message={pwError} />
+              </View>
+              <View style={styles.sheetActions}>
+                <Pressable onPress={() => setPwOpen(false)} style={styles.sheetCancel}>
+                  <Text style={styles.sheetCancelText}>Annuler</Text>
+                </Pressable>
+                <View style={styles.sheetPrimary}>
+                  <PrimaryButton title="Valider" onPress={() => void savePassword()} busy={pwBusy} />
+                </View>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -273,6 +515,7 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
     color: colors.muted,
   },
   profileRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  avatarWrap: { position: "relative" },
   avatar: {
     width: 48,
     height: 48,
@@ -281,9 +524,45 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  avatarImg: { width: 48, height: 48, borderRadius: 24 },
+  avatarBadge: {
+    position: "absolute",
+    right: -2,
+    bottom: -2,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: colors.surfaceElevated,
+  },
   profileText: { flex: 1 },
   profileName: { fontSize: 16, fontWeight: "600", color: colors.ink },
   profileDetail: { fontSize: 12, color: colors.muted, marginTop: 1 },
+  editButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  passwordButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  passwordButtonText: { fontSize: 13, fontWeight: "500", color: colors.ink },
   mutedText: { fontSize: 13, color: colors.muted },
   usageBarTrack: {
     height: 8,
@@ -322,16 +601,6 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
     paddingVertical: 10,
   },
   themeButtonText: { flex: 1, fontSize: 13, fontWeight: "500", color: colors.ink },
-  disclaimerText: { fontSize: 12, lineHeight: 17, color: colors.inkSoft },
-  sourceRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingVertical: 8,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  sourceLabel: { flex: 1, fontSize: 13, color: colors.ink },
   logoutButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -357,4 +626,39 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   },
   deleteText: { fontSize: 14, fontWeight: "500", color: colors.danger },
   versionText: { fontSize: 11, color: colors.faint, textAlign: "center", marginTop: 4 },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "flex-end",
+  },
+  sheet: {
+    backgroundColor: colors.surfaceElevated,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    padding: 20,
+    gap: 14,
+    maxHeight: "92%",
+  },
+  sheetTitle: { fontSize: 16, fontWeight: "700", color: colors.ink },
+  sheetFields: { gap: 12 },
+  fieldLabel: { fontSize: 12, fontWeight: "500", color: colors.inkSoft },
+  personaRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  personaChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  personaChipActive: { backgroundColor: colors.accent, borderColor: colors.accent },
+  personaChipText: { fontSize: 12, fontWeight: "500", color: colors.inkSoft },
+  personaChipTextActive: { color: "#fff" },
+  sheetActions: { flexDirection: "row", alignItems: "center", gap: 12 },
+  sheetCancel: { paddingVertical: 12, paddingHorizontal: 8 },
+  sheetCancelText: { fontSize: 14, fontWeight: "500", color: colors.inkSoft },
+  sheetPrimary: { flex: 1 },
 });

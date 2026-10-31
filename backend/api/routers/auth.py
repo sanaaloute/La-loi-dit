@@ -18,10 +18,12 @@ import secrets
 import time
 from typing import Any, Optional
 
-from fastapi import APIRouter, Body, HTTPException, Request, Response
+from fastapi import APIRouter, Body, HTTPException, Request, Response, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from backend.core.config import Settings
+from pathlib import Path
 from backend.core import catalog
 from backend.core.exceptions import AuthenticationError, UserAlreadyExistsError
 from backend.core.mailer import send_email
@@ -88,6 +90,29 @@ class PasswordResetConfirm(BaseModel):
     new_password: str = Field(min_length=6, max_length=200)
 
 
+class ProfileUpdate(BaseModel):
+    """Editable profile fields; the current password gates every change."""
+
+    current_password: str = Field(min_length=1, max_length=200)
+    name: Optional[str] = Field(default=None, max_length=200)
+    phone: Optional[str] = Field(default=None, max_length=32)
+    email: Optional[str] = Field(default=None, max_length=320)
+
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=1, max_length=200)
+    new_password: str = Field(min_length=6, max_length=200)
+
+
+#: Profile photos live under <data_dir>/avatars/<user_id>.<ext>; large phone
+#: photos are expected, so the cap is generous (nginx allows 100 MB).
+AVATAR_MAX_BYTES = 10 * 1024 * 1024
+AVATAR_CONTENT_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
+#: Filename-extension fallback when the upload carries no useful MIME type
+#: (the expo-file-system File part does not always set one).
+AVATAR_EXTENSIONS = {".jpg": ".jpg", ".jpeg": ".jpg", ".png": ".png", ".webp": ".webp"}
+
+
 #: Cache namespace + TTL for password-reset tokens.
 RESET_KEY_PREFIX = "pwd_reset:"
 RESET_TTL_SECONDS = 30 * 60
@@ -103,6 +128,7 @@ class MeResponse(BaseModel):
     workspace_id: str = ""
     workspace_name: str = ""
     features: dict[str, Any] = {}  # tier features from the catalog (export formats, drafting, ...)
+    avatar_url: str = ""  # /api/v1/auth/me/avatar?v=<mtime> when a photo is set
 
 
 def build_user_store(settings: Settings) -> dict[str, dict[str, Any]]:
@@ -154,6 +180,41 @@ def _db_user_store(request: Request):
     from backend.api.deps import get_ctx
 
     return getattr(get_ctx(request), "user_store", None)
+
+
+def _avatar_dir(settings: Settings) -> Path:
+    return settings.ensure_data_dir() / "avatars"
+
+
+def _avatar_file(settings: Settings, user_id: str) -> Optional[Path]:
+    """The stored photo for a user (any supported extension), else None."""
+    avatar_dir = _avatar_dir(settings)
+    for ext in AVATAR_CONTENT_TYPES.values():
+        candidate = avatar_dir / f"{user_id}{ext}"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _avatar_url(settings: Settings, user_id: str) -> str:
+    """Cache-busting URL of the caller's photo ("" when none is stored)."""
+    existing = _avatar_file(settings, user_id)
+    if existing is None:
+        return ""
+    return f"/api/v1/auth/me/avatar?v={int(existing.stat().st_mtime)}"
+
+
+async def _check_current_password(user_store: Any, record: Any, current_password: str) -> None:
+    """403 unless the current password matches the account's stored hash."""
+    identifier = record.email or record.phone
+    ok = False
+    if identifier:
+        try:
+            ok = await user_store.authenticate(identifier, current_password) is not None
+        except Exception:
+            ok = False
+    if not ok:
+        raise HTTPException(status_code=403, detail="Le mot de passe actuel est incorrect.")
 
 
 async def _token_response(
@@ -442,6 +503,7 @@ async def whoami(request: Request) -> MeResponse:
                 workspace_id=record.workspace_id,
                 workspace_name=workspace_name,
                 features=catalog.get_tier(record.tier, settings=settings).get("features", {}),
+                avatar_url=_avatar_url(settings, record.id),
             )
     # Dev-store or anonymous principal: synthesize from the token claims.
     return MeResponse(
@@ -502,6 +564,12 @@ async def delete_account(request: Request) -> Response:
     if not await user_store.delete_user(record.id):
         raise HTTPException(status_code=500, detail="account deletion failed")
     await revoke_all_sessions(record.id, getattr(ctx, "cache", None))
+    existing_avatar = _avatar_file(ctx.settings, record.id)
+    if existing_avatar is not None:
+        try:
+            existing_avatar.unlink()
+        except OSError:
+            pass  # a leftover photo must not fail the deletion
 
     # Best-effort purge of chat history + long-term memory; a failure here
     # must not resurrect the account or fail the request.
@@ -517,6 +585,110 @@ async def delete_account(request: Request) -> Response:
                 "memory purge failed for deleted account", extra={"user_id": record.id}
             )
     return Response(status_code=204)
+
+
+@router.patch("/me", response_model=MeResponse)
+async def update_profile(payload: ProfileUpdate, request: Request) -> MeResponse:
+    """Update the caller's name/phone/email, gated on the current password."""
+    from backend.api.deps import require_user
+
+    user: TokenPayload = await require_user(request)
+    if not user.user_id:
+        raise HTTPException(status_code=400, detail="only registered accounts can edit their profile")
+    user_store = _db_user_store(request)
+    if user_store is None:
+        raise HTTPException(status_code=503, detail="user store unavailable")
+    record = await user_store.get_by_id(user.user_id)
+    if record is None:
+        raise HTTPException(status_code=400, detail="only registered accounts can edit their profile")
+    await _check_current_password(user_store, record, payload.current_password)
+    try:
+        updated = await user_store.update_profile(
+            record.id,
+            name=record.name if payload.name is None else payload.name,
+            phone=record.phone if payload.phone is None else payload.phone,
+            email=record.email if payload.email is None else payload.email,
+        )
+    except ValueError as exc:
+        detail = (
+            "Cette adresse email est déjà utilisée."
+            if str(exc) == "email_taken"
+            else "Ce numéro de téléphone est déjà utilisé."
+        )
+        raise HTTPException(status_code=409, detail=detail) from exc
+    if not updated:
+        raise HTTPException(status_code=500, detail="profile update failed")
+    return await whoami(request)
+
+
+@router.post("/me/password", status_code=204)
+async def change_password(payload: PasswordChange, request: Request) -> Response:
+    """Change the caller's password after confirming the current one."""
+    from backend.api.deps import require_user
+
+    user: TokenPayload = await require_user(request)
+    if not user.user_id:
+        raise HTTPException(status_code=400, detail="only registered accounts can change password")
+    user_store = _db_user_store(request)
+    if user_store is None:
+        raise HTTPException(status_code=503, detail="user store unavailable")
+    record = await user_store.get_by_id(user.user_id)
+    if record is None:
+        raise HTTPException(status_code=400, detail="only registered accounts can change password")
+    await _check_current_password(user_store, record, payload.current_password)
+    if not await user_store.set_password(record.id, payload.new_password):
+        raise HTTPException(status_code=500, detail="password change failed")
+    return Response(status_code=204)
+
+
+@router.post("/me/avatar")
+async def upload_avatar(request: Request, file: UploadFile) -> dict[str, str]:
+    """Store the caller's profile photo (jpeg/png/webp, ≤ 10 MB)."""
+    from backend.api.deps import get_ctx, require_user
+
+    user: TokenPayload = await require_user(request)
+    if not user.user_id:
+        raise HTTPException(status_code=400, detail="only registered accounts can set a photo")
+    user_store = _db_user_store(request)
+    if user_store is None or await user_store.get_by_id(user.user_id) is None:
+        raise HTTPException(status_code=400, detail="only registered accounts can set a photo")
+    ext = AVATAR_CONTENT_TYPES.get((file.content_type or "").lower())
+    if ext is None:
+        ext = AVATAR_EXTENSIONS.get(Path(file.filename or "").suffix.lower())
+    if ext is None:
+        raise HTTPException(status_code=400, detail="Format d'image non pris en charge (jpeg, png, webp).")
+    data = await file.read()
+    if len(data) > AVATAR_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="La photo dépasse la taille maximale autorisée (10 Mo).")
+    if not data:
+        raise HTTPException(status_code=400, detail="Le fichier est vide.")
+    settings = get_ctx(request).settings
+    avatar_dir = _avatar_dir(settings)
+    avatar_dir.mkdir(parents=True, exist_ok=True)
+    # One file per user: drop any previous extension before writing.
+    for old_ext in AVATAR_CONTENT_TYPES.values():
+        old = avatar_dir / f"{user.user_id}{old_ext}"
+        if old.is_file() and old_ext != ext:
+            old.unlink()
+    target = avatar_dir / f"{user.user_id}{ext}"
+    tmp = target.with_suffix(f"{ext}.tmp")
+    tmp.write_bytes(data)
+    tmp.replace(target)
+    return {"avatar_url": _avatar_url(settings, user.user_id)}
+
+
+@router.get("/me/avatar")
+async def get_avatar(request: Request) -> FileResponse:
+    """Serve the caller's profile photo; 404 when none is stored."""
+    from backend.api.deps import get_ctx, require_user
+
+    user: TokenPayload = await require_user(request)
+    if not user.user_id:
+        raise HTTPException(status_code=404, detail="no photo")
+    existing = _avatar_file(get_ctx(request).settings, user.user_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="no photo")
+    return FileResponse(existing, headers={"Cache-Control": "no-cache"})
 
 
 @router.post("/password-reset/request", status_code=202)

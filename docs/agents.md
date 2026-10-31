@@ -44,23 +44,24 @@ list above is the exact compiled pipeline.
 ## Fixed role models
 
 Production LLM calls use the private Afrikia provider (OpenAI-compatible,
-bearer key `AFRIKIA_API_KEY`, base URL `https://afrikia.neobytech.net/v1`) with
-server-fixed assignments per role — models are placed on their measured
-strengths, not uniformly:
+bearer key `AFRIKIA_API_KEY`; base URL `https://afrikia.neobytech.net/v1`, or
+the local gateway `http://127.0.0.1:4010/v1` when the backend runs on the same
+machine as the provider) with server-fixed assignments per role — models are
+placed on their measured strengths, not uniformly:
+**Nemotron 3 Nano** (`nemotron-3-nano`) for reasoning/reflection (analysis
+role) and all user-facing synthesis, with reasoning ON — its
+`reasoning_content` streams live to the chat UI and the provider caps it
+server-side at 1024 tokens, so the answer budget is effectively all answer;
 **Qwen 2.5 7B** (`qwen2.5-7b`) for language gate, context/memory, claim
-refinement, LLM rerank scoring (classification role), retrieval planning,
-reasoning/reflection, and all user-facing synthesis;
-**gemma4-e4b** for query routing only (router role).
-The assignments come from measured accuracy on the repo's benchmark suite
-(`scripts/benchmark_role_models.py`), not provider labels. Re-benchmarked on
-2026-10-25 over all three provider models: qwen2.5-7b is the only viable
-synthesis/planning model (3/3 grounded, 4-5× faster than gemma4-e4b;
-nemotron-3-nano 0/3 synthesis, 7/14 routing), while gemma4-e4b routes
-questions best (14/14 vs 12/14 — qwen mis-routed "Que sais-tu du droit du
-travail ?" / "C'est quoi l'OHADA ?" to GENERAL, producing ungrounded answers).
-Earlier larger/newer assignments caused regressions or became unavailable
-(gpt-oss-20b was removed from Afrikia; nemotron-3-nano stalled during
-synthesis).
+refinement, LLM rerank scoring (classification role) and retrieval planning
+(no reasoning support);
+**gemma4-e4b** for query routing only (router role). Reasoning is enabled for
+both reasoning models (gemma4-e4b, nemotron-3-nano): their `reasoning_content`
+streams live to the chat UI for every agent that produces it.
+An earlier pin of analysis/synthesis to qwen2.5-7b (nemotron stalled during
+synthesis in the 2026-10-25 benchmark) was reverted once the provider added
+the server-side reasoning cap; `scripts/benchmark_role_models.py` validates
+the assignment.
 Users cannot select models, and environment role overrides or runtime catalog
 changes cannot replace these assignments. There is no external chat failover;
 daily quotas and anti-abuse rate limits still cover all role calls. The
@@ -69,11 +70,11 @@ daily quotas and anti-abuse rate limits still cover all role calls. The
 `ROLE_MODEL_CONFIGS` (`backend/core/llm.py`) is the single source for model IDs
 and role defaults: role-specific token and temperature limits — 0.0 for
 classification, 0.3 for planning, and a near-deterministic 0.2 for analysis
-and synthesis (higher temperatures made the 7B model drift: repeating
+and synthesis (higher temperatures made the model drift: repeating
 conversation history and varying legal statements between runs). Analysis is
-capped at 120 seconds and 2,048 tokens per call; synthesis keeps the larger
-answer budget (4,096 tokens). The public model catalog derives its IDs from
-the same constants.
+capped at 120 seconds and 4,096 tokens per call; synthesis keeps the larger
+answer budget (8,192 tokens, so long legal answers are never truncated). The
+public model catalog derives its IDs from the same constants.
 
 Embeddings, faster-whisper STT, OCR, semantic guardrails, and cross-encoder
 reranking are separate capabilities, not alternative chat role models.

@@ -14,7 +14,8 @@ import re
 from typing import Any, Optional
 
 from backend.agents.citation_verification import extract_citations
-from backend.agents.agent import CompletionAgent
+from backend.agents.agent import CompletionAgent, streamed_completion
+from backend.core.state import emit_stream_event
 from backend.agents.answerability import confidence_cap, detect_abstention
 from backend.agents.context_agent import format_memory_sections
 from backend.agents.coverage_auditor import audit_coverage
@@ -219,12 +220,19 @@ class ResponseGeneratorAgent(CompletionAgent):
             else {}
         )
         try:
-            text = await ctx.llm.complete(
+            # Streamed draft: reasoning and answer tokens reach the UI live;
+            # corrective passes below may still rewrite it (delta_reset then).
+            text = await streamed_completion(
+                ctx.llm,
                 system_prompt,
                 user_message,
+                state,
+                node=self.name,
+                emit_answer=True,
                 temperature=ctx.settings.llm_temperature,
                 **completion_kwargs,
             )
+            streamed_text = text
             if (
                 text.strip()
                 and state.get("ranked_evidence")
@@ -288,6 +296,12 @@ class ResponseGeneratorAgent(CompletionAgent):
                         temperature=ctx.settings.llm_temperature,
                         **completion_kwargs,
                     )
+            if text != streamed_text:
+                # A corrective pass rewrote the streamed draft: drop the
+                # provisional UI text and replay the corrected answer.
+                emit_stream_event(state, "delta_reset")
+                if text.strip():
+                    emit_stream_event(state, "delta", text=text)
         except Exception as exc:
             return self._fallback(state, f"LLM completion failed: {exc!r}")
         return self._parse_final(text, state, ctx)
@@ -337,9 +351,13 @@ class ResponseGeneratorAgent(CompletionAgent):
         errors: list[str] = []
         prompt_name = "RESPONSE_GENERAL_SYSTEM" if route == "general" else "RESPONSE_DIRECT_SYSTEM"
         try:
-            text = await ctx.llm.complete(
+            text = await streamed_completion(
+                ctx.llm,
                 get_prompt(prompt_name),
                 user_message,
+                state,
+                node=self.name,
+                emit_answer=True,
                 temperature=ctx.settings.llm_temperature,
             )
         except Exception as exc:

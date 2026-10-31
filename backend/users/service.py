@@ -425,6 +425,45 @@ class UserStore:
             await session.commit()
         return bool(result.rowcount)
 
+    async def update_profile(self, user_id: str, *, name: str, phone: str, email: str) -> bool:
+        """Update display name, phone and email (stored lowercased).
+
+        False on missing user or DB down. Raises ValueError("email_taken") /
+        ValueError("phone_taken") when the new identifier belongs to another
+        account, so the API can answer 409.
+        """
+        if not await self._ensure_db():
+            return False
+        from sqlalchemy import select, update
+
+        email = email.strip().lower()
+        phone = phone.strip()
+        t = TABLES["users"]
+        async with self._session_factory() as session:
+            if email:
+                clash = (
+                    await session.execute(
+                        select(t.c.id).where(t.c.email == email, t.c.id != user_id)
+                    )
+                ).first()
+                if clash:
+                    raise ValueError("email_taken")
+            if phone:
+                clash = (
+                    await session.execute(
+                        select(t.c.id).where(t.c.phone == phone, t.c.id != user_id)
+                    )
+                ).first()
+                if clash:
+                    raise ValueError("phone_taken")
+            result = await session.execute(
+                update(t)
+                .where(t.c.id == user_id)
+                .values(name=name.strip(), phone=phone, email=email)
+            )
+            await session.commit()
+        return bool(result.rowcount)
+
     async def delete_user(self, user_id: str) -> bool:
         """Delete an account and its rows in this store's own tables.
 
