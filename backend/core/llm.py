@@ -265,6 +265,10 @@ class LLMClient:
             result = self._mock_complete(system, user)
             self._record_usage(system, user, result, None)
             if result:
+                # A fixed reasoning chunk keeps the streaming/thinking pipeline
+                # exercised in offline runs (the real reasoning models stream
+                # their thinking ahead of the answer).
+                yield ("reasoning", "Réflexion hors ligne.")
                 yield ("content", result)
             return
         request_timeout = self.timeout_seconds if timeout_seconds is None else timeout_seconds

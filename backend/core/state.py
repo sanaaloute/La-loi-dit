@@ -94,6 +94,10 @@ class GraphState(TypedDict, total=False):
     # ("reasoning_delta" | "delta" | "delta_reset", {...}) tuples through
     # emit_stream_event. Absent on REST runs and in tests (events dropped).
     stream_queue: Any
+    # Accumulated reasoning text per agent (one "[node]\n…" entry each),
+    # attached to the answer metadata so the thinking survives stream drops
+    # and history reloads. Shared by reference across nodes.
+    thinking_log: list[str]
 
 
 def emit_stream_event(state: GraphState, kind: str, **fields: Any) -> None:

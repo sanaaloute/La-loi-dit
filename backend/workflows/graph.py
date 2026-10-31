@@ -269,6 +269,7 @@ def initial_state(
         needs_more_retrieval=False,
         errors=[],
         trace=[],
+        thinking_log=[],
     )
 
 

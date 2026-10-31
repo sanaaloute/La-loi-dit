@@ -58,9 +58,11 @@ async def streamed_completion(
     parts: list[str] = []
     pending = ""  # answer chars held back pending the prose/JSON decision
     json_like = False  # confirmed structured draft: never stream it live
+    reasoning_parts: list[str] = []
     try:
         async for kind, text in llm.complete_stream(system, user, **kwargs):
             if kind == "reasoning":
+                reasoning_parts.append(text)
                 emit_stream_event(state, "reasoning_delta", node=node, text=text)
                 continue
             parts.append(text)
@@ -79,11 +81,23 @@ async def streamed_completion(
         # Short prose answers never crossed the guard mid-stream: flush now.
         if emit_answer and pending and not json_like:
             emit_stream_event(state, "delta", text=pending)
+        _log_reasoning(state, node, reasoning_parts)
         return "".join(parts)
     except LLMError:
+        _log_reasoning(state, node, reasoning_parts)
         if emit_answer:
             emit_stream_event(state, "delta_reset")
         return await llm.complete(system, user, **kwargs)
+
+
+def _log_reasoning(state: GraphState, node: str, reasoning_parts: list[str]) -> None:
+    """Append one node's thinking to the shared log (persisted with the answer)."""
+    text = "".join(reasoning_parts).strip()
+    if not text:
+        return
+    log = state.get("thinking_log")
+    if isinstance(log, list):
+        log.append(f"[{node}]\n{text}")
 
 
 class Agent(ABC):

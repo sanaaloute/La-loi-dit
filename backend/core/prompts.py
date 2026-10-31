@@ -174,17 +174,17 @@ Respond in the user's requested language.""",
     # Prompt-level only (spec §40): complex question types get this structure.
     "RESPONSE_SECTIONS_ADDENDUM_FR": (
         "\n\nSTRUCTURE OBLIGATOIRE pour cette question — utilise exactement ces sections :\n"
-        "## Réponse\n## Fondements juridiques\n## Application\n## Points d'incertitude\n## Sources"
+        "## Réponse\n## Fondements juridiques\n## Application\n## Sources"
     ),
     "RESPONSE_SECTIONS_ADDENDUM_EN": (
         "\n\nMANDATORY STRUCTURE for this question — use exactly these sections:\n"
-        "## Answer\n## Legal basis\n## Application\n## Points of uncertainty\n## Sources"
+        "## Answer\n## Legal basis\n## Application\n## Sources"
     ),
     # Case-analysis structure and per-statement labeling (spec §31).
     "RESPONSE_CASE_ANALYSIS_ADDENDUM_FR": (
         "\n\nANALYSE DE CAS — structure et étiquetage obligatoires :\n"
         "1. Structure ta réponse avec exactement ces sections :\n"
-        "## Faits\n## Qualification juridique\n## Règles applicables\n## Application\n## Incertitudes\n## Sources\n"
+        "## Faits\n## Qualification juridique\n## Règles applicables\n## Application\n## Sources\n"
         "2. Préfixe CHAQUE affirmation de l'une de ces étiquettes :\n"
         "- [LOI] : disposition légale ou texte officiel — DOIT porter une citation [n] "
         "renvoyant à l'extrait de preuve correspondant ;\n"
@@ -195,7 +195,7 @@ Respond in the user's requested language.""",
     "RESPONSE_CASE_ANALYSIS_ADDENDUM_EN": (
         "\n\nCASE ANALYSIS — mandatory structure and labeling:\n"
         "1. Structure your answer with exactly these sections:\n"
-        "## Facts\n## Legal qualification\n## Applicable rules\n## Application\n## Uncertainties\n## Sources\n"
+        "## Facts\n## Legal qualification\n## Applicable rules\n## Application\n## Sources\n"
         "2. Prefix EVERY statement with one of these labels:\n"
         "- [LAW]: statutory text or official provision — MUST carry an [n] citation "
         "referring to the corresponding evidence excerpt;\n"

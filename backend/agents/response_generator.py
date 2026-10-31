@@ -377,7 +377,14 @@ class ResponseGeneratorAgent(CompletionAgent):
         answer = FinalAnswer(
             answer=draft,
             language=language,
-            metadata={"route": route},
+            metadata={
+                "route": route,
+                **(
+                    {"thinking": "\n\n".join(state.get("thinking_log") or [])}
+                    if state.get("thinking_log")
+                    else {}
+                ),
+            },
         )
         return {
             "final_answer": answer,
@@ -546,41 +553,9 @@ class ResponseGeneratorAgent(CompletionAgent):
             breakdown = compute_confidence_breakdown(
                 state, evidence, citation_accuracy=accuracy, coverage=coverage, settings=settings
             )
-            if coverage < settings.coverage_retry_threshold:
-                if language.startswith("en"):
-                    warnings.append(
-                        "Potentially incomplete answer: some aspects of the question are not "
-                        "covered by the indexed official sources."
-                    )
-                else:
-                    warnings.append(
-                        "Réponse potentiellement incomplète : certaines dimensions de la "
-                        "question ne sont pas couvertes par les sources indexées."
-                    )
-            unresolved = [c for c in state.get("conflicts", []) if not c.resolved]
-            if unresolved:
-                if language.startswith("en"):
-                    warnings.append(
-                        f"{len(unresolved)} conflicting source(s) could not be resolved; "
-                        "confidence reduced accordingly."
-                    )
-                else:
-                    warnings.append(
-                        f"{len(unresolved)} source(s) se contredisent sans que le conflit "
-                        "ait pu être résolu ; la confiance est réduite en conséquence."
-                    )
-            reflection = state.get("reflection")
-            if reflection is not None and not reflection.answered_all_questions:
-                if language.startswith("en"):
-                    warnings.append(
-                        "The self-review indicates that not every part of the question "
-                        "was answered."
-                    )
-                else:
-                    warnings.append(
-                        "L'auto-évaluation indique que la réponse ne couvre pas toutes "
-                        "les parties de la question."
-                    )
+            # Partial-coverage, unresolved-conflict and reflection-gap notices
+            # are intentionally not user-facing (they made answers look
+            # unreliable); they remain in trace/metadata for observability.
             confidence = compute_aggregate_confidence(
                 state,
                 evidence,
@@ -600,10 +575,21 @@ class ResponseGeneratorAgent(CompletionAgent):
             confidence_breakdown=breakdown,
             language=language,
             warnings=warnings,
-            conflicts=state.get("conflicts", []),
+            # Conflicts stay out of the user-facing answer (the cards read as
+            # errors to non-lawyers); the count remains in metadata and the
+            # full reports in the admin trace.
+            conflicts=[],
             metadata={
                 "citation_total_count": citation_total,
                 "citation_rejected_count": len(rejected),
+                "conflicts_unresolved_count": len([c for c in state.get("conflicts", []) if not c.resolved]),
+                # The agents' reasoning travels with the answer so clients that
+                # lost the stream (or reload from history) still show it.
+                **(
+                    {"thinking": "\n\n".join(state.get("thinking_log") or [])}
+                    if state.get("thinking_log")
+                    else {}
+                ),
                 **({"abstention_detected": list(abstention.matched)} if abstention.matched else {}),
                 **(
                     {"abstention_partial": True}

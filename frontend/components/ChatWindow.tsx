@@ -172,23 +172,28 @@ const PERSONA_SUGGESTIONS: Record<Exclude<PersonaKey, "autre">, string[]> = {
 };
 
 /** Map the persisted session history to UI messages (shared by loadSession
- * and the dropped-connection recovery). */function mapHistoryMessages(detail: ChatSessionDetail): Message[] {
-  return detail.messages.map((m) => ({
-    id: nextId(),
-    role: m.role,
-    text: m.role === "assistant" && m.answer ? m.answer.answer : m.content,
-    ts: m.created_at,
-    response:
-      m.role === "assistant" && m.answer
-        ? {
-            session_id: detail.session_id,
+ * and the dropped-connection recovery). The thinking persisted in the answer
+ * metadata is restored into the collapsible Réflexion block. */function mapHistoryMessages(detail: ChatSessionDetail): Message[] {
+  return detail.messages.map((m) => {
+    const thinking = m.answer?.metadata?.thinking;
+    return {
+      id: nextId(),
+      role: m.role,
+      text: m.role === "assistant" && m.answer ? m.answer.answer : m.content,
+      ts: m.created_at,
+      thinking: typeof thinking === "string" && thinking ? thinking : undefined,
+      response:
+        m.role === "assistant" && m.answer
+          ? {
+              session_id: detail.session_id,
             answer: m.answer,
             trace: [],
             latency_ms: 0,
             trace_id: "",
           }
         : undefined,
-  }));
+    };
+  });
 }
 
 /** Chat timeline timestamp: HH:MM today, DD/MM HH:MM for older messages. */

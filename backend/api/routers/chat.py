@@ -167,6 +167,16 @@ async def _watch_run(session_id: str, task: "asyncio.Task[Any]", ctx: Any) -> No
 async def _register_run(session_id: str, task: "asyncio.Task[Any]", ctx: Any, run_id: str) -> None:
     if not session_id:
         return
+    # A retry on the same session supersedes any run still draining from a
+    # disconnected stream: without this, duplicate runs pile onto the single
+    # GPU and every run crawls past its timeout.
+    previous = _RUNNING.get(session_id)
+    if previous is not None and previous is not task and not previous.done():
+        previous.cancel()
+        try:
+            await ctx.cache.set(_cancel_key(session_id), {"run_id": _run_id(previous)}, ttl=_run_ttl(ctx.settings))
+        except Exception:
+            pass
     setattr(task, "_yawoto_run_id", run_id)
     _RUNNING[session_id] = task
     await _set_run_node(session_id, run_id, None, ctx)
