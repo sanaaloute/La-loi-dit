@@ -97,9 +97,12 @@ export default function ChatScreen() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [tab, setTab] = useState<PanelTab>("citations");
   const listRef = useRef<FlatList<ChatMessage>>(null);
-  // Auto-scroll pinning: the stream is followed only while the user stays near
-  // the bottom; scrolling up releases the follow so they can read undisturbed.
-  const pinnedRef = useRef(true);
+  // Auto-scroll follow: the stream is glued to the bottom while the user stays
+  // near it. ONLY a user drag may release/re-arm it — programmatic scroll
+  // events lag behind a growing content size and read as "not at the bottom",
+  // which used to kill the follow mid-stream and hide the status line.
+  const followRef = useRef(true);
+  const draggingRef = useRef(false);
   const prevBusyRef = useRef(false);
 
   // Saved answers: message id -> bookmark id (local mirror of /bookmarks).
@@ -153,7 +156,7 @@ export default function ChatScreen() {
     prevBusyRef.current = busy;
     if (messages.length === 0) return;
     if (busy) {
-      if (pinnedRef.current) listRef.current?.scrollToEnd({ animated: false });
+      if (followRef.current) listRef.current?.scrollToEnd({ animated: false });
       return;
     }
     if (justFinished) {
@@ -331,15 +334,29 @@ export default function ChatScreen() {
                   styles={styles}
                 />
               ) : null}
-              <View style={styles.streamingWrap}>
-                <Text style={styles.streamingText} selectable>{msg.text}</Text>
-                <View style={styles.cursor} />
-              </View>
+              <Text style={styles.streamingText} selectable>{msg.text}</Text>
             </View>
           ) : (
             <Markdown>{msg.text}</Markdown>
           )}
-          {msg.ts ? <Text style={styles.assistantTime}>{formatMessageTime(msg.ts)}</Text> : null}
+          {msg.streaming && busy ? (
+            // While streaming, the workflow status takes the timestamp's seat:
+            // pinned to the bubble's bottom edge, it stays on screen as the
+            // text grows — and the time is meaningless until the answer lands.
+            <View style={[styles.busyRow, styles.streamStatus]}>
+              <ActivityIndicator size={12} color={colors.accent} />
+              <View style={styles.busyTextBlock}>
+                <Text style={styles.busyLabel} numberOfLines={1}>
+                  {currentStepLabel(statuses)}
+                </Text>
+                <Text style={styles.busySub}>
+                  Traitement en cours par les agents… ({elapsed}s)
+                </Text>
+              </View>
+            </View>
+          ) : msg.ts ? (
+            <Text style={styles.assistantTime}>{formatMessageTime(msg.ts)}</Text>
+          ) : null}
           {response ? (
             <View style={styles.actionsRow}>
               <Pressable
@@ -499,9 +516,18 @@ export default function ChatScreen() {
             renderItem={({ item }) => renderMessage(item)}
             contentContainerStyle={styles.messageList}
             onScroll={(e) => {
+              // Ignore programmatic scrolls (see followRef note): only the
+              // user's own drag decides whether the stream keeps being glued.
+              if (!draggingRef.current) return;
               const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-              pinnedRef.current =
+              followRef.current =
                 contentOffset.y + layoutMeasurement.height >= contentSize.height - 100;
+            }}
+            onScrollBeginDrag={() => {
+              draggingRef.current = true;
+            }}
+            onScrollEndDrag={() => {
+              draggingRef.current = false;
             }}
             scrollEventThrottle={100}
             onScrollToIndexFailed={({ index }) => {
@@ -511,8 +537,21 @@ export default function ChatScreen() {
                 300,
               );
             }}
+            onContentSizeChange={() => {
+              // Scroll AFTER layout: fired from the messages-update effect,
+              // scrollToEnd computes against the pre-layout content size and
+              // lands a frame short — the status footer ends up clipped under
+              // the composer. Here the size is exact, so the footer's bottom
+              // stays glued to the screen until the stream finishes.
+              if (busy && followRef.current) {
+                listRef.current?.scrollToEnd({ animated: false });
+              }
+            }}
             ListFooterComponent={
-              busy ? (
+              // Covers only the gap before the first stream frame (and the
+              // reconnect-recovery path, which has no provisional bubble):
+              // once the streaming message exists, the status lives inside it.
+              busy && !messages[messages.length - 1]?.streaming ? (
                 <View style={styles.busyRow}>
                   <ActivityIndicator size={14} color={colors.accent} />
                   <View style={styles.busyTextBlock}>
@@ -554,7 +593,7 @@ export default function ChatScreen() {
                 onPress={() => {
                   const q = input;
                   setInput("");
-                  pinnedRef.current = true; // a new question re-pins the follow-the-stream scroll
+                  followRef.current = true; // a new question re-arms the follow-the-stream scroll
                   void chatEngine.send(q);
                 }}
                 disabled={sendDisabled}
@@ -740,7 +779,6 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   quotaTitle: { fontSize: 13, fontWeight: "600", color: colors.warnText },
   quotaText: { fontSize: 13, color: colors.warnText },
   quotaHint: { fontSize: 11, color: colors.warnText, opacity: 0.8 },
-  streamingWrap: { flexDirection: "row", flexWrap: "wrap", alignItems: "flex-end" },
   streamingText: { fontSize: 14, color: colors.inkSoft, lineHeight: 21 },
   thinkingBox: {
     borderWidth: StyleSheet.hairlineWidth,
@@ -752,7 +790,6 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   thinkingHeader: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 5 },
   thinkingTitle: { fontSize: 11, fontWeight: "600", color: colors.muted },
   thinkingText: { fontSize: 11, fontStyle: "italic", color: colors.muted, lineHeight: 16, paddingHorizontal: 8, paddingBottom: 6 },
-  cursor: { width: 2, height: 16, backgroundColor: colors.faint, marginLeft: 2 },
   assistantTime: { fontSize: 10, color: colors.faint, marginTop: 6 },
   actionsRow: {
     flexDirection: "row",
@@ -774,6 +811,7 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   },
   actionText: { fontSize: 12, color: colors.muted },
   busyRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6 },
+  streamStatus: { marginTop: 4 },
   busyTextBlock: { flex: 1 },
   busyLabel: { fontSize: 13, color: colors.muted },
   busySub: { fontSize: 11, color: colors.faint, marginTop: 1 },

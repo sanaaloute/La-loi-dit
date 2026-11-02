@@ -472,6 +472,10 @@ export function ensureFreshToken(): Promise<string | null> {
 // answers the retry in ~2 s instead of the user staring at a spinner.
 const REQUEST_TIMEOUT_MS = 25_000;
 
+/** Drafting runs retrieval plus a full LLM enrichment pass — far beyond the
+ * CRUD-sized default budget (the web app has no client-side cap at all). */
+const DRAFT_TIMEOUT_MS = 120_000;
+
 /** Paths safe to replay when the first attempt dies without a response:
  * GETs are read-only; token/refresh simply re-issue the same session. */
 const RETRYABLE_POST_PATHS = ["/auth/token", "/auth/refresh"];
@@ -489,6 +493,13 @@ async function fetchWithTimeout(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    // Our own deadline fired: say so plainly instead of surfacing the raw
+    // "Aborted" DOMException, which reads like a crashed request.
+    if (controller.signal.aborted) {
+      throw new ApiError("Le serveur met trop de temps à répondre. Réessayez.", 408);
+    }
+    throw err;
   } finally {
     clearTimeout(timer);
   }
@@ -496,6 +507,8 @@ async function fetchWithTimeout(
 
 interface ApiFetchOptions extends RequestInit {
   token?: string | null;
+  /** Overrides REQUEST_TIMEOUT_MS for slow endpoints (e.g. drafting). */
+  timeoutMs?: number;
 }
 
 async function baseHeaders(token?: string | null): Promise<Record<string, string>> {
@@ -508,7 +521,8 @@ async function baseHeaders(token?: string | null): Promise<Record<string, string
 }
 
 export async function apiFetch(path: string, options: ApiFetchOptions = {}): Promise<Response> {
-  const { token, ...fetchOptions } = options;
+  const { token, timeoutMs, ...fetchOptions } = options;
+  const timeout = timeoutMs ?? REQUEST_TIMEOUT_MS;
   // Renew a soon-to-expire token before the request so a valid session never
   // dies mid-call (auth endpoints are excluded: they manage tokens directly).
   if (!path.startsWith("/auth/") && (token ?? getToken())) {
@@ -524,11 +538,11 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}): Pro
     method === "GET" || RETRYABLE_POST_PATHS.some((p) => path.startsWith(p));
   let res: Response;
   try {
-    res = await fetchWithTimeout(url, { ...fetchOptions, headers }, REQUEST_TIMEOUT_MS);
+    res = await fetchWithTimeout(url, { ...fetchOptions, headers }, timeout);
   } catch (firstErr) {
     if (!retryable) throw firstErr;
     // The tunnel hiccup killed the attempt before any response: replay once.
-    res = await fetchWithTimeout(url, { ...fetchOptions, headers }, REQUEST_TIMEOUT_MS);
+    res = await fetchWithTimeout(url, { ...fetchOptions, headers }, timeout);
   }
 
   // Try one silent refresh on 401, then replay the request. Only log out if
@@ -543,7 +557,7 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}): Pro
       const retry = await fetchWithTimeout(
         url,
         { ...fetchOptions, headers: retryHeaders },
-        REQUEST_TIMEOUT_MS,
+        timeout,
       );
       if (retry.status === 401) {
         clearToken();
@@ -850,6 +864,7 @@ export async function createDraft(payload: DraftRequest, token?: string | null):
     headers: { "Content-Type": "application/json" },
     token,
     body: JSON.stringify(payload),
+    timeoutMs: DRAFT_TIMEOUT_MS,
   });
   if (!res.ok) {
     const detail = await safeDetail(res);

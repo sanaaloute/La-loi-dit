@@ -2,7 +2,7 @@
 //   1. document list grouped by corpus folder, with full-text search
 //   2. article index of one document
 //   3. full article reader
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -21,6 +21,7 @@ import {
   listArticles,
   listSources,
   searchEvidence,
+  type ArticleChunk,
   type ArticleIndexEntry,
   type ArticleLookupResponse,
   type EvidenceChunk,
@@ -48,6 +49,25 @@ function folderKey(folder: string): string {
   return FOLDER_LABELS[folder] ? folder : "autres";
 }
 
+/**
+ * The article lookup returns every chunk tagged with the article — the parent
+ * (full text) AND its child excerpts (alinéas). Render only the "maximal"
+ * chunks: a chunk whose content is contained in another returned chunk is a
+ * child excerpt and would duplicate the parent's text (web app parity).
+ */
+function maximalChunks(data: ArticleLookupResponse): ArticleChunk[] {
+  const chunks = data.chunks;
+  return chunks.filter(
+    (c, i) =>
+      !chunks.some(
+        (o, j) =>
+          j !== i &&
+          o.content.includes(c.content) &&
+          (o.content.length > c.content.length || j < i),
+      ),
+  );
+}
+
 export default function ExplorerScreen() {
   const { token } = useAuth();
   const { colors } = useTheme();
@@ -71,6 +91,9 @@ export default function ExplorerScreen() {
   const [article, setArticle] = useState<ArticleLookupResponse | null>(null);
   const [articleLoading, setArticleLoading] = useState(false);
   const [articleError, setArticleError] = useState<string | null>(null);
+  // Sequence guard: a slow response must never overwrite a newer article
+  // (or reopen the reader after the user went back).
+  const articleRequestRef = useRef(0);
 
   const reload = useCallback(() => {
     if (!token) return;
@@ -137,20 +160,29 @@ export default function ExplorerScreen() {
   }
 
   function openArticle(documentId: string, articleNumber: string) {
+    const requestId = ++articleRequestRef.current;
     setArticle(null);
     setArticleError(null);
     setArticleLoading(true);
     getArticle(documentId, articleNumber)
-      .then(setArticle)
-      .catch((err) =>
-        setArticleError(err instanceof Error ? err.message : "Une erreur est survenue."),
-      )
-      .finally(() => setArticleLoading(false));
+      .then((res) => {
+        if (articleRequestRef.current === requestId) setArticle(res);
+      })
+      .catch((err) => {
+        if (articleRequestRef.current === requestId) {
+          setArticleError(err instanceof Error ? err.message : "Une erreur est survenue.");
+        }
+      })
+      .finally(() => {
+        if (articleRequestRef.current === requestId) setArticleLoading(false);
+      });
   }
 
   function backFromArticle() {
+    articleRequestRef.current += 1; // a late response must not reopen the reader
     setArticle(null);
     setArticleError(null);
+    setArticleLoading(false);
   }
 
   function backFromDocument() {
@@ -164,6 +196,7 @@ export default function ExplorerScreen() {
   // -------------------------------------------------------------------------
   if (doc || article || articleLoading || articleError) {
     if (article || articleLoading || articleError) {
+      const readerChunks = article ? maximalChunks(article) : [];
       return (
         <SafeAreaView style={styles.safe} edges={["top"]}>
           <View style={styles.header}>
@@ -187,17 +220,17 @@ export default function ExplorerScreen() {
             </View>
           ) : article ? (
             <FlatList
-              data={article.chunks}
+              data={readerChunks}
               keyExtractor={(c) => c.chunk_id}
               contentContainerStyle={styles.readerList}
               ListHeaderComponent={
                 <View style={styles.readerHeader}>
                   <Text style={styles.readerDoc} numberOfLines={2}>
-                    {article.chunks[0]?.document_name ?? doc?.document_name ?? ""}
+                    {readerChunks[0]?.document_name ?? doc?.document_name ?? ""}
                   </Text>
-                  {article.count > 1 && (
+                  {readerChunks.length > 1 && (
                     <Text style={styles.readerMeta}>
-                      {article.count} extraits indexés pour cet article
+                      {readerChunks.length} extraits indexés pour cet article
                     </Text>
                   )}
                 </View>

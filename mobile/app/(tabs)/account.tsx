@@ -445,94 +445,100 @@ export default function AccountScreen() {
 
       {/* Modification du profil */}
       <Modal visible={editOpen} transparent animationType="slide" onRequestClose={() => setEditOpen(false)}>
-        <View style={styles.modalBackdrop}>
-          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
-            <View style={styles.sheet}>
-              <Text style={styles.sheetTitle}>Mes informations</Text>
-              <ScrollView contentContainerStyle={styles.sheetFields} keyboardShouldPersistTaps="handled">
-                <TextField label="Nom" value={editName} onChangeText={setEditName} />
-                <TextField
-                  label="Téléphone"
-                  value={editPhone}
-                  onChangeText={setEditPhone}
-                  keyboardType="phone-pad"
-                  optional
-                />
-                <TextField
-                  label="Email"
-                  value={editEmail}
-                  onChangeText={setEditEmail}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  optional
-                />
-                <Text style={styles.fieldLabel}>Profil utilisateur</Text>
-                <View style={styles.personaRow}>
-                  {PERSONA_OPTIONS.map((option) => (
-                    <Pressable
-                      key={option.id}
-                      onPress={() => setEditPersona(option.id)}
-                      style={[styles.personaChip, editPersona === option.id && styles.personaChipActive]}
+        {/* The avoiding view must own the full modal frame: padding/height then
+         * shrinks that frame above the keyboard and the bottom-anchored sheet
+         * rides up with it. Wrapped around the sheet alone, the keyboard
+         * covers the fields. "height" on Android: modal windows don't resize. */}
+        <KeyboardAvoidingView
+          style={styles.modalBackdrop}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+        >
+          <View style={styles.sheet}>
+            <Text style={styles.sheetTitle}>Mes informations</Text>
+            <ScrollView contentContainerStyle={styles.sheetFields} keyboardShouldPersistTaps="handled">
+              <TextField label="Nom" value={editName} onChangeText={setEditName} />
+              <TextField
+                label="Téléphone"
+                value={editPhone}
+                onChangeText={setEditPhone}
+                keyboardType="phone-pad"
+                optional
+              />
+              <TextField
+                label="Email"
+                value={editEmail}
+                onChangeText={setEditEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                optional
+              />
+              <Text style={styles.fieldLabel}>Profil utilisateur</Text>
+              <View style={styles.personaRow}>
+                {PERSONA_OPTIONS.map((option) => (
+                  <Pressable
+                    key={option.id}
+                    onPress={() => setEditPersona(option.id)}
+                    style={[styles.personaChip, editPersona === option.id && styles.personaChipActive]}
+                  >
+                    <Ionicons
+                      name={option.icon}
+                      size={13}
+                      color={editPersona === option.id ? "#fff" : colors.inkSoft}
+                    />
+                    <Text
+                      style={[
+                        styles.personaChipText,
+                        editPersona === option.id && styles.personaChipTextActive,
+                      ]}
                     >
-                      <Ionicons
-                        name={option.icon}
-                        size={13}
-                        color={editPersona === option.id ? "#fff" : colors.inkSoft}
-                      />
-                      <Text
-                        style={[
-                          styles.personaChipText,
-                          editPersona === option.id && styles.personaChipTextActive,
-                        ]}
-                      >
-                        {option.label}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-                <PasswordField
-                  label="Mot de passe actuel (confirmation)"
-                  value={editPassword}
-                  onChangeText={setEditPassword}
-                />
-                <ErrorText message={editError} />
-              </ScrollView>
-              <View style={styles.sheetActions}>
-                <Pressable onPress={() => setEditOpen(false)} style={styles.sheetCancel}>
-                  <Text style={styles.sheetCancelText}>Annuler</Text>
-                </Pressable>
-                <View style={styles.sheetPrimary}>
-                  <PrimaryButton title="Enregistrer" onPress={() => void saveProfile()} busy={editBusy} />
-                </View>
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              <PasswordField
+                label="Mot de passe actuel (confirmation)"
+                value={editPassword}
+                onChangeText={setEditPassword}
+              />
+              <ErrorText message={editError} />
+            </ScrollView>
+            <View style={styles.sheetActions}>
+              <Pressable onPress={() => setEditOpen(false)} style={styles.sheetCancel}>
+                <Text style={styles.sheetCancelText}>Annuler</Text>
+              </Pressable>
+              <View style={styles.sheetPrimary}>
+                <PrimaryButton title="Enregistrer" onPress={() => void saveProfile()} busy={editBusy} />
               </View>
             </View>
-          </KeyboardAvoidingView>
-        </View>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Changement de mot de passe */}
       <Modal visible={pwOpen} transparent animationType="slide" onRequestClose={() => setPwOpen(false)}>
-        <View style={styles.modalBackdrop}>
-          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
-            <View style={styles.sheet}>
-              <Text style={styles.sheetTitle}>Changer le mot de passe</Text>
-              <View style={styles.sheetFields}>
-                <PasswordField label="Mot de passe actuel" value={pwCurrent} onChangeText={setPwCurrent} />
-                <PasswordField label="Nouveau mot de passe" value={pwNew} onChangeText={setPwNew} />
-                <PasswordField label="Confirmer le nouveau mot de passe" value={pwConfirm} onChangeText={setPwConfirm} />
-                <ErrorText message={pwError} />
-              </View>
-              <View style={styles.sheetActions}>
-                <Pressable onPress={() => setPwOpen(false)} style={styles.sheetCancel}>
-                  <Text style={styles.sheetCancelText}>Annuler</Text>
-                </Pressable>
-                <View style={styles.sheetPrimary}>
-                  <PrimaryButton title="Valider" onPress={() => void savePassword()} busy={pwBusy} />
-                </View>
+        <KeyboardAvoidingView
+          style={styles.modalBackdrop}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+        >
+          <View style={styles.sheet}>
+            <Text style={styles.sheetTitle}>Changer le mot de passe</Text>
+            <View style={styles.sheetFields}>
+              <PasswordField label="Mot de passe actuel" value={pwCurrent} onChangeText={setPwCurrent} />
+              <PasswordField label="Nouveau mot de passe" value={pwNew} onChangeText={setPwNew} />
+              <PasswordField label="Confirmer le nouveau mot de passe" value={pwConfirm} onChangeText={setPwConfirm} />
+              <ErrorText message={pwError} />
+            </View>
+            <View style={styles.sheetActions}>
+              <Pressable onPress={() => setPwOpen(false)} style={styles.sheetCancel}>
+                <Text style={styles.sheetCancelText}>Annuler</Text>
+              </Pressable>
+              <View style={styles.sheetPrimary}>
+                <PrimaryButton title="Valider" onPress={() => void savePassword()} busy={pwBusy} />
               </View>
             </View>
-          </KeyboardAvoidingView>
-        </View>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
