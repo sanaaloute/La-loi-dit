@@ -10,6 +10,10 @@ import { getPreferences } from "../src/lib/api";
 import { chatEngine } from "../src/lib/chat";
 import { hasOnboarded } from "../src/lib/persona";
 import { syncPushToken } from "../src/lib/push";
+import { setRefreshToken, setToken } from "../src/lib/storage";
+import * as Device from "expo-device";
+import { File, Paths } from "expo-file-system";
+import { UpdateChecker } from "../src/components/UpdateChecker";
 import type { ThemeColors } from "../src/theme";
 import { ThemeProvider, useTheme } from "../src/theme-context";
 
@@ -35,6 +39,30 @@ function AuthGate() {
       router.replace("/");
     }
   }, [status, segments, router]);
+
+  // TEMPORARY screenshot automation (simulator only — never active on devices):
+  // reads Documents/screenshot_state.json ({token, refresh, route, sessionId}).
+  // TODO: revert before the next production build.
+  useEffect(() => {
+    if (Device.isDevice || status === "loading") return;
+    void (async () => {
+      try {
+        const file = new File(Paths.document, "screenshot_state.json");
+        if (!file.exists) return;
+        const state = (await file.json()) as { token?: string; refresh?: string; route?: string; sessionId?: string };
+        if (state.token) {
+          setToken(state.token);
+          if (state.refresh) setRefreshToken(state.refresh);
+        }
+        if (state.sessionId) {
+          setTimeout(() => void chatEngine.loadSession(state.sessionId as string), 4000);
+        }
+        if (state.route) setTimeout(() => router.replace(state.route as never), 3000);
+      } catch {
+        // No state file — normal launch.
+      }
+    })();
+  }, [status, router]);
 
   // Register the device for legal-news push alerts once signed in — covers
   // both app start with a stored session and a fresh login/register.
@@ -120,6 +148,7 @@ export default function RootLayout() {
         <AuthProvider>
           <ThemedStatusBar />
           <AuthGate />
+          <UpdateChecker />
         </AuthProvider>
       </ThemeProvider>
     </SafeAreaProvider>

@@ -17,13 +17,6 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import { SafeAreaView } from "react-native-safe-area-context";
-import {
-  AudioModule,
-  RecordingPresets,
-  requestRecordingPermissionsAsync,
-  setAudioModeAsync,
-  type AudioRecorder,
-} from "expo-audio";
 import AnswerView from "../../src/components/AnswerView";
 import CitationPanel from "../../src/components/CitationPanel";
 import EvidenceViewer from "../../src/components/EvidenceViewer";
@@ -34,7 +27,6 @@ import {
   createShare,
   deleteBookmark,
   getPreferences,
-  transcribeAudio,
   type ChatResponse,
   type ExportItem,
 } from "../../src/lib/api";
@@ -50,72 +42,6 @@ import { formatMessageTime } from "../../src/lib/format";
 import { suggestionsForPersona } from "../../src/lib/persona";
 import type { ThemeColors } from "../../src/theme";
 import { useTheme } from "../../src/theme-context";
-
-/**
- * On-device/live speech recognition. The package resolves its native module
- * at import time, which throws where the module is missing (Expo Go): require
- * it lazily so the app still boots there — the record→upload fallback below
- * then handles voice input. Null only in those unsupported environments.
- */
-type SpeechRecognitionModuleT =
-  typeof import("expo-speech-recognition").ExpoSpeechRecognitionModule;
-let SpeechModule: SpeechRecognitionModuleT | null = null;
-try {
-  SpeechModule = require("expo-speech-recognition").ExpoSpeechRecognitionModule;
-} catch {
-  SpeechModule = null;
-}
-
-/** Voice notes and live dictation are capped: short clips cost less. */
-const MAX_REC_SECONDS = 30;
-
-/** Legal-domain hints: nudges the recognizer toward Yawoto's vocabulary. */
-const DICTATION_CONTEXT_STRINGS = [
-  "OHADA",
-  "CCJA",
-  "acte uniforme",
-  "Burkina Faso",
-  "code du travail",
-  "code pénal",
-  "code des personnes et de la famille",
-  "SARL",
-  "licenciement",
-  "tribunal",
-];
-
-/** Join dictation fragments (composer base, final segments, interim) cleanly. */
-function joinDictation(...parts: string[]): string {
-  return parts
-    .map((p) => p.trim())
-    .filter(Boolean)
-    .join(" ");
-}
-
-/** User-facing French message for a speech-recognition error code. */
-function dictationErrorMessage(code: string): string {
-  switch (code) {
-    case "not-allowed":
-      return "Micro inaccessible. Autorisez le micro dans les réglages de l'appareil.";
-    case "no-speech":
-    case "speech-timeout":
-      return "Aucune voix détectée. Parlez plus près du micro et réessayez.";
-    case "network":
-      return "La reconnaissance vocale a échoué (réseau). Vérifiez votre connexion.";
-    case "service-not-allowed":
-    case "language-not-supported":
-      return "La reconnaissance vocale n'est pas disponible sur cet appareil.";
-    default:
-      return "La dictée a échoué. Réessayez ou saisissez votre question.";
-  }
-}
-
-/**
- * Metering floor (dBFS) for a usable recording. AVAudioRecorder reports
- * -160 dB for digital silence; room tone with a live mic sits around -60…-45;
- * speech near the phone is -30…-10. Below -50 the clip carries no voice, and
- * transcribing pure silence makes the STT model hallucinate subtitle credits.
- */
-const SILENCE_DB_THRESHOLD = -50;
 
 const SUGGESTIONS = [
   "Quels sont les droits d'un salarié licencié au Burkina Faso ?",
@@ -251,294 +177,6 @@ export default function ChatScreen() {
     return () => clearTimeout(t);
   }, [messages, busy]);
 
-  // -------------------------------------------------------------------------
-  // Voice input, two paths (text always lands in the composer for review,
-  // never auto-sent):
-  //  - PREFERRED: live dictation with expo-speech-recognition (see below).
-  //  - FALLBACK: expo-audio recorder -> POST /chat/transcribe.
-  //
-  // The recorder is created ON DEMAND and released right after use. We
-  // deliberately avoid useAudioRecorder/useAudioRecorderState: those hooks
-  // keep a native shared object alive for the whole mount and call native
-  // code during render, which crashes hard ("shared object already
-  // released") when React remounts the screen with preserved state
-  // (expo-router's Suspense does exactly that).
-  // -------------------------------------------------------------------------
-  const recorderRef = useRef<AudioRecorder | null>(null);
-  const recStartTsRef = useRef(0);
-  // Loudest metering sample (dBFS) of the current take; -Infinity until the
-  // first sample arrives (platforms without metering never move it).
-  const peakDbRef = useRef(-Infinity);
-  const [recording, setRecording] = useState(false);
-  const [recElapsed, setRecElapsed] = useState(0);
-  const [transcribing, setTranscribing] = useState(false);
-  const [recError, setRecError] = useState<string | null>(null);
-  const discardRef = useRef(false);
-  const mountedRef = useRef(true);
-
-  const stopRecording = useCallback(async () => {
-    const recorder = recorderRef.current;
-    recorderRef.current = null;
-    setRecording(false);
-    if (!recorder) return;
-    let uri: string | null = null;
-    try {
-      await recorder.stop();
-      uri = recorder.uri;
-    } catch {
-      // Not recording anymore.
-    }
-    try {
-      recorder.release();
-    } catch {
-      // Already released.
-    }
-    void setAudioModeAsync({ allowsRecording: false }).catch(() => {});
-    if (discardRef.current || !uri || !mountedRef.current) return;
-    // Silent-take guard: the level never rose above the noise floor, so the
-    // clip holds no speech. Uploading it would come back as a hallucinated
-    // "transcription" (silent audio breaks the STT model). No metering
-    // samples at all (peak still -Infinity) means the platform cannot meter:
-    // let the upload through, the backend runs the same check.
-    if (peakDbRef.current > -Infinity && peakDbRef.current < SILENCE_DB_THRESHOLD) {
-      setRecError("Aucun son détecté. Rapprochez-vous du micro et réessayez.");
-      return;
-    }
-    setTranscribing(true);
-    setRecError(null);
-    try {
-      const { text } = await transcribeAudio(uri);
-      if (text && mountedRef.current) {
-        setInput((prev) => (prev.trim() ? `${prev.trimEnd()} ${text}` : text));
-      }
-    } catch (err) {
-      if (mountedRef.current) {
-        setRecError(err instanceof Error ? err.message : "La transcription a échoué.");
-      }
-    } finally {
-      if (mountedRef.current) setTranscribing(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      discardRef.current = true;
-      const recorder = recorderRef.current;
-      recorderRef.current = null;
-      if (recorder) {
-        try {
-          if (recorder.isRecording) recorder.stop();
-        } catch {
-          // Already stopped.
-        }
-        try {
-          recorder.release();
-        } catch {
-          // Already released.
-        }
-      }
-      try {
-        SpeechModule?.abort();
-      } catch {
-        // Not recognizing.
-      }
-    };
-  }, []);
-
-  const startRecording = useCallback(async () => {
-    setRecError(null);
-    try {
-      const permission = await requestRecordingPermissionsAsync();
-      if (!permission.granted) {
-        setRecError("Micro inaccessible. Autorisez le micro dans les réglages de l'appareil.");
-        return;
-      }
-      await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
-      // Constructed empty on purpose: the (user-facing) preset goes through
-      // prepareToRecordAsync, whose shim converts it to the native format.
-      const recorder = new AudioModule.AudioRecorder({});
-      recorderRef.current = recorder;
-      await recorder.prepareToRecordAsync({
-        ...RecordingPresets.HIGH_QUALITY,
-        // Voice dictation is mono: phone mics deliver one channel, Whisper
-        // downmixes anyway, and mono halves the upload. Stereo asks iOS for
-        // a channel layout the hardware does not have for zero benefit.
-        numberOfChannels: 1,
-        // Level metering feeds the silent-take guard in stopRecording.
-        isMeteringEnabled: true,
-      });
-      discardRef.current = false;
-      peakDbRef.current = -Infinity;
-      recorder.record();
-      // record() no-ops natively when the recorder is not in the prepared
-      // state (e.g. the audio session was torn down between prepare and
-      // record): fail fast instead of metering silence for nothing.
-      if (!recorder.isRecording) {
-        throw new Error("recorder did not start");
-      }
-      recStartTsRef.current = Date.now();
-      setRecElapsed(0);
-      setRecording(true);
-    } catch {
-      setRecError("Micro inaccessible. Vérifiez les autorisations de l'appareil.");
-    }
-  }, []);
-
-  const cancelRecording = useCallback(() => {
-    discardRef.current = true;
-    void stopRecording();
-  }, [stopRecording]);
-
-  // -------------------------------------------------------------------------
-  // Live dictation (preferred voice path): expo-speech-recognition streams
-  // partial transcripts straight into the composer as the user speaks — no
-  // recording file, no upload, no Whisper round-trip, and on iOS fully
-  // on-device. Falls back to the recorder above when the native module or
-  // the recognition service is unavailable.
-  // -------------------------------------------------------------------------
-  const [listening, setListening] = useState(false);
-  const [liveDictation, setLiveDictation] = useState<boolean>(() => {
-    try {
-      return SpeechModule?.isRecognitionAvailable() ?? false;
-    } catch {
-      return false;
-    }
-  });
-  const dictationBaseRef = useRef(""); // composer text when the take started
-  const dictationFinalRef = useRef(""); // finalized segments, accumulated
-  const dictationHeardRef = useRef(false); // any result event this take
-  const dictationDiscardRef = useRef(false); // cancel: restore the base text
-
-  useEffect(() => {
-    const mod = SpeechModule;
-    if (!mod) return;
-    const subs = [
-      mod.addListener("start", () => {
-        setListening(true);
-        setRecError(null);
-      }),
-      mod.addListener("result", (ev) => {
-        dictationHeardRef.current = true;
-        const text = ev.results[0]?.transcript ?? "";
-        if (ev.isFinal) {
-          dictationFinalRef.current = joinDictation(dictationFinalRef.current, text);
-          setInput(joinDictation(dictationBaseRef.current, dictationFinalRef.current));
-        } else {
-          setInput(joinDictation(dictationBaseRef.current, dictationFinalRef.current, text));
-        }
-      }),
-      mod.addListener("end", () => {
-        setListening(false);
-        setRecElapsed(0);
-        if (dictationDiscardRef.current) {
-          dictationDiscardRef.current = false;
-          setInput(dictationBaseRef.current);
-        } else {
-          // Only finalized segments are committed; a trailing interim is
-          // dropped (the recognizer promotes it to final on stop() first).
-          setInput(joinDictation(dictationBaseRef.current, dictationFinalRef.current));
-          if (!dictationHeardRef.current) {
-            setRecError("Aucune voix détectée. Parlez plus près du micro et réessayez.");
-          }
-        }
-      }),
-      mod.addListener("error", (ev) => {
-        setListening(false);
-        if (ev.error === "aborted") return; // our own cancel
-        if (ev.error === "service-not-allowed" || ev.error === "language-not-supported") {
-          // Permanent on this device: route the next taps to the recorder.
-          setLiveDictation(false);
-        }
-        setRecError(dictationErrorMessage(ev.error));
-      }),
-    ];
-    return () => {
-      for (const sub of subs) sub.remove();
-    };
-  }, []);
-
-  const startDictation = useCallback(async () => {
-    const mod = SpeechModule;
-    if (!mod) return;
-    setRecError(null);
-    try {
-      // iOS: fully on-device recognition (offline, and the mic permission
-      // alone covers it). Android: the platform SpeechRecognizer (network
-      // path is the norm; on-device French models are rarely installed).
-      const onDevice = Platform.OS === "ios" && mod.supportsOnDeviceRecognition();
-      const perms = onDevice
-        ? await mod.requestMicrophonePermissionsAsync()
-        : await mod.requestPermissionsAsync();
-      if (!perms.granted) {
-        setRecError("Micro inaccessible. Autorisez le micro dans les réglages de l'appareil.");
-        return;
-      }
-      dictationBaseRef.current = input;
-      dictationFinalRef.current = "";
-      dictationHeardRef.current = false;
-      dictationDiscardRef.current = false;
-      recStartTsRef.current = Date.now();
-      setRecElapsed(0);
-      mod.start({
-        lang: "fr-FR",
-        interimResults: true,
-        maxAlternatives: 1,
-        // Sustained dictation across pauses (and no Android start/stop beeps).
-        continuous: true,
-        requiresOnDeviceRecognition: onDevice,
-        addsPunctuation: true,
-        contextualStrings: DICTATION_CONTEXT_STRINGS,
-      });
-      // `listening` flips on the native "start" event, not here.
-    } catch {
-      // The recorder path is a strict superset of capabilities: use it.
-      void startRecording();
-    }
-  }, [input, startRecording]);
-
-  const stopDictation = useCallback(() => {
-    try {
-      SpeechModule?.stop(); // final result(s) arrive, then the "end" event
-    } catch {
-      setListening(false);
-    }
-  }, []);
-
-  const cancelDictation = useCallback(() => {
-    dictationDiscardRef.current = true;
-    try {
-      SpeechModule?.abort();
-    } catch {
-      setListening(false);
-    }
-  }, []);
-
-  // Elapsed-time ticker + hard cap: auto-stop at the limit (dictation commits
-  // its finals; a recording transcribes). While recording, each tick also
-  // samples the mic level so stopRecording can reject a take that never
-  // carried any sound (see SILENCE_DB_THRESHOLD).
-  useEffect(() => {
-    if (!recording && !listening) return;
-    const tick = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - recStartTsRef.current) / 1000);
-      setRecElapsed(elapsed);
-      try {
-        const level = recorderRef.current?.getStatus().metering;
-        if (typeof level === "number" && level > peakDbRef.current) {
-          peakDbRef.current = level;
-        }
-      } catch {
-        // Native recorder mid-teardown: keep the samples gathered so far.
-      }
-      if (elapsed >= MAX_REC_SECONDS) {
-        if (recording) void stopRecording();
-        else stopDictation();
-      }
-    }, 1000);
-    return () => clearInterval(tick);
-  }, [recording, listening, stopRecording, stopDictation]);
 
   // -------------------------------------------------------------------------
   // Derived view data
@@ -893,29 +531,6 @@ export default function ChatScreen() {
 
         {/* Composer */}
         <View style={styles.composer}>
-          {recording && (
-            <View style={styles.recRow}>
-              <View style={styles.recDot} />
-              <Text style={styles.recText}>
-                Enregistrement… ({recElapsed}s / {MAX_REC_SECONDS}s max)
-              </Text>
-            </View>
-          )}
-          {listening && (
-            <View style={styles.recRow}>
-              <View style={styles.recDot} />
-              <Text style={styles.recText}>
-                Dictée en cours… ({recElapsed}s / {MAX_REC_SECONDS}s max)
-              </Text>
-            </View>
-          )}
-          {transcribing && (
-            <View style={styles.recRow}>
-              <ActivityIndicator size={14} color={colors.accent} />
-              <Text style={styles.transcribingText}>Transcription en cours…</Text>
-            </View>
-          )}
-          {recError ? <Text style={styles.recError}>{recError}</Text> : null}
           <View style={styles.composerRow}>
             <TextInput
               value={input}
@@ -923,27 +538,10 @@ export default function ChatScreen() {
               placeholder="Posez votre question."
               placeholderTextColor={colors.faint}
               multiline
-              editable={!busy && !recording && !listening}
+              editable={!busy}
               style={styles.input}
             />
-            {recording || listening ? (
-              <>
-                <Pressable
-                  onPress={recording ? cancelRecording : cancelDictation}
-                  style={[styles.roundButton, styles.roundButtonMuted]}
-                  accessibilityLabel={recording ? "Annuler l'enregistrement" : "Annuler la dictée"}
-                >
-                  <Ionicons name="close" size={18} color={colors.inkSoft} />
-                </Pressable>
-                <Pressable
-                  onPress={() => (recording ? void stopRecording() : stopDictation())}
-                  style={[styles.roundButton, styles.roundButtonDanger]}
-                  accessibilityLabel={recording ? "Arrêter et transcrire" : "Terminer la dictée"}
-                >
-                  <Ionicons name="stop" size={16} color="#fff" />
-                </Pressable>
-              </>
-            ) : busy ? (
+            {busy ? (
               <Pressable
                 onPress={() => chatEngine.stop()}
                 style={[styles.roundButton, styles.roundButtonDanger]}
@@ -952,32 +550,22 @@ export default function ChatScreen() {
                 <Ionicons name="stop" size={16} color="#fff" />
               </Pressable>
             ) : (
-              <>
-                <Pressable
-                  onPress={() => void (liveDictation ? startDictation() : startRecording())}
-                  disabled={transcribing}
-                  style={[styles.roundButton, styles.roundButtonMuted, transcribing && { opacity: 0.5 }]}
-                  accessibilityLabel="Dicter votre question"
-                >
-                  <Ionicons name="mic" size={17} color={colors.inkSoft} />
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    const q = input;
-                    setInput("");
-                    pinnedRef.current = true; // a new question re-pins the follow-the-stream scroll
-                    void chatEngine.send(q);
-                  }}
-                  disabled={sendDisabled}
-                  style={[
-                    styles.roundButton,
-                    sendDisabled ? styles.roundButtonDisabled : styles.roundButtonAccent,
-                  ]}
-                  accessibilityLabel={wordCount > MAX_WORDS ? `Limite de ${MAX_WORDS} mots dépassée` : "Envoyer"}
+              <Pressable
+                onPress={() => {
+                  const q = input;
+                  setInput("");
+                  pinnedRef.current = true; // a new question re-pins the follow-the-stream scroll
+                  void chatEngine.send(q);
+                }}
+                disabled={sendDisabled}
+                style={[
+                  styles.roundButton,
+                  sendDisabled ? styles.roundButtonDisabled : styles.roundButtonAccent,
+                ]}
+                accessibilityLabel={wordCount > MAX_WORDS ? `Limite de ${MAX_WORDS} mots dépassée` : "Envoyer"}
                 >
                   <Ionicons name="arrow-up" size={17} color={sendDisabled ? colors.faint : "#fff"} />
                 </Pressable>
-              </>
             )}
           </View>
           {wordCount > 0 && (

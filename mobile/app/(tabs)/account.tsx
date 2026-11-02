@@ -29,6 +29,15 @@ import {
 import { useAuth } from "../../src/lib/auth";
 import { shortDay } from "../../src/lib/format";
 import { personaLabel, PERSONA_OPTIONS, type PersonaId } from "../../src/lib/persona";
+import {
+  APP_VERSION,
+  fetchLatestRelease,
+  isUpdateAvailable,
+  openStoreListing,
+  openTerms,
+  openWhatsApp,
+  type LatestRelease,
+} from "../../src/lib/release";
 import { getToken } from "../../src/lib/storage";
 import type { ThemeColors } from "../../src/theme";
 import { useTheme } from "../../src/theme-context";
@@ -50,6 +59,7 @@ export default function AccountScreen() {
   const { colors, isDark, toggleTheme } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [usage, setUsage] = useState<UsageResponse | null>(null);
+  const [updateRelease, setUpdateRelease] = useState<LatestRelease | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
@@ -76,8 +86,12 @@ export default function AccountScreen() {
     if (!token) return;
     setLoading(true);
     void refreshProfile();
-    Promise.allSettled([usageMe()]).then(([u]) => {
+    Promise.allSettled([usageMe(), fetchLatestRelease()]).then(([u, release]) => {
       setUsage(u.status === "fulfilled" ? u.value : null);
+      const latest = release.status === "fulfilled" ? release.value : null;
+      setUpdateRelease(
+        latest && isUpdateAvailable(APP_VERSION, latest.latest_version) ? latest : null,
+      );
       setLoading(false);
     });
   }, [token, refreshProfile]);
@@ -373,6 +387,43 @@ export default function AccountScreen() {
           </Pressable>
         </View>
 
+        {/* Contact */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Contact</Text>
+          <Pressable style={styles.linkButton} onPress={() => openWhatsApp()}>
+            <Ionicons name="logo-whatsapp" size={16} color={colors.accent} />
+            <Text style={styles.linkButtonText}>Contactez-nous</Text>
+            <Ionicons name="open-outline" size={14} color={colors.muted} />
+          </Pressable>
+        </View>
+
+        {/* À propos */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>À propos</Text>
+          <Text style={styles.aboutName}>Yawoto — Assistant juridique</Text>
+          <Text style={styles.aboutDetail}>Version {APP_VERSION || "—"}</Text>
+          <Text style={styles.aboutDetail}>
+            Le droit du Burkina Faso et de l'OHADA, cité à la source.
+          </Text>
+          <Text style={styles.aboutCredit}>Conçu et développé par NeoByte Technology</Text>
+          {updateRelease && (
+            <Pressable
+              style={styles.updateButton}
+              onPress={() => openStoreListing(updateRelease)}
+            >
+              <Ionicons name="download-outline" size={16} color="#fff" />
+              <Text style={styles.updateButtonText}>
+                Mettre à jour — version {updateRelease.latest_version}
+              </Text>
+            </Pressable>
+          )}
+          <Pressable style={styles.linkButton} onPress={() => openTerms()}>
+            <Ionicons name="document-text-outline" size={16} color={colors.accent} />
+            <Text style={styles.linkButtonText}>Terms et Conditions</Text>
+            <Ionicons name="open-outline" size={14} color={colors.muted} />
+          </Pressable>
+        </View>
+
         {/* Actions */}
         <Pressable
           style={styles.logoutButton}
@@ -390,7 +441,6 @@ export default function AccountScreen() {
           <Ionicons name="trash-outline" size={16} color={colors.danger} />
           <Text style={styles.deleteText}>Supprimer mon compte</Text>
         </Pressable>
-        <Text style={styles.versionText}>Yawoto pour Burkina Faso — version 1.0.1</Text>
       </ScrollView>
 
       {/* Modification du profil */}
@@ -625,7 +675,31 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
     paddingVertical: 12,
   },
   deleteText: { fontSize: 14, fontWeight: "500", color: colors.danger },
-  versionText: { fontSize: 11, color: colors.faint, textAlign: "center", marginTop: 4 },
+  linkButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  linkButtonText: { flex: 1, fontSize: 13, fontWeight: "500", color: colors.ink },
+  aboutName: { fontSize: 15, fontWeight: "600", color: colors.ink },
+  aboutDetail: { fontSize: 13, color: colors.muted },
+  aboutCredit: { fontSize: 12, color: colors.faint },
+  updateButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: colors.accent,
+    borderRadius: 10,
+    paddingVertical: 10,
+  },
+  updateButtonText: { fontSize: 13, fontWeight: "600", color: "#fff" },
   modalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.4)",

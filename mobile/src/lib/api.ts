@@ -772,58 +772,6 @@ export async function cancelChat(sessionId: string, token?: string | null): Prom
 }
 
 // ---------------------------------------------------------------------------
-// Voice transcription
-// ---------------------------------------------------------------------------
-
-/**
- * Transcribe a recorded audio file (voice input for the chat composer).
- * The returned text is meant to be reviewed by the user before sending.
- */
-export async function transcribeAudio(
-  uri: string,
-  token?: string | null,
-): Promise<{ text: string }> {
-  const form = new FormData();
-  // The global fetch is expo/fetch (WinterCG): its FormData only accepts
-  // strings and Blob-like parts, so the React Native {uri, name, type}
-  // descriptor throws "Unsupported FormDataPart implementation". The
-  // expo-file-system File implements bytes() and carries the recording's real
-  // filename — the backend sniffs the audio format from its extension.
-  form.append("file", new File(uri) as unknown as Blob);
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 120_000);
-  let res: Response;
-  try {
-    res = await apiFetch("/chat/transcribe", {
-      method: "POST",
-      body: form,
-      token,
-      signal: controller.signal,
-    });
-  } catch (err) {
-    // Log the underlying cause (like the web app does): the message shown to
-    // the user is a generic one, the console keeps the actionable detail.
-    console.error("Transcription request failed", err);
-    // Classify on our own signal rather than the error name: RN's fetch does
-    // not always reject aborts with an "AbortError"-named error.
-    if (controller.signal.aborted) {
-      throw new Error("La transcription a expiré. Réessayez avec un extrait plus court.");
-    }
-    throw new Error(
-      "Impossible de joindre le serveur de transcription. Vérifiez votre connexion puis réessayez.",
-    );
-  } finally {
-    clearTimeout(timeout);
-  }
-  if (!res.ok) {
-    const detail = await safeDetail(res);
-    throw new ApiError(detail ?? `La transcription a échoué (${res.status})`, res.status);
-  }
-  return (await res.json()) as { text: string };
-}
-
-// ---------------------------------------------------------------------------
 // Profile editing (account page)
 // ---------------------------------------------------------------------------
 

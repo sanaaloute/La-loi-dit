@@ -398,6 +398,25 @@ dead tokens pruned on DeviceNotRegistered):
 
 ### DELETE /api/v1/push/token `{ "token": "…" }` → `204` (owner-scoped, call it on logout).
 
+## Mobile (`backend/api/routers/mobile.py`)
+
+### GET /api/v1/app/version
+
+Public (no auth — the apps call it before login). Returns the latest store
+release so the mobile apps can prompt for an update at launch and show an
+update button on the account screen:
+
+```json
+{ "latest_version": "1.0.4", "release_notes": "…",
+  "store_url_ios": "https://apps.apple.com/app/id6826883491",
+  "store_url_android": "https://play.google.com/store/apps/details?id=net.neobytech.yawoto" }
+```
+
+Backed by `data/mobile_release.json` — bump `latest_version` / `release_notes`
+there when a store release goes live; the store URLs are defaults the file can
+override. A missing or corrupt file returns an empty `latest_version`, which
+the apps treat as "no update info" (no prompt).
+
 ## Models and usage (`backend/api/routers/models.py`, `usage.py`)
 
 `GET /api/v1/models` is a read-only compatibility/status endpoint for the

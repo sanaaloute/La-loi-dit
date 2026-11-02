@@ -10,7 +10,6 @@
       "supportsTablet": true,
       "bundleIdentifier": "net.neobytech.yawoto",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Yawoto utilise le micro pour dicter vos questions juridiques.",
         "NSPhotoLibraryUsageDescription": "Yawoto utilise la photothèque pour enregistrer et partager vos documents juridiques.",
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -39,19 +38,6 @@
       "expo-router",
       "expo-secure-store",
       "expo-notifications",
-      [
-        "expo-audio",
-        {
-          "microphonePermission": "Yawoto utilise le micro pour dicter vos questions juridiques."
-        }
-      ],
-      [
-        "expo-speech-recognition",
-        {
-          "microphonePermission": "Yawoto utilise le micro pour dicter vos questions juridiques.",
-          "speechRecognitionPermission": "Yawoto utilise la reconnaissance vocale pour dicter vos questions juridiques."
-        }
-      ],
       [
         "expo-image-picker",
         {
