@@ -135,11 +135,13 @@ def parse_route(text: str) -> str:
     if not tokens:
         return "retrieval"
     token = tokens[0].strip(".!:»«\"'").upper()
-    return {"DIRECT": "direct", "GENERAL": "general"}.get(token, "retrieval")
+    return {"DIRECT": "direct", "GENERAL": "general", "CLARIFY": "clarify"}.get(
+        token, "retrieval"
+    )
 
 
 class QueryRouterAgent(Agent):
-    """Routes guardrail-approved queries to direct, general, or retrieval."""
+    """Routes guardrail-approved queries to direct, general, clarify or retrieval."""
 
     name = "query_router"
     # Reasoning is enabled (its thinking streams to the UI), so allow more than

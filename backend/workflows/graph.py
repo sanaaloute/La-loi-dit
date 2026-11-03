@@ -3,7 +3,7 @@
 Pipeline (see docs/architecture.md for the Mermaid diagram):
 
     user -> input_guardrail -> language_gate -> query_router
-         -> (direct/general) response_generator
+         -> (direct/general/clarify) response_generator
          -> (retrieval) planner -> context_agent -> memory_agent
          -> [fan-out: one retrieval_branch per sub-question, in parallel]
          -> retrieval_merge -> conflict_resolver -> evidence_ranking
@@ -94,8 +94,12 @@ def build_graph(ctx: AppContext):
         return "refusal" if guardrail and not guardrail.allowed else "language_gate"
 
     def _route_after_router(state: GraphState) -> str:
-        """Conversation and general knowledge short-circuit legal retrieval."""
-        return "response_generator" if state.get("route") in {"direct", "general"} else "planner"
+        """Conversation, unclear input and general knowledge skip legal retrieval."""
+        return (
+            "response_generator"
+            if state.get("route") in {"direct", "general", "clarify"}
+            else "planner"
+        )
 
     def _fanout_retrieval(state: GraphState) -> list[Send]:
         """Fan out one parallel retrieval branch per decomposed sub-question.
@@ -199,8 +203,12 @@ def build_graph(ctx: AppContext):
         return "response_generator"
 
     def _route_after_response(state: GraphState) -> str:
-        """Direct/general answers have no evidence for claim verification."""
-        return END if state.get("route") in {"direct", "general"} else "claim_verification"
+        """Direct/general/clarify answers have no evidence for claim verification."""
+        return (
+            END
+            if state.get("route") in {"direct", "general", "clarify"}
+            else "claim_verification"
+        )
 
     g = StateGraph(GraphState)
     g.add_node("input_guardrail", bind(input_guardrail.input_guardrail_node))

@@ -217,56 +217,6 @@ for that session). Aborted runs persist nothing and are not metered.
 WebSocket equivalent: send a `ChatRequest` JSON, receive the same per-node
 update objects, then the final `ChatResponse`.
 
-### POST /api/v1/chat/transcribe
-
-Transcribes a voice message to text (voice input for the chat composer — the
-chat flow itself is unchanged: the returned text is reviewed by the user,
-then sent through the normal chat endpoints). Auth like the other chat
-endpoints. Multipart upload, field `file`:
-
-```
-POST /api/v1/chat/transcribe
-Content-Type: multipart/form-data
-file: <audio blob>  (webm, ogg, mp3, wav, m4a, mp4 — extension or content-type)
-```
-
-→ `{ "text": "bonjour le droit" }`. A successful transcription is metered as
-one request (0 tokens) on the caller's daily usage.
-
-Errors: `400` unsupported format or empty file, `413` audio larger than
-`LEGAL_AI_STT_MAX_AUDIO_BYTES` (25 MB default), `422` no usable speech in
-the clip (silent or noise-floor-only capture — the client should ask the
-user to re-record), `503` STT not available on this server, `502`
-transcription provider failure.
-
-Configuration (`backend/core/config.py`). The approved deployment explicitly
-sets `LEGAL_AI_STT_PROVIDER=faster-whisper`; STT is a separate capability and
-does not use either fixed chat role model. The table lists built-in defaults,
-including the optional separate LiteLLM transcription adapter:
-
-| Setting | Default | Purpose |
-|---|---|---|
-| `LEGAL_AI_STT_PROVIDER` | `litellm` | `litellm` (LiteLLM gateway, reuses the LLM credentials) or `faster-whisper` (fully local) |
-| `LEGAL_AI_STT_MODEL` | `whisper-1` | LiteLLM transcription model |
-| `LEGAL_AI_STT_API_KEY` | _(empty)_ | Dedicated transcription API key; falls back to `LEGAL_AI_LLM_API_KEY` |
-| `LEGAL_AI_STT_API_BASE` | _(empty)_ | Dedicated transcription endpoint; falls back to `LEGAL_AI_LLM_API_BASE` |
-| `LEGAL_AI_STT_LANGUAGE` | `fr` | Transcription language hint |
-| `LEGAL_AI_STT_TIMEOUT_SECONDS` | `90` | Provider call timeout (a misconfigured endpoint fails instead of hanging) |
-| `LEGAL_AI_FASTER_WHISPER_MODEL_SIZE` | `small` | Local Whisper model size |
-| `LEGAL_AI_STT_MODELS_DIR` | `data/stt_models` | Local model download cache |
-| `LEGAL_AI_STT_MAX_AUDIO_BYTES` | `26214400` | Upload size cap (HTTP 413) |
-
-The `faster-whisper` package is import-guarded: without it, the local
-provider reports unavailable (503) and the rest of the platform is
-unaffected.
-
-Note: the Afrikia chat endpoint cannot serve Whisper transcriptions. Use
-`LEGAL_AI_STT_PROVIDER=faster-whisper` (local) or point
-`LEGAL_AI_STT_API_BASE`/`LEGAL_AI_STT_API_KEY` at a transcription-capable
-endpoint (OpenAI `whisper-1`, Groq `groq/whisper-large-v3`, …). Voice notes
-are capped at 30 s in the UI; transcription is batch (a few seconds), not
-realtime streaming.
-
 ## Documents (`backend/api/routers/documents.py`)
 
 ### POST /api/v1/documents

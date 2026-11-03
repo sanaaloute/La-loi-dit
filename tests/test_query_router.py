@@ -48,6 +48,8 @@ def test_is_retrieval_shortcut(query, expected):
         ("RETRIEVAL", "retrieval"),
         ("GENERAL", "general"),
         ("DIRECT", "direct"),
+        ("CLARIFY", "clarify"),
+        ("clarify.", "clarify"),
         ("", "retrieval"),
         ("some prose", "retrieval"),
         ("retrieval.", "retrieval"),
@@ -55,6 +57,20 @@ def test_is_retrieval_shortcut(query, expected):
 )
 def test_parse_route(text, expected):
     assert parse_route(text) == expected
+
+
+@pytest.mark.asyncio
+async def test_clarify_route_returns_deterministic_answer():
+    """Unintelligible input gets a canned rephrase request — no LLM, no search."""
+    from backend.agents.response_generator import ResponseGeneratorAgent
+
+    agent = ResponseGeneratorAgent()
+    state = {"route": "clarify", "query": "Hu", "language": "fr", "trace": [], "errors": []}
+    result = await agent.run(state, None)
+    answer = result["final_answer"]
+    assert answer.metadata["route"] == "clarify"
+    assert "préciser" in answer.answer
+    assert not answer.evidence
 
 
 async def _stub_llm_complete(system, user, **kwargs):

@@ -78,9 +78,6 @@ overrides service addresses). Key groups:
   `LEGAL_AI_EMBEDDING_DIMENSION=4096`, and an explicit
   `LEGAL_AI_EMBEDDING_API_BASE` (same Afrikia provider); this is a separate
   capability from the chat role models.
-- **STT**: `LEGAL_AI_STT_PROVIDER=faster-whisper` for the approved local setup;
-  transcription is independent of the chat provider (the Afrikia chat endpoint
-  cannot serve Whisper).
 - **Stores**: `LEGAL_AI_DATABASE_URL`, `LEGAL_AI_REDIS_URL` /
   `LEGAL_AI_REDIS_ENABLED`, `LEGAL_AI_MILVUS_HOST` /
   `LEGAL_AI_MILVUS_PORT` / `LEGAL_AI_MILVUS_ENABLED`
@@ -198,13 +195,13 @@ what strict mode verifies at boot and via `/ready`.
    proxy `https://yawoto.neobytech.net` to `http://127.0.0.1:3000` (the
    frontend container). Redirect :80 → :443 on the host.
 3. **Backups** — schedule `pg_dump` of `legal_ai` and a copy of `./data`
-   (which holds the Milvus Lite index, OCR/STT models and legal documents;
+   (which holds the Milvus Lite index, OCR models and legal documents;
    see [operations.md](operations.md)).
 4. **Scaling** — `docker compose up -d --scale api=3` behind Nginx.
    Redis and Postgres are single points — use managed/HA variants for real
    production.
 5. **Resource limits** — give the api container a memory limit and uvicorn
-   `--workers` matching CPU (see the OCR/STT memory notes in
+   `--workers` matching CPU (see the OCR memory notes in
    [DOCUMENT_PROCESSING.md](DOCUMENT_PROCESSING.md)).
 6. **Observability** — enable OTel (`LEGAL_AI_OTEL_ENABLED=true`) pointed at
    your collector; create a Langfuse project and set its keys.

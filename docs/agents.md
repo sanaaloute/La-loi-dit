@@ -13,7 +13,7 @@ flowchart LR
     ig -->|allowed| lg[language_gate]
     ig -->|blocked| ref[refusal]
     lg --> qr[query_router]
-    qr -->|direct/general| rg[response_generator]
+    qr -->|direct/general/clarify| rg[response_generator]
     qr -->|retrieval| pl[planner]
     pl --> ca[context_agent]
     ca --> ma[memory_agent]
@@ -31,7 +31,7 @@ flowchart LR
     rf -.->|should_retry_retrieval, iteration ≤ 1| fan
     rf --> rg
     rg --> clv[claim_verification]
-    rg -->|direct/general routes| a
+    rg -->|direct/general/clarify routes| a
     clv --> cv[citation_verification]
     cv --> a[Final answer]
     ref --> a
@@ -76,7 +76,7 @@ capped at 120 seconds and 4,096 tokens per call; synthesis keeps the larger
 answer budget (8,192 tokens, so long legal answers are never truncated). The
 public model catalog derives its IDs from the same constants.
 
-Embeddings, faster-whisper STT, OCR, semantic guardrails, and cross-encoder
+Embeddings, OCR, semantic guardrails, and cross-encoder
 reranking are separate capabilities, not alternative chat role models.
 
 ## input_guardrail (`backend/agents/input_guardrail.py`)

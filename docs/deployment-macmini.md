@@ -67,7 +67,6 @@ AFRIKIA_API_KEY=<your Afrikia key>        # bearer key, plain name (no LEGAL_AI_
 LEGAL_AI_EMBEDDING_MODEL=qwen3-embedding-8b
 LEGAL_AI_EMBEDDING_DIMENSION=4096
 LEGAL_AI_EMBEDDING_API_BASE=https://afrikia.neobytech.net/v1
-LEGAL_AI_STT_PROVIDER=faster-whisper
 API_PROXY_TARGET=http://api:8000
 # Standalone Milvus server (compose services etcd+minio+milvus), shared by
 # every api worker — do NOT point this at the embedded Lite file:
@@ -90,9 +89,9 @@ reasoning counts against `max_tokens`). Users cannot select models or override t
 roles through the environment; there is no external chat failover. Daily quotas
 and anti-abuse rate limits remain active. Embeddings (`qwen3-embedding-8b`,
 4096 dimensions) come from the same provider — an existing Milvus corpus
-embedded with the same Qwen3-Embedding-8B weights needs no re-ingestion. STT,
-OCR, semantic guardrails, and cross-encoder reranking remain separate local
-capabilities (the Afrikia chat endpoint cannot serve Whisper).
+embedded with the same Qwen3-Embedding-8B weights needs no re-ingestion. OCR,
+semantic guardrails, and cross-encoder reranking remain separate local
+capabilities.
 
 The frontend binds **127.0.0.1:3100** (see `docker-compose.yml`) — the
 tunnel reaches it on localhost, and nothing is exposed on the LAN. Port 3100

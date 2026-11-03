@@ -831,8 +831,8 @@ export async function uploadAvatar(
   token?: string | null,
 ): Promise<{ avatar_url: string }> {
   const form = new FormData();
-  // Same constraint as transcribeAudio: expo/fetch FormData takes Blob-like
-  // parts; the expo-file-system File carries the photo's real filename.
+  // expo/fetch FormData takes Blob-like parts; the expo-file-system File
+  // carries the photo's real filename.
   form.append("file", new File(uri) as unknown as Blob);
   const res = await apiFetch("/auth/me/avatar", { method: "POST", body: form, token });
   if (!res.ok) {

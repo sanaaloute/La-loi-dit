@@ -823,52 +823,6 @@ export async function cancelChat(sessionId: string, token?: string | null): Prom
   }
 }
 
-/**
- * Transcribe a recorded audio blob (voice input for the chat composer).
- * The returned text is meant to be reviewed by the user before sending.
- */
-export async function transcribeAudio(blob: Blob, token?: string | null): Promise<{ text: string }> {
-  // Give the file a real extension: the backend sniffs the audio format
-  // from the filename (MediaRecorder blobs have none).
-  const ext = blob.type.includes("ogg") ? "ogg" : blob.type.includes("mp4") ? "m4a" : "webm";
-  const form = new FormData();
-  form.append("file", blob, `vocal.${ext}`);
-  let res: Response;
-  try {
-    // A misconfigured STT provider can hang — fail visibly instead of
-    // leaving the "Transcription en cours…" state forever. Manual fallback:
-    // AbortSignal.timeout is missing on older mobile browsers.
-    res = await apiFetch("/chat/transcribe", {
-      method: "POST",
-      body: form,
-      token,
-      signal: timeoutSignal(120_000),
-    });
-  } catch (err) {
-    if (err instanceof DOMException && (err.name === "TimeoutError" || err.name === "AbortError")) {
-      throw new Error("La transcription a expiré. Réessayez avec un extrait plus court.");
-    }
-    console.error("Transcription request failed", err);
-    throw new Error("Impossible de joindre le serveur de transcription. Vérifiez votre connexion puis réessayez.");
-  }
-  if (!res.ok) {
-    const detail = await safeDetail(res);
-    throw new ApiError(detail ?? `La transcription a échoué (${res.status})`, res.status);
-  }
-  return (await res.json()) as { text: string };
-}
-
-/** AbortSignal.timeout with a fallback for browsers that lack it. */
-function timeoutSignal(ms: number): AbortSignal | undefined {
-  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
-    return AbortSignal.timeout(ms);
-  }
-  if (typeof AbortController === "undefined") return undefined;
-  const controller = new AbortController();
-  setTimeout(() => controller.abort(new DOMException("Transcription timeout", "TimeoutError")), ms);
-  return controller.signal;
-}
-
 export class ApiError extends Error {
   status: number;
 

@@ -13,7 +13,6 @@ import {
   Loader2,
   Menu,
   MessageSquarePlus,
-  Mic,
   PanelRight,
   Square,
   ThumbsDown,
@@ -44,7 +43,6 @@ import {
   setSessionId,
   streamChat,
   submitFeedback,
-  transcribeAudio,
   type ChatResponse,
   type ChatSessionDetail,
   type ExportItem,
@@ -69,9 +67,6 @@ interface Message {
 }
 
 type PanelTab = "agents" | "citations" | "preuves";
-
-/** Voice notes are capped: short clips transcribe faster and cost less. */
-const MAX_REC_SECONDS = 30;
 
 /** Questions are capped in words (matches backend input_max_words). */
 const MAX_WORDS = 200;
@@ -257,46 +252,6 @@ export default function ChatWindow() {
   // run; carried onto the final message so it stays readable above the answer.
   const streamThinkingRef = useRef("");
 
-  // Voice input: MediaRecorder -> POST /chat/transcribe -> text inserted into
-  // the composer (never auto-sent; the user reviews it first).
-  const [micSupported] = useState(
-    () =>
-      typeof navigator !== "undefined" &&
-      !!navigator.mediaDevices?.getUserMedia &&
-      typeof MediaRecorder !== "undefined",
-  );
-  const [recording, setRecording] = useState(false);
-  const [recElapsed, setRecElapsed] = useState(0);
-  const [transcribing, setTranscribing] = useState(false);
-  const [recError, setRecError] = useState<string | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const discardRef = useRef(false);
-  const mountedRef = useRef(true);
-
-  // Release the microphone when the component unmounts mid-recording, and
-  // silence any late recorder callbacks (no setState/transcribe after
-  // unmount).
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      discardRef.current = true;
-      const recorder = recorderRef.current;
-      if (recorder && recorder.state !== "inactive") {
-        try {
-          recorder.stop();
-        } catch {
-          // Already stopped — nothing to release.
-        }
-      }
-      recorderRef.current = null;
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    };
-  }, []);
-
   useEffect(() => {
     const stored = getSessionId();
     // Snapshot for the refresh-restore effect below: only the conversation
@@ -372,17 +327,6 @@ export default function ChatWindow() {
     const id = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 1000);
     return () => clearInterval(id);
   }, [busy]);
-
-  // Elapsed seconds while recording audio.
-  useEffect(() => {
-    if (!recording) {
-      setRecElapsed(0);
-      return;
-    }
-    const t0 = Date.now();
-    const id = setInterval(() => setRecElapsed(Math.floor((Date.now() - t0) / 1000)), 1000);
-    return () => clearInterval(id);
-  }, [recording]);
 
   const markNodeRunning = useCallback((nodeId: string) => {
     setStatuses((prev) => {
@@ -691,72 +635,6 @@ export default function ChatWindow() {
     if (sessionId) void cancelChat(sessionId, token);
     abortRef.current?.abort();
   }, [sessionId, token]);
-
-  // Send a recorded blob for transcription and insert the text into the
-  // composer (the user reviews and sends it through the normal chat flow).
-  const sendForTranscription = useCallback(
-    async (blob: Blob) => {
-      setTranscribing(true);
-      setRecError(null);
-      try {
-        const { text } = await transcribeAudio(blob, token);
-        if (text) setInput((prev) => (prev.trim() ? `${prev.trimEnd()} ${text}` : text));
-      } catch (err) {
-        setRecError(err instanceof Error ? err.message : "La transcription a échoué.");
-      } finally {
-        setTranscribing(false);
-      }
-    },
-    [token],
-  );
-
-  const startRecording = useCallback(async () => {
-    setRecError(null);
-    let stream: MediaStream | null = null;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      recorderRef.current = recorder;
-      streamRef.current = stream;
-      chunksRef.current = [];
-      discardRef.current = false;
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-      recorder.onstop = () => {
-        // Always release the microphone when recording ends.
-        recorder.stream.getTracks().forEach((t) => t.stop());
-        if (streamRef.current === stream) streamRef.current = null;
-        // Unmounted (or cancelled) mid-recording: no setState, no transcribe.
-        if (discardRef.current || !mountedRef.current) return;
-        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
-        void sendForTranscription(blob);
-      };
-      recorder.start();
-      setRecording(true);
-    } catch {
-      // getUserMedia succeeded but a later step threw: release the mic.
-      stream?.getTracks().forEach((t) => t.stop());
-      if (streamRef.current === stream) streamRef.current = null;
-      setRecError("Micro inaccessible. Vérifiez les autorisations du navigateur.");
-    }
-  }, [sendForTranscription]);
-
-  const stopRecording = useCallback(() => {
-    recorderRef.current?.stop();
-    recorderRef.current = null;
-    setRecording(false);
-  }, []);
-
-  const cancelRecording = useCallback(() => {
-    discardRef.current = true;
-    stopRecording();
-  }, [stopRecording]);
-
-  // Hard cap on recording length: auto-stop (and transcribe) at the limit.
-  useEffect(() => {
-    if (recording && recElapsed >= MAX_REC_SECONDS) stopRecording();
-  }, [recording, recElapsed, stopRecording]);
 
   const send = useCallback(async () => {
     const query = input.trim();
@@ -1306,22 +1184,6 @@ export default function ChatWindow() {
                   />
                 </div>
               )}
-              {recording && (
-                <div className="mb-2 flex items-center gap-2 text-sm text-red-700">
-                  <span className="relative flex h-3 w-3">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-600 opacity-75" />
-                    <span className="relative inline-flex h-3 w-3 rounded-full bg-red-600" />
-                  </span>
-                  Enregistrement… ({recElapsed}s / {MAX_REC_SECONDS}s max)
-                </div>
-              )}
-              {transcribing && (
-                <div className="mb-2 flex items-center gap-2 text-sm text-gray-500">
-                  <Loader2 className="h-4 w-4 animate-spin text-accent" />
-                  Transcription en cours…
-                </div>
-              )}
-              {recError && <p className="mb-2 text-sm text-red-700">{recError}</p>}
               <div className="relative">
               <textarea
                 value={input}
@@ -1330,32 +1192,11 @@ export default function ChatWindow() {
                 rows={2}
                 placeholder="Posez votre question."
                 className={`w-full resize-none rounded-xl border border-gray-200 bg-white py-3 pl-4 text-sm text-gray-900 placeholder:text-gray-400 focus:border-accent/60 focus:bg-white focus:outline-none disabled:opacity-60 ${
-                  recording ? "pr-24" : busy ? "pr-14" : micSupported ? "pr-[8.75rem]" : "pr-24"
+                  busy ? "pr-14" : "pr-24"
                 }`}
                 disabled={busy}
               />
-              {recording ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={cancelRecording}
-                    title="Annuler l'enregistrement"
-                    aria-label="Annuler l'enregistrement"
-                    className="absolute right-14 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-gray-200 text-gray-600 transition-colors hover:bg-gray-300"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={stopRecording}
-                    title="Arrêter et transcrire"
-                    aria-label="Arrêter et transcrire"
-                    className="absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-red-700 text-white transition-colors hover:bg-red-800"
-                  >
-                    <Square className="h-4 w-4" />
-                  </button>
-                </>
-              ) : busy ? (
+              {busy ? (
                 <button
                   type="button"
                   onClick={stop}
@@ -1373,9 +1214,7 @@ export default function ChatWindow() {
                     title="Choisir une date de référence (scénario « loi en vigueur au »)"
                     aria-label="Choisir une date de référence (scénario)"
                     aria-pressed={dateOpen}
-                    className={`absolute top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full transition-colors ${
-                      micSupported ? "right-[6.25rem]" : "right-14"
-                    } ${
+                    className={`absolute right-14 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full transition-colors ${
                       scenarioDate
                         ? "bg-accent/15 text-accent hover:bg-accent/25"
                         : "bg-gray-200 text-gray-600 hover:bg-gray-300"
@@ -1383,18 +1222,6 @@ export default function ChatWindow() {
                   >
                     <Calendar className="h-4 w-4" />
                   </button>
-                  {micSupported && (
-                    <button
-                      type="button"
-                      onClick={() => void startRecording()}
-                      disabled={transcribing}
-                      title="Dicter votre question"
-                      aria-label="Dicter votre question"
-                      className="absolute right-14 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-gray-200 text-gray-600 transition-colors hover:bg-gray-300 disabled:opacity-50"
-                    >
-                      <Mic className="h-4 w-4" />
-                    </button>
-                  )}
                   <button
                     type="button"
                     onClick={() => void send()}

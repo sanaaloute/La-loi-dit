@@ -69,9 +69,6 @@ Portage fidèle de la machine à états de résilience du web
   429 → bulle de quota.
 - Retour au premier plan (`AppState`) pendant un run : abandon immédiat de la
   socket tuée par l'OS et récupération silencieuse depuis l'historique.
-- Entrée vocale : micro `expo-audio` (30 s max) → `POST /chat/transcribe` →
-  texte inséré dans le champ de saisie pour relecture — jamais envoyé
-  automatiquement.
 - Compteur de 200 mots, bouton stop (AbortController + `POST /chat/cancel`),
   feedback 👍/👎 (`POST /chat/feedback`), export PDF/Word/CSV/Markdown vers la
   feuille de partage (`expo-file-system` + `expo-sharing`).

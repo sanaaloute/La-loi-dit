@@ -244,24 +244,6 @@ class Settings(BaseSettings):
     max_upload_bytes_admin: int = 100 * 1024 * 1024
     max_upload_bytes_user: int = 25 * 1024 * 1024
 
-    # --- speech-to-text (voice messages, POST /chat/transcribe) ---
-    # "litellm" (default: transcription via the LiteLLM gateway — OpenAI
-    # Whisper or any compatible endpoint, reusing the main LLM credentials) |
-    # "faster-whisper" (fully local; the package is import-guarded, so the
-    # platform runs unchanged without it and the endpoint reports 503).
-    stt_provider: str = "litellm"
-    stt_model: str = "whisper-1"  # LiteLLM transcription model
-    stt_language: str = "fr"
-    # Optional dedicated transcription endpoint credentials; when empty the
-    # main LLM api_key/api_base are reused (same convention as embeddings).
-    stt_api_key: str = ""
-    stt_api_base: str = ""
-    stt_timeout_seconds: float = 90.0
-    faster_whisper_model_size: str = "small"  # local Whisper model size
-    # Local Whisper model download cache; None = data_dir/"stt_models".
-    stt_models_dir: Optional[Path] = None
-    stt_max_audio_bytes: int = 25 * 1024 * 1024
-
     # --- chunking / ingestion ---
     # Legal docs use boundary-based parents (whole articles) with alinéa-based
     # children; ``chunk_parent_size`` only applies to the unstructured
@@ -469,11 +451,6 @@ class Settings(BaseSettings):
     def ocr_models_path(self) -> Path:
         """Effective OCR model cache directory (``ocr_models_dir`` or the default)."""
         return self.ocr_models_dir or (self.data_dir / "ocr_models")
-
-    @property
-    def stt_models_path(self) -> Path:
-        """Effective STT model cache directory (``stt_models_dir`` or the default)."""
-        return self.stt_models_dir or (self.data_dir / "stt_models")
 
     @property
     def is_production(self) -> bool:

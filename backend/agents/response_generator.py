@@ -201,6 +201,10 @@ class ResponseGeneratorAgent(CompletionAgent):
         # Direct/general routes: no evidence screening, citations or grounding.
         if state.get("route") in {"direct", "general"}:
             return await self._run_direct(state, ctx)
+        # Clarify route: the router found the message unintelligible — ask the
+        # user to rephrase instead of burning a corpus search on gibberish.
+        if state.get("route") == "clarify":
+            return self._run_clarify(state)
         # Retrieved-document injection screening (spec §42): sanitize the
         # evidence BEFORE it reaches the prompt. When every chunk is dropped,
         # the parse step follows the existing insufficient-evidence path.
@@ -393,6 +397,27 @@ class ResponseGeneratorAgent(CompletionAgent):
             "trace": [
                 *state.get("trace", []),
                 f"response_generator: {route} answer ({len(draft)} chars)",
+            ],
+        }
+
+    def _run_clarify(self, state: GraphState) -> dict[str, Any]:
+        """Deterministic clarification request for unintelligible input.
+
+        No retrieval, no LLM: the router established that the message cannot
+        be interpreted, so the honest (and instant) response asks the user to
+        rephrase, with a few example questions as guidance.
+        """
+        language = state.get("language") or "fr"
+        draft = get_prompt(
+            "RESPONSE_CLARIFY_EN" if language.startswith("en") else "RESPONSE_CLARIFY_FR"
+        )
+        answer = FinalAnswer(answer=draft, language=language, metadata={"route": "clarify"})
+        return {
+            "final_answer": answer,
+            "draft_answer": draft,
+            "trace": [
+                *state.get("trace", []),
+                f"{self.name}: clarify answer ({len(draft)} chars)",
             ],
         }
 

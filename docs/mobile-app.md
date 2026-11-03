@@ -15,7 +15,7 @@ The backend **is already an API gateway in every meaningful sense**: a standalon
 - `create_app()` at `backend/api/main.py:132`, served by uvicorn (`docker-compose.yml:39`).
 - Routers mounted under `/api/v1` include `auth`, `chat`, `search`, `documents`, `draft`, `export`, `models`, `usage`, `articles`, `citations`, `sources`, `legal`, `admin`, `bookmarks`, `freshness`, `push`, and `share`; there is no billing router.
 - Root probes outside the prefix: `GET /health`, `GET /ready`, `GET /metrics`.
-- JSON everywhere; multipart only for uploads (`POST /documents`, `POST /chat/transcribe`, admin upload). Errors are uniformly `{"detail": "..."}`.
+- JSON everywhere; multipart only for uploads (`POST /documents`, admin upload). Errors are uniformly `{"detail": "..."}`.
 
 ### Auth — already mobile-shaped
 
@@ -59,7 +59,7 @@ Ordered by severity:
 ## 3. What works as-is (no backend changes)
 
 - Register / login / refresh / `GET /auth/me`.
-- Full chat: SSE stream with heartbeats, cancel (`POST /chat/cancel`), feedback, voice input, sessions list/get/delete, run-status recovery polling. Voice input prefers **live dictation** (`expo-speech-recognition`: on-device on iOS, the platform SpeechRecognizer on Android, French, 30 s cap, partials streamed into the composer); when recognition is unavailable it falls back to recording + `POST /chat/transcribe` (multipart audio, 30 s cap).
+- Full chat: SSE stream with heartbeats, cancel (`POST /chat/cancel`), feedback, sessions list/get/delete, run-status recovery polling.
 - `GET /models` (read-only status for the fixed local role models, with `selectable: false`) and `GET /usage/me` (shared token/request budgets + 30-day history). Do not build a model picker; legacy model request values are ignored.
 - Drafting (`/draft/templates`, `POST /draft`) and export (`/export/*`) — mobile replaces the browser download with a share-sheet/save-file.
 - Search/citation endpoints the web UI doesn't even use yet (`/search`, `/articles`, `/citations/{chunk_id}`, `/sources`) — free features for the app.

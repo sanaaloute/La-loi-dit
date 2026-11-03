@@ -823,11 +823,6 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
     borderTopColor: colors.border,
     backgroundColor: colors.surfaceElevated,
   },
-  recRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 },
-  recDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.danger },
-  recText: { fontSize: 13, color: colors.danger },
-  transcribingText: { fontSize: 13, color: colors.muted },
-  recError: { fontSize: 13, color: colors.danger, marginBottom: 6 },
   composerRow: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
   input: {
     flex: 1,

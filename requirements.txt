@@ -73,13 +73,3 @@ opencv-contrib-python-headless==4.10.0.84
 
 # Export (PDF/Word)
 reportlab==4.1.0
-
-# Speech-to-text (voice messages, POST /chat/transcribe). The default
-# stt_provider is "litellm" (no extra dependency); faster-whisper powers the
-# optional fully-local provider and is import-guarded in backend/core/stt.py.
-# Its dependency tree (ctranslate2, onnxruntime, av, tokenizers) resolves to
-# cp312 manylinux wheels — verified with pip download (see
-# scripts/download_wheels.sh).
-faster-whisper==1.2.1
-# faster-whisper 1.2.1 is incompatible with PyAV 19 (metadata_errors removed).
-av>=11,<19

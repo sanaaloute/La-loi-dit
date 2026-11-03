@@ -7,7 +7,8 @@ Supports two providers:
   native stack.
 * ``paddleocr``: PaddleX/PaddleOCR engine. Kept for backwards compatibility, but
   it runs in a child process (``python -m backend.ingestion.ocr_worker``) because
-  paddlepaddle and ctranslate2 (faster-whisper STT) segfault the interpreter
+  paddlepaddle and ctranslate2 (the faster-whisper dependency, back when STT
+  was shipped) segfault the interpreter
   when their native stacks share a process — observed killing API workers
   mid-request.
 

@@ -164,7 +164,8 @@ them with **PaddleOCR** (French, CPU). Outcomes land in metadata:
 **Process isolation:** paddle runs only in a child process
 (`python -m backend.ingestion.ocr_worker`, one batch per document), driven by
 `backend/ingestion/ocr.py::ocr_images`. paddlepaddle and ctranslate2
-(faster-whisper STT) segfault the interpreter when their native stacks share
+(the faster-whisper dependency, back when STT was shipped) segfaulted the
+interpreter when their native stacks shared
 a process — observed in production killing uvicorn workers mid-request — so
 the API/worker processes must never import paddle. A crashed, timed-out or
 missing OCR child is non-fatal: text PDFs extract normally and scanned PDFs

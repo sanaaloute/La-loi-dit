@@ -28,10 +28,9 @@ import logging
 import time
 import uuid
 from datetime import date, datetime, timezone
-from pathlib import Path
 from typing import Any, AsyncIterator, Literal, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from langchain_core.callbacks import AsyncCallbackHandler
 from pydantic import BaseModel, ValidationError
@@ -39,10 +38,8 @@ from pydantic import BaseModel, ValidationError
 from backend.agents.query_router import is_direct_shortcut
 from backend.agents.response_generator import response_generator_node
 from backend.api.deps import get_ctx, get_graph, require_user
-from backend.core import stt
 from backend.core.answer_cache import AnswerCache, cache_identity, is_cacheable
 from backend.core.config import Settings
-from backend.core.exceptions import NoSpeechError, STTError
 from backend.core.model_router import check_budget, resolve_llm, resolve_model_entry
 from backend.core.llm import LLMClient
 from backend.core.models import ChatMessage, ChatRequest, ChatResponse, FinalAnswer, Role, parse_answer_json
@@ -677,10 +674,10 @@ async def _pump_events(
             if isinstance(update, dict) and isinstance(update.get("route"), str):
                 route = update["route"]
             node = event.get("node")
-            # response_generator is terminal only on the direct/general routes;
-            # on the retrieval route the verification nodes still follow it.
+            # response_generator is terminal only on the direct/general/clarify
+            # routes; on the retrieval route the verification nodes still follow.
             if node in _TERMINAL_GRAPH_NODES and (
-                node != "response_generator" or route in {"direct", "general"}
+                node != "response_generator" or route in {"direct", "general", "clarify"}
             ):
                 break
         await queue.put(("done", None))
@@ -1333,78 +1330,6 @@ async def chat_feedback(
         settings=settings,
     )
     return {"status": "recorded"}
-
-
-# ---------------------------------------------------------------------------
-# Audio transcription (voice input for the chat composer)
-# ---------------------------------------------------------------------------
-
-#: Accepted uploads: extension OR content-type must match (browsers are
-#: inconsistent about what MediaRecorder reports).
-_AUDIO_EXTENSIONS = {".webm", ".ogg", ".mp3", ".wav", ".m4a", ".mp4"}
-_AUDIO_CONTENT_TYPES = {"video/mp4", "application/ogg"}  # plus any audio/*
-
-
-@router.post("/chat/transcribe")
-async def chat_transcribe(
-    request: Request,
-    file: UploadFile = File(...),
-    user: TokenPayload = Depends(require_role(Role.VIEWER)),
-) -> dict[str, str]:
-    """Transcribe a voice message to text; the chat flow itself is unchanged.
-
-    The browser records with MediaRecorder and posts the blob here; the
-    returned text is inserted into the composer so the user reviews it and
-    sends it through the normal chat endpoints.
-    """
-    ctx = get_ctx(request)
-    settings: Settings = ctx.settings
-    # Same quota gate as the chat endpoints: over-budget users get a 429
-    # instead of free transcriptions.
-    await check_budget(ctx.user_store, user, settings)
-    ext = Path(file.filename or "").suffix.lower()
-    content_type = (file.content_type or "").lower()
-    if ext not in _AUDIO_EXTENSIONS and not (
-        content_type.startswith("audio/") or content_type in _AUDIO_CONTENT_TYPES
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="Format audio non pris en charge. Formats acceptés : webm, ogg, mp3, wav, m4a, mp4.",
-        )
-    audio = await file.read()
-    if len(audio) > settings.stt_max_audio_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail="Le fichier audio dépasse la taille maximale autorisée.",
-        )
-    if not audio:
-        raise HTTPException(status_code=400, detail="Le fichier audio est vide.")
-    if not stt.stt_available():
-        raise HTTPException(
-            status_code=503,
-            detail="La transcription audio n'est pas disponible sur ce serveur.",
-        )
-    try:
-        text = await stt.transcribe_audio(audio, file.filename or f"audio{ext or '.webm'}")
-    except NoSpeechError as exc:
-        # The clip held no usable speech (silent/broken capture): actionable
-        # 422, not a 502 — the fix is on the user's side, not the server's.
-        raise HTTPException(
-            status_code=422,
-            detail="Aucune voix détectée dans l'enregistrement. Parlez plus près du micro et réessayez.",
-        ) from exc
-    except STTError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail="La transcription a échoué. Réessayez ou saisissez votre question.",
-        ) from exc
-    # Meter one request, no tokens (same best-effort pattern as _meter).
-    if getattr(user, "user_id", None) and ctx.user_store is not None:
-        try:
-            await ctx.user_store.record_usage(user.user_id, 0, 0)
-        except Exception:
-            pass
-    return {"text": text}
 
 
 # ---------------------------------------------------------------------------

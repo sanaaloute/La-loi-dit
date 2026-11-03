@@ -1,8 +1,9 @@
 """Child-process OCR worker — the ONLY place paddle is loaded.
 
-PaddleOCR/paddlepaddle and ctranslate2 (faster-whisper STT) crash the
-interpreter with SIGSEGV when their native stacks share a process, so the
-API process must never import paddle. This module runs as
+PaddleOCR/paddlepaddle and ctranslate2 (the faster-whisper dependency, back
+when STT was shipped) crash the interpreter with SIGSEGV when their native
+stacks share a process, so the API process must never import paddle. This
+module runs as
 ``python -m backend.ingestion.ocr_worker <manifest.json>`` where the manifest
 is ``{"images": [path, ...], "out": result_json_path}``; it writes
 ``{image_path: recognized_text}`` JSON to ``out``. Exit code 0 means the
