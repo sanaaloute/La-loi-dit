@@ -66,11 +66,39 @@ export interface ConflictReport {
   resolved: boolean;
 }
 
+export type SupportLevel = "direct" | "indirect" | "insufficient" | "contradictory";
+
+export interface ClaimSource {
+  chunk_id: string;
+  document_name: string;
+  article?: string | null;
+  support_level: SupportLevel;
+}
+
+export interface Claim {
+  claim_id: string;
+  text: string;
+  support_level: SupportLevel;
+  sources: ClaimSource[];
+  verification_note?: string | null;
+}
+
+export interface ConfidenceBreakdown {
+  source_confidence: number;
+  retrieval_confidence: number;
+  legal_support_confidence: number;
+  temporal_confidence: number;
+  citation_confidence: number;
+  coverage: number;
+}
+
 export interface FinalAnswer {
   answer: string;
   citations: Citation[];
   evidence: EvidenceChunk[];
   confidence: number;
+  confidence_breakdown?: ConfidenceBreakdown | null;
+  claims?: Claim[];
   language: string;
   warnings: string[];
   conflicts: ConflictReport[];
@@ -237,14 +265,15 @@ export interface PipelineNode {
 export const PIPELINE_NODES: PipelineNode[] = [
   { id: "input_guardrail", label: "Garde-fou d'entrée" },
   { id: "refusal", label: "Refus" },
+  { id: "language_gate", label: "Détection / traduction" },
   { id: "query_router", label: "Analyse de la question" },
   { id: "planner", label: "Planificateur" },
   { id: "context_agent", label: "Agent de contexte" },
   { id: "memory_agent", label: "Agent mémoire" },
   { id: "retrieval_branch", label: "Recherches parallèles" },
   { id: "retrieval_merge", label: "Fusion des preuves" },
-  { id: "conflict_resolver", label: "Résolution de conflits" },
   { id: "parent_expansion", label: "Enrichissement des passages" },
+  { id: "conflict_resolver", label: "Résolution de conflits" },
   { id: "evidence_ranking", label: "Classement des preuves" },
   { id: "coverage_auditor", label: "Audit de couverture" },
   { id: "reasoning_agent", label: "Raisonnement" },
@@ -252,6 +281,7 @@ export const PIPELINE_NODES: PipelineNode[] = [
   { id: "response_generator", label: "Génération de la réponse" },
   { id: "claim_verification", label: "Vérification des affirmations" },
   { id: "citation_verification", label: "Vérification des citations" },
+  { id: "output_guardrail", label: "Contrôle final" },
 ];
 
 // ---------------------------------------------------------------------------

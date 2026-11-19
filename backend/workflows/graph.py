@@ -48,6 +48,7 @@ from backend.agents import (
     input_guardrail,
     language_gate,
     memory_agent,
+    output_guardrail,
     parent_expansion,
     query_router,
     reasoning_agent,
@@ -203,9 +204,9 @@ def build_graph(ctx: AppContext):
         return "response_generator"
 
     def _route_after_response(state: GraphState) -> str:
-        """Direct/general/clarify answers have no evidence for claim verification."""
+        """Direct/general/clarify answers skip claim verification and go to output_guardrail."""
         return (
-            END
+            "output_guardrail"
             if state.get("route") in {"direct", "general", "clarify"}
             else "claim_verification"
         )
@@ -220,15 +221,16 @@ def build_graph(ctx: AppContext):
     g.add_node("memory_agent", bind(memory_agent.memory_agent_node, role="classification"))
     g.add_node("retrieval_branch", bind(retrieval_node.retrieval_branch_node))
     g.add_node("retrieval_merge", bind(retrieval_node.retrieval_merge_node))
+    g.add_node("parent_expansion", bind(parent_expansion.parent_expansion_node))
     g.add_node("conflict_resolver", bind(conflict_resolver.conflict_resolver_node))
     g.add_node("evidence_ranking", bind(evidence_ranking.evidence_ranking_node))
-    g.add_node("parent_expansion", bind(parent_expansion.parent_expansion_node))
     g.add_node("coverage_auditor", bind(coverage_auditor.coverage_auditor_node))
     g.add_node("reasoning_agent", bind(reasoning_agent.reasoning_agent_node, role="analysis"))
     g.add_node("reflection_agent", bind(reflection_agent.reflection_agent_node, role="analysis"))
     g.add_node("citation_verification", bind(citation_verification.citation_verification_node))
     g.add_node("claim_verification", bind(claim_verification.claim_verification_node, role="classification"))
     g.add_node("response_generator", bind(response_generator.response_generator_node, role="synthesis"))
+    g.add_node("output_guardrail", bind(output_guardrail.output_guardrail_node))
 
     g.add_edge(START, "input_guardrail")
     g.add_conditional_edges("input_guardrail", _route_after_guardrail)
@@ -239,16 +241,17 @@ def build_graph(ctx: AppContext):
     g.add_edge("context_agent", "memory_agent")
     g.add_conditional_edges("memory_agent", _fanout_retrieval)
     g.add_edge("retrieval_branch", "retrieval_merge")
-    g.add_edge("retrieval_merge", "conflict_resolver")
-    g.add_edge("conflict_resolver", "parent_expansion")
-    g.add_edge("parent_expansion", "evidence_ranking")
+    g.add_edge("retrieval_merge", "parent_expansion")
+    g.add_edge("parent_expansion", "conflict_resolver")
+    g.add_edge("conflict_resolver", "evidence_ranking")
     g.add_edge("evidence_ranking", "coverage_auditor")
     g.add_conditional_edges("coverage_auditor", _route_after_coverage)
     g.add_conditional_edges("reasoning_agent", _route_after_reasoning)
     g.add_conditional_edges("reflection_agent", _route_after_reflection)
     g.add_conditional_edges("response_generator", _route_after_response)
     g.add_edge("claim_verification", "citation_verification")
-    g.add_edge("citation_verification", END)
+    g.add_edge("citation_verification", "output_guardrail")
+    g.add_edge("output_guardrail", END)
     return g.compile()
 
 

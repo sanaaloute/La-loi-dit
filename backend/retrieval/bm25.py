@@ -22,12 +22,53 @@ from backend.vectorstore.memory_store import matches_filters
 
 _SPLIT_RE = re.compile(r"[^0-9a-z]+")
 
+_FR_STOPWORDS = frozenset(
+    {
+        "le", "la", "les", "un", "une", "des", "du", "de", "d", "l",
+        "et", "ou", "en", "au", "aux", "a", "est", "sont", "etre", "avoir",
+        "pour", "par", "sur", "dans", "sous", "entre", "avec", "sans",
+        "ce", "cet", "cette", "ces", "se", "sa", "son", "ses", "leur", "leurs",
+        "qui", "que", "quoi", "quel", "quelle", "quels", "quelles", "dont",
+        "il", "elle", "ils", "elles", "on", "nous", "vous", "ne", "pas", "plus",
+        "si", "y", "car", "mais", "donc", "ni", "ou", "the", "of", "and", "to",
+        "in", "is", "are", "for", "on", "with", "what", "which", "how",
+    }
+)
+
+# Ordered longest-first common French inflection/derivation suffixes.
+_FR_SUFFIXES = (
+    "issements", "issement", "ations", "ation", "ements", "ement",
+    "eurs", "euses", "eur", "euse", "aux", "ales", "ale", "als",
+    "er", "ir", "ez", "ent", "ant", "es", "e", "s", "x",
+)
+
+
+def _stem_fr(token: str) -> str:
+    if len(token) <= 4 or token.isdigit():
+        return token
+    for suffix in _FR_SUFFIXES:
+        if token.endswith(suffix) and len(token) - len(suffix) >= 4:
+            stem = token[: -len(suffix)]
+            # Strip trailing plural/feminine 'e' after 'es' or 'i' if still >= 4 chars
+            if suffix == "es" and stem.endswith("i") and len(stem) >= 6:
+                return stem
+            return stem
+    return token
+
 
 def tokenize(text: str) -> list[str]:
-    """French-sane tokenizer: lowercase, strip accents, split non-alnum."""
+    """French-sane tokenizer: lowercase, strip accents, drop stopwords, dual-index stems."""
     normalized = unicodedata.normalize("NFKD", text.lower())
     ascii_text = "".join(c for c in normalized if not unicodedata.combining(c))
-    return [token for token in _SPLIT_RE.split(ascii_text) if token]
+    tokens: list[str] = []
+    for raw in _SPLIT_RE.split(ascii_text):
+        if not raw or raw in _FR_STOPWORDS:
+            continue
+        tokens.append(raw)
+        stem = _stem_fr(raw)
+        if stem != raw:
+            tokens.append(stem)
+    return tokens
 
 
 class _TfidfFallback:

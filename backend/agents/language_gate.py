@@ -29,12 +29,20 @@ from backend.core.state import GraphState
 
 # French diacritics catch marker-less French ("Préavis en cas de licenciement ?").
 _FR_DIACRITICS = frozenset("àâäéèêëîïôöùûüç")
+_FR_LEGAL_TERMS = (
+    "licenciement", "travail", "contrat", "tribunal", "procureur", "bail",
+    "loyer", "impot", "foncier", "divorce", "mariage", "succession", "testament",
+    "plainte", "delai", "recours", "peine", "amende", "sarl", "ohada",
+    "burkina", "faso", "juridiction", "preavis", "indemnite", "constitution",
+)
 
 
 def _looks_french(text: str) -> bool:
     lowered = f" {text.lower()} "
-    return any(m in lowered for m in _FR_MARKERS) or any(
-        c in _FR_DIACRITICS for c in lowered
+    return (
+        any(m in lowered for m in _FR_MARKERS)
+        or any(c in _FR_DIACRITICS for c in lowered)
+        or any(re.search(rf"\b{t}\b", lowered) for t in _FR_LEGAL_TERMS)
     )
 
 

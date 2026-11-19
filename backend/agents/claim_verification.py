@@ -63,7 +63,10 @@ logger = logging.getLogger(__name__)
 _CITATION_RE = re.compile(r"\[(\d+)\]")
 _HEADING_RE = re.compile(r"^\s*#{1,6}\s+")
 _LIST_MARKER_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+")
-_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?!\[\d+\])")
+# Avoid splitting on common French legal abbreviations (art., al., ch., cf., etc., M., Dr., Me., L., R., D.).
+_SENTENCE_SPLIT_RE = re.compile(
+    r"(?<!\bart\.)(?<!\bal\.)(?<!\bch\.)(?<!\bcf\.)(?<!\betc\.)(?<!\bM\.)(?<!\bDr\.)(?<!\bMe\.)(?<!\b[LRD]\.)(?<=[.!?])\s+(?!\[\d+\])"
+)
 _NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?")
 
 # FR + EN legal vocabulary marking a sentence as a substantive statement.

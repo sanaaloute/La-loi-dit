@@ -8,6 +8,7 @@ node translates the prose into state updates.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from backend.agents.agent import CompletionAgent
@@ -17,6 +18,49 @@ from backend.core.context import AppContext
 from backend.core.prompts import PromptRef
 from backend.core.state import GraphState
 from backend.ingestion.text_cleaning import repair_extraction_artifacts
+from backend.tools.legal_calculations import (
+    RuleNotFound,
+    compute_notice_period,
+    compute_severance,
+)
+
+
+def _deterministic_calculations(query: str) -> str:
+    """Run deterministic legal calculators when the query supplies concrete inputs."""
+    q = query.lower()
+    if not any(k in q for k in ("licenci", "préavis", "preavis", "indemnit", "anciennet")):
+        return ""
+    notes: list[str] = []
+
+    seniority_match = re.search(r"\b(\d+(?:[.,]\d+)?)\s*(?:ans?|ann[ée]es?)\b", q)
+    seniority = float(seniority_match.group(1).replace(",", ".")) if seniority_match else None
+
+    salary_match = re.search(r"\b(\d[\d\s.,]{2,})\s*(?:fcfa|f\s*cfa|cfa|francs?)\b", q)
+    salary: Optional[float] = None
+    if salary_match:
+        raw_num = re.sub(r"\s+", "", salary_match.group(1)).replace(",", ".")
+        try:
+            salary = float(raw_num)
+        except ValueError:
+            salary = None
+
+    if salary is not None and seniority is not None and any(k in q for k in ("indemnit", "licenci")):
+        try:
+            res = compute_severance(monthly_salary=salary, seniority_years=seniority)
+            notes.append(f"CALCUL DÉTERMINISTE (indemnité de licenciement) : {res.explanation}")
+        except (RuleNotFound, ValueError):
+            pass
+
+    for cat in ("cadre", "agent de maîtrise", "agent de maitrise", "technicien", "employé", "employe", "ouvrier", "journalier"):
+        if cat in q and any(k in q for k in ("préavis", "preavis", "licenci")):
+            try:
+                res = compute_notice_period(category=cat, seniority_years=seniority or 0.0)
+                notes.append(f"CALCUL DÉTERMINISTE (préavis) : {res.explanation}")
+                break
+            except (RuleNotFound, ValueError):
+                pass
+
+    return "\n".join(notes)
 
 
 class ReasoningAgent(CompletionAgent):
@@ -65,19 +109,25 @@ class ReasoningAgent(CompletionAgent):
             and coverage_report.coverage < ctx.settings.coverage_retry_threshold
         )
         needs_more = wants_retry and (thin or low_coverage)
+        calc_notes = _deterministic_calculations(state.get("original_query") or state.get("query", ""))
+        notes_text = text.strip()
+        if calc_notes:
+            notes_text = f"{notes_text}\n\n{calc_notes}" if notes_text else calc_notes
+
         if needs_more and retries < max_retries and not state.get("needs_more_retrieval"):
             return {
                 "needs_more_retrieval": True,
                 "tasks": state.get("plan", None) and state["plan"].tasks or state.get("tasks", []),
-                "reasoning_notes": text.strip(),
+                "reasoning_notes": notes_text,
                 "trace": [*state.get("trace", []), "reasoning: insufficient evidence, retry requested"],
             }
         return {
-            "reasoning_notes": text.strip(),
+            "reasoning_notes": notes_text,
             "needs_more_retrieval": False,
             "trace": [
                 *state.get("trace", []),
                 f"reasoning: analyzed {len(state.get('ranked_evidence', []))} evidence chunks"
+                + (" (+ deterministic calc)" if calc_notes else "")
                 + (" (retry declined: evidence sufficient)" if wants_retry else ""),
             ],
         }

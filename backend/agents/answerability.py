@@ -50,8 +50,6 @@ _ABSTENTION_PHRASES: tuple[str, ...] = tuple(
         "n'est pas mentionné",
         "ne figure pas dans les extraits",
         "ne figurent pas dans les extraits",
-        "il est nécessaire de consulter",
-        "il convient de consulter",
         "les sources fournies ne",
         "les extraits fournis ne",
         # FR — fixed pipeline messages (honest insufficiency paths)

@@ -57,6 +57,17 @@ _DIRECT_CLAUSE_PATTERNS = (
     r"bye( bye)?",
     r"goodbye",
     r"bonne (journée|journee|soirée|soiree|nuit)",
+    # acknowledgements / short conversational follow-ups
+    r"ok(ay)?",
+    r"d'accord",
+    r"compris",
+    r"parfait",
+    r"super",
+    r"entendu",
+    r"c'est noté",
+    r"c'est note",
+    r"bien reçu",
+    r"bien recu",
     # meta questions about the assistant
     r"qui (es-tu|es tu|êtes-vous|etes-vous)",
     r"que (peux[- ]tu|pouvez[- ]vous|sais[- ]tu|savez[- ]vous) faire( pour (moi|nous))?",
@@ -83,15 +94,20 @@ _CLAUSE_SPLIT = re.compile(r"[,;:!?.\n…]+")
 # These are checked before the LLM classifier so concrete legal questions keep
 # their corpus grounding even if the classifier misbehaves.
 _RETRIEVAL_SHORTCUT_PATTERNS = (
-    r"délai de prescription|prescription des actions|délais de prescription",
-    r"délai de recours|délai pour former|délai de pourvoi",
-    r"délai de préavis|préavis de licenciement|préavis de démission",
+    r"délai de prescription|delai de prescription|prescription des actions|délais de prescription",
+    r"délai de recours|delai de recours|délai pour former|délai de pourvoi",
+    r"délai de préavis|delai de preavis|préavis de licenciement|preavis de licenciement|préavis de démission",
     r"peine (prévue|encourt|encourue|infligée)",
-    r"article\s+\d+",
-    r"code (civil|pénal|du travail|de procédure|des personnes)",
-    r"droit (ohada|OHADA)",
-    r"SARL|SAS|SA\b|RCCM",
-    r"divorce|mariage|succession",
+    r"\barticle\s*(?:n[°o]?\s*)?\d+",
+    r"code (civil|pénal|penal|du travail|de procédure|des personnes|de la route|général des impôts|des impôts|foncier|des assurances)",
+    r"droit (ohada|du travail|pénal|civil|commercial|fiscal|foncier|constitutionnel|administratif)",
+    r"\b(sarl|sas|sa|snc|scs|rccm|ccja|ohada)\b",
+    r"\b(licenciement|licencié|licencie|indemnité de licenciement|faute lourde|contrat de travail)\b",
+    r"\b(divorce|mariage|succession|testament|pension alimentaire|garde d'enfant|autorité parentale)\b",
+    r"\b(titre foncier|bail commercial|bail d'habitation|loyer|expulsion)\b",
+    r"\b(procureur|garde à vue|mise en examen|infraction|escroquerie|abus de confiance|vol)\b",
+    r"\b(tva|impôt sur|patente|taxe|douane)\b",
+    r"\bconstitution\b",
 )
 _RETRIEVAL_SHORTCUTS = tuple(re.compile(p, re.IGNORECASE) for p in _RETRIEVAL_SHORTCUT_PATTERNS)
 

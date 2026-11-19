@@ -123,14 +123,15 @@ function ThinkingBlock({ text, live = false }: { text: string; live?: boolean })
 const STEP_LABELS: Record<string, string> = {
   input_guardrail: "Vérification des règles de sécurité…",
   refusal: "Vérification des limites…",
+  language_gate: "Détection de la langue…",
   query_router: "Analyse de votre requête…",
   planner: "Planification de la recherche…",
   context_agent: "Analyse du contexte…",
   memory_agent: "Consultation de la mémoire…",
   retrieval_branch: "Recherche documentaire…",
   retrieval_merge: "Fusion des résultats…",
-  conflict_resolver: "Résolution des conflits…",
   parent_expansion: "Enrichissement des passages…",
+  conflict_resolver: "Résolution des conflits…",
   evidence_ranking: "Classement des preuves…",
   coverage_auditor: "Vérification de la couverture…",
   reasoning_agent: "Raisonnement juridique…",
@@ -138,6 +139,7 @@ const STEP_LABELS: Record<string, string> = {
   response_generator: "Rédaction de la réponse…",
   claim_verification: "Vérification des affirmations…",
   citation_verification: "Vérification des citations…",
+  output_guardrail: "Contrôle final de conformité…",
 };
 
 /** Starter questions on the empty chat screen; the persona (chosen at

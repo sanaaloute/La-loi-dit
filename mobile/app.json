@@ -24,12 +24,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "permissions": [
-        "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
-      ]
+      "permissions": []
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -41,7 +36,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Yawoto accède à votre photothèque pour définir votre photo de profil."
+          "photosPermission": "Yawoto accède à votre photothèque pour définir votre photo de profil.",
+          "microphonePermission": false
         }
       ],
       "expo-sharing",

@@ -33,18 +33,26 @@ Do not put the token in client-side browser code, public repositories, logs or U
 
 ## Available models
 
-Chat models (choose by role in your workflow):
+Chat models (call these with `POST /v1/chat/completions`):
 
 - `gemma4-e4b` — classification / routing between agents
 - `qwen2.5-7b` — planning / plan generation
 - `nemotron-3-nano` — analysis & synthesis; grounds answers with citations and abstains when unsure
+- `nemotron-3.5-bolt-e4b` — general-purpose chat, reasoning and tool use; loads on first request
+- `qwen3-vl-30b` — multimodal chat for text and image input; loads on first request and uses its projector
 
 Embedding models:
 
 - `qwen3-embedding-0.6b` — 1024-dimensional embeddings; fast and light
 - `qwen3-embedding-8b` — 4096-dimensional embeddings; best retrieval quality for RAG
 
-All three chat models and `qwen3-embedding-8b` are always loaded — calls start instantly. `qwen3-embedding-0.6b` loads automatically on first request — expect a few extra seconds on that first call, then normal speed.
+Decision model (call this with `POST /v1/systemone`, not chat completions):
+
+- `nimble-9b` — structured decisions through Ollama's systemone API; available in the model catalog, decision-only
+
+The three existing chat models and `qwen3-embedding-8b` are loaded at startup. The two added chat models and `qwen3-embedding-0.6b` load automatically on first request, so the first call includes model-load latency. The chat router keeps at most three models loaded; an on-demand model may evict an idle chat model. Nimble loads through Ollama on first decision and shares the Mac's unified memory; its Ollama `keep_alive` setting can be set to `0` to unload it after a request.
+
+Nimble scored 15/15 on a small synthetic decision smoke set, with a 0.68 s warm median and 7.98 s first request including model load. This is not a measure of real-world legal or financial reliability.
 
 Note: `nemotron-3-nano` and `gemma4-e4b` are reasoning models — give them enough `max_tokens` (e.g. 1500) so the final answer fits after the reasoning. See Reasoning (thinking) below for how to turn reasoning off per request.
 
@@ -147,6 +155,54 @@ curl -N http://127.0.0.1:4010/v1/chat/completions \
 ```
 
 Read each `data:` event until `data: [DONE]`.
+
+## Image input
+
+Use `qwen3-vl-30b` when the request includes an image. For example, pass a base64-encoded image as a data URL:
+
+```json
+{
+  "model": "qwen3-vl-30b",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "Describe this image."},
+        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,BASE64_ENCODED_JPEG"}}
+      ]
+    }
+  ],
+  "max_tokens": 512
+}
+```
+
+Send this body to `POST /v1/chat/completions`. The Qwen3-VL projector is configured for this model; keep images reasonably sized to avoid oversized requests.
+
+## Nimble decisions
+
+Nimble is a decision model, not a chat model. It appears as `nimble-9b` in `GET /v1/models` and accepts the Ollama systemone request shape through the authenticated gateway:
+
+```bash
+curl http://127.0.0.1:4010/v1/systemone \
+  -H "Authorization: Bearer $APP_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "nimble-9b",
+    "state": "Task A is complete. Task B depends only on Task A.",
+    "questions": {
+      "can_start": {
+        "type": "noul",
+        "instructions": "Can Task B start now?",
+        "criteria": {
+          "true": "Task B is ready to start.",
+          "false": "Task B is not ready to start."
+        }
+      }
+    }
+  }'
+```
+
+The response contains the decision under `answers.can_start.noul`. Use a `choice` question with named criteria when selecting among multiple alternatives. A key restricted to specific models must include `nimble-9b`. Calling Nimble through `/v1/chat/completions` returns HTTP 405; use `/v1/systemone`.
 
 ## Tool calling
 

@@ -129,12 +129,16 @@ class OutputGuardrailAgent(Agent):
                 ]
                 salvaged = True
 
-        # A partial answer that declares a coverage gap but still answers part
-        # of the question keeps its body — its sub-0.55 badge is honest and
-        # replacing it wholesale would discard usable content. Replacement is
-        # reserved for answers with no usable content.
+        # A partial answer that declares a coverage gap or carries verified
+        # citations with moderate confidence keeps its body — replacing it
+        # wholesale discards usable, cited legal text. Only replace when there
+        # are no verified citations/evidence or confidence is critically low
+        # (< 0.35) and nothing was salvaged.
+        has_verified_citations = any(c.verified for c in (answer.citations or []))
         keeps_body = (
-            bool(answer.metadata.get("abstention_partial")) or salvaged
+            bool(answer.metadata.get("abstention_partial"))
+            or salvaged
+            or (has_verified_citations and answer.confidence >= 0.35)
         ) and bool(answer.evidence)
         low_confidence = (
             route == "retrieval"
@@ -159,7 +163,7 @@ class OutputGuardrailAgent(Agent):
             note = get_prompt("GENERAL_KNOWLEDGE_NOTE_EN" if english else "GENERAL_KNOWLEDGE_NOTE_FR")
             if note.strip() not in answer.answer:
                 answer.answer = answer.answer.rstrip() + note
-        elif route != "direct":
+        elif route not in ("direct", "clarify"):
             full = get_prompt("DISCLAIMER_EN" if english else "DISCLAIMER_FR")
             note = get_prompt("INFO_NOTE_EN" if english else "INFO_NOTE_FR")
             # Claim verification flagged deductions or unverifiable statements:
