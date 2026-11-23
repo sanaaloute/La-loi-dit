@@ -39,7 +39,7 @@ import {
   type LatestRelease,
 } from "../../src/lib/release";
 import { getToken } from "../../src/lib/storage";
-import type { ThemeColors } from "../../src/theme";
+import { serifFont, type ThemeColors } from "../../src/theme";
 import { useTheme } from "../../src/theme-context";
 import { ErrorText, PasswordField, PrimaryButton, TextField } from "../../src/components/ui";
 
@@ -271,6 +271,7 @@ export default function AccountScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
+        <Ionicons name="person-circle-outline" size={17} color={colors.gold} />
         <Text style={styles.headerTitle}>Compte</Text>
       </View>
       <ScrollView contentContainerStyle={styles.scroll}>
@@ -547,13 +548,16 @@ export default function AccountScreen() {
 const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   header: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     backgroundColor: colors.surfaceElevated,
   },
-  headerTitle: { fontSize: 17, fontWeight: "700", color: colors.ink },
+  headerTitle: { fontFamily: serifFont, fontSize: 20, fontWeight: "700", color: colors.ink },
   scroll: { padding: 16, gap: 14, paddingBottom: 32 },
   card: {
     borderWidth: 1,

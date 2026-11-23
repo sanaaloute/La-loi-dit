@@ -8,7 +8,7 @@ import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { putPreferences } from "../src/lib/api";
 import { markOnboarded, PERSONA_OPTIONS, type PersonaId } from "../src/lib/persona";
-import type { ThemeColors } from "../src/theme";
+import { serifFont, type ThemeColors } from "../src/theme";
 import { useTheme } from "../src/theme-context";
 
 export default function OnboardingScreen() {
@@ -38,7 +38,7 @@ export default function OnboardingScreen() {
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
       <View style={styles.header}>
         <View style={styles.logo}>
-          <Ionicons name="scale" size={30} color="#fff" />
+          <Ionicons name="scale" size={30} color={colors.gold} />
         </View>
         <Text style={styles.title}>Bienvenue sur Yawoto</Text>
         <Text style={styles.subtitle}>
@@ -99,12 +99,12 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 18,
-    backgroundColor: colors.accent,
+    backgroundColor: colors.goldLight,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 14,
   },
-  title: { fontSize: 21, fontWeight: "700", color: colors.ink, textAlign: "center" },
+  title: { fontFamily: serifFont, fontSize: 22, fontWeight: "700", color: colors.ink, textAlign: "center" },
   subtitle: {
     fontSize: 14,
     lineHeight: 20,

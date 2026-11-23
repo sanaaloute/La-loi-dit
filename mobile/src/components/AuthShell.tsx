@@ -2,7 +2,7 @@ import React, { useMemo } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
-import type { ThemeColors } from "../theme";
+import { serifFont, type ThemeColors } from "../theme";
 import { useTheme } from "../theme-context";
 
 /** Shared shell for the auth screens: brand header + scrollable card. */
@@ -26,7 +26,7 @@ export default function AuthShell({
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <View style={styles.brand}>
             <View style={styles.logo}>
-              <Ionicons name="scale" size={30} color="#fff" />
+              <Ionicons name="scale" size={30} color={colors.gold} />
             </View>
             <Text style={styles.appName}>Yawoto</Text>
             <Text style={styles.tagline}>Le droit, cité à la source.</Text>
@@ -51,13 +51,13 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 18,
-    backgroundColor: colors.accent,
+    backgroundColor: colors.goldLight,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 12,
   },
-  appName: { fontSize: 24, fontWeight: "700", color: colors.ink },
-  tagline: { fontSize: 13, color: colors.muted, marginTop: 2 },
+  appName: { fontFamily: serifFont, fontSize: 26, fontWeight: "700", color: colors.ink },
+  tagline: { fontFamily: serifFont, fontSize: 14, fontWeight: "600", color: colors.gold, marginTop: 2 },
   card: {
     backgroundColor: colors.surfaceElevated,
     borderWidth: 1,

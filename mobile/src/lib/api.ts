@@ -1146,6 +1146,224 @@ export async function deleteBookmark(id: string, token?: string | null): Promise
 // ---------------------------------------------------------------------------
 // Share (public read-only answer links)
 // ---------------------------------------------------------------------------
+// Dossiers (backend/api/routers/dossiers.py): personal documents uploaded
+// for AI analysis — upload, list, read the extracted text, ask questions.
+// ---------------------------------------------------------------------------
+
+export interface Dossier {
+  id: string;
+  name: string;
+  original_name: string;
+  extension: string;
+  size_bytes: number;
+  char_count: number;
+  page_count: number;
+  status: string; // ready | error
+  error: string;
+  folder_id: string;
+  created_at: string;
+}
+
+export interface DossierText {
+  dossier: Dossier;
+  text: string;
+}
+
+export interface DossierAnalysis {
+  answer: string;
+  truncated: boolean;
+  chars_used: number;
+}
+
+/** Local file descriptor for the upload (expo-document-picker asset shape). */
+export interface DossierUploadFile {
+  uri: string;
+  name: string;
+  mimeType?: string;
+}
+
+/** Upload one personal document (PDF/TXT/MD/DOCX) and extract its text. */
+export async function uploadDossier(
+  file: DossierUploadFile,
+  title: string,
+  token?: string | null,
+  folderId?: string,
+): Promise<Dossier> {
+  const form = new FormData();
+  form.append("file", {
+    uri: file.uri,
+    name: file.name,
+    type: file.mimeType ?? "application/octet-stream",
+  } as unknown as Blob);
+  if (title.trim()) form.append("title", title.trim());
+  if (folderId) form.append("folder_id", folderId);
+  const res = await apiFetch("/dossiers", { method: "POST", token, body: form });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec de l'envoi du document (${res.status})`, res.status);
+  }
+  return (await res.json()) as Dossier;
+}
+
+/** Newest-first dossiers of the current user. */
+export async function listDossiers(token?: string | null): Promise<Dossier[]> {
+  const res = await apiFetch("/dossiers", { token });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec du chargement de vos dossiers (${res.status})`, res.status);
+  }
+  return (await res.json()) as Dossier[];
+}
+
+/** Full extracted text of one dossier (owner-scoped). */
+export async function getDossierText(id: string, token?: string | null): Promise<DossierText> {
+  const res = await apiFetch(`/dossiers/${encodeURIComponent(id)}/text`, { token });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec du chargement du document (${res.status})`, res.status);
+  }
+  return (await res.json()) as DossierText;
+}
+
+/** 204 on success; 404 when the dossier is foreign or unknown. */
+export async function deleteDossier(id: string, token?: string | null): Promise<void> {
+  const res = await apiFetch(`/dossiers/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    token,
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec de la suppression du dossier (${res.status})`, res.status);
+  }
+}
+
+/** Ask one question grounded exclusively on the dossier's text. */
+export async function analyzeDossier(
+  id: string,
+  question: string,
+  token?: string | null,
+): Promise<DossierAnalysis> {
+  const res = await apiFetch(`/dossiers/${encodeURIComponent(id)}/analyze`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    token,
+    body: JSON.stringify({ question }),
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec de l'analyse (${res.status})`, res.status);
+  }
+  return (await res.json()) as DossierAnalysis;
+}
+
+// --- Case folders: group several documents into one case ---
+
+export interface DossierFolder {
+  id: string;
+  name: string;
+  description: string;
+  document_count: number;
+  created_at: string;
+}
+
+export interface FolderAnalysis {
+  answer: string;
+  mode: string;
+  confidence: number;
+  citations: { label: string; document_name?: string; article?: string | null; url?: string | null }[];
+  documents_used: string[];
+  truncated: boolean;
+}
+
+/** Create one case folder. */
+export async function createFolder(
+  name: string,
+  description: string,
+  token?: string | null,
+): Promise<DossierFolder> {
+  const res = await apiFetch("/dossiers/folders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    token,
+    body: JSON.stringify({ name, description }),
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec de la création du dossier (${res.status})`, res.status);
+  }
+  return (await res.json()) as DossierFolder;
+}
+
+/** Newest-first folders of the current user, with document counts. */
+export async function listFolders(token?: string | null): Promise<DossierFolder[]> {
+  const res = await apiFetch("/dossiers/folders", { token });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec du chargement de vos dossiers (${res.status})`, res.status);
+  }
+  return (await res.json()) as DossierFolder[];
+}
+
+/** Delete one folder; with deleteDocuments its documents are removed too. */
+export async function deleteFolder(
+  id: string,
+  deleteDocuments: boolean,
+  token?: string | null,
+): Promise<void> {
+  const res = await apiFetch(
+    `/dossiers/folders/${encodeURIComponent(id)}${deleteDocuments ? "?delete_documents=true" : ""}`,
+    { method: "DELETE", token },
+  );
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec de la suppression du dossier (${res.status})`, res.status);
+  }
+}
+
+/** Move one document into a folder (folderId "" unfiles it). */
+export async function moveDossier(
+  id: string,
+  folderId: string,
+  token?: string | null,
+): Promise<Dossier> {
+  const res = await apiFetch(`/dossiers/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    token,
+    body: JSON.stringify({ folder_id: folderId }),
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec du déplacement (${res.status})`, res.status);
+  }
+  return (await res.json()) as Dossier;
+}
+
+/**
+ * Ask one question about a whole case folder.
+ * mode "case": folder documents + legal corpus (full analysis with citations).
+ * mode "documents": grounded exclusively on the folder's documents.
+ */
+export async function analyzeFolder(
+  id: string,
+  question: string,
+  mode: "case" | "documents",
+  token?: string | null,
+): Promise<FolderAnalysis> {
+  const res = await apiFetch(`/dossiers/folders/${encodeURIComponent(id)}/analyze`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    token,
+    body: JSON.stringify({ question, mode }),
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Échec de l'analyse (${res.status})`, res.status);
+  }
+  return (await res.json()) as FolderAnalysis;
+}
+
+// ---------------------------------------------------------------------------
 
 export interface SharePayload {
   query: string;

@@ -11,10 +11,11 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import CitationPanel from "../../src/components/CitationPanel";
-import Markdown from "../../src/components/Markdown";
-import { PrimaryButton, TextField } from "../../src/components/ui";
+import CitationPanel from "../src/components/CitationPanel";
+import Markdown from "../src/components/Markdown";
+import { PrimaryButton, TextField } from "../src/components/ui";
 import {
   ApiError,
   createDraft,
@@ -22,10 +23,10 @@ import {
   type DraftField,
   type DraftResponse,
   type DraftTemplate,
-} from "../../src/lib/api";
-import { shareDraftExport, type MenuFormat } from "../../src/lib/export";
-import type { ThemeColors } from "../../src/theme";
-import { useTheme } from "../../src/theme-context";
+} from "../src/lib/api";
+import { shareDraftExport, type MenuFormat } from "../src/lib/export";
+import { serifFont, type ThemeColors } from "../src/theme";
+import { useTheme } from "../src/theme-context";
 
 type Step = "templates" | "form" | "result";
 
@@ -88,6 +89,7 @@ function FieldInput({
 
 export default function DraftScreen() {
   const { colors } = useTheme();
+  const router = useRouter();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [templates, setTemplates] = useState<DraftTemplate[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -389,6 +391,10 @@ export default function DraftScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
+        <Pressable onPress={() => router.back()} style={styles.backButton} accessibilityLabel="Retour">
+          <Ionicons name="chevron-back" size={20} color={colors.accent} />
+        </Pressable>
+        <Ionicons name="create-outline" size={17} color={colors.gold} />
         <Text style={styles.headerTitle}>Rédaction</Text>
       </View>
       <View style={styles.flex}>{body}</View>
@@ -400,18 +406,22 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   flex: { flex: 1 },
   header: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     backgroundColor: colors.surfaceElevated,
   },
-  headerTitle: { fontSize: 17, fontWeight: "700", color: colors.ink },
+  headerTitle: { fontFamily: serifFont, fontSize: 20, fontWeight: "700", color: colors.ink },
+  backButton: { paddingVertical: 4, paddingRight: 4, marginLeft: -6 },
   scroll: { padding: 16, paddingBottom: 24 },
   centerBlock: { flex: 1, alignItems: "center", justifyContent: "center", gap: 10, padding: 24 },
   mutedText: { fontSize: 13, color: colors.muted },
   errorText: { fontSize: 12, color: colors.danger },
-  pageTitle: { fontSize: 20, fontWeight: "600", color: colors.ink },
+  pageTitle: { fontFamily: serifFont, fontSize: 20, fontWeight: "700", color: colors.ink },
   pageSubtitle: { fontSize: 13, color: colors.muted, marginTop: 4, marginBottom: 12 },
   searchField: { marginBottom: 16 },
   emptySearch: { fontSize: 13, color: colors.muted, textAlign: "center", paddingVertical: 32 },

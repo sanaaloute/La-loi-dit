@@ -29,7 +29,7 @@ import {
 } from "../../src/lib/api";
 import { useAuth } from "../../src/lib/auth";
 import { localLongDate } from "../../src/lib/format";
-import type { ThemeColors } from "../../src/theme";
+import { serifFont, type ThemeColors } from "../../src/theme";
 import { useTheme } from "../../src/theme-context";
 
 const FOLDER_LABELS: Record<string, string> = {
@@ -323,7 +323,8 @@ export default function ExplorerScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Explorer</Text>
+        <Ionicons name="library" size={17} color={colors.gold} />
+        <Text style={styles.headerBrandTitle}>Sources officielles</Text>
       </View>
       <View style={styles.searchRow}>
         <Ionicons name="search" size={16} color={colors.faint} />
@@ -469,6 +470,7 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
     backgroundColor: colors.surfaceElevated,
   },
   headerTitle: { flex: 1, fontSize: 17, fontWeight: "700", color: colors.ink },
+  headerBrandTitle: { fontFamily: serifFont, fontSize: 20, fontWeight: "700", color: colors.ink },
   backButton: {
     flexDirection: "row",
     alignItems: "center",

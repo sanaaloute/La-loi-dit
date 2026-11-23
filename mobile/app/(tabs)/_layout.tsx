@@ -3,6 +3,9 @@ import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../../src/theme-context";
 
+// Tab bar mirrors the web sidebar: Accueil, Veille, Sources, Dossiers, Compte.
+// History lives in the chat header (drawer pattern, like the web) and the
+// drafting tool is reached from the chat empty state.
 export default function TabsLayout() {
   const { colors } = useTheme();
   return (
@@ -12,42 +15,48 @@ export default function TabsLayout() {
         // Keyboard open => hide the tab bar (keeps the chat composer and form
         // inputs fully visible; pairs with android softwareKeyboardLayoutMode "pan").
         tabBarHideOnKeyboard: true,
-        tabBarActiveTintColor: colors.accent,
-        tabBarInactiveTintColor: colors.faint,
-        tabBarStyle: { backgroundColor: colors.surfaceElevated, borderTopColor: colors.border },
+        // Mirrors the web sidebar: fixed deep navy in both themes, gold active.
+        tabBarActiveTintColor: colors.gold,
+        tabBarInactiveTintColor: colors.sidebarText,
+        tabBarStyle: {
+          backgroundColor: colors.sidebarBg,
+          borderTopColor: "rgba(255, 255, 255, 0.08)",
+        },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          title: "Chat",
+          title: "Accueil",
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="chatbubble-ellipses-outline" size={size} color={color} />
+            <Ionicons name="home-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="veille"
+        options={{
+          title: "Veille",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="notifications-outline" size={size} color={color} />
           ),
         }}
       />
       <Tabs.Screen
         name="explorer"
         options={{
-          title: "Explorer",
+          title: "Sources",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="library-outline" size={size} color={color} />
           ),
         }}
       />
       <Tabs.Screen
-        name="history"
+        name="dossiers"
         options={{
-          title: "Historique",
-          tabBarIcon: ({ color, size }) => <Ionicons name="time-outline" size={size} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="draft"
-        options={{
-          title: "Rédaction",
+          title: "Dossiers",
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="document-text-outline" size={size} color={color} />
+            <Ionicons name="folder-open-outline" size={size} color={color} />
           ),
         }}
       />

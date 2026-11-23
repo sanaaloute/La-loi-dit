@@ -15,6 +15,7 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import * as Clipboard from "expo-clipboard";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AnswerView from "../../src/components/AnswerView";
@@ -40,7 +41,7 @@ import {
 } from "../../src/lib/chat";
 import { formatMessageTime } from "../../src/lib/format";
 import { suggestionsForPersona } from "../../src/lib/persona";
-import type { ThemeColors } from "../../src/theme";
+import { serifFont, type ThemeColors } from "../../src/theme";
 import { useTheme } from "../../src/theme-context";
 
 const SUGGESTIONS = [
@@ -87,6 +88,7 @@ type ChatStyles = ReturnType<typeof makeStyles>;
 
 export default function ChatScreen() {
   const { token } = useAuth();
+  const router = useRouter();
   const { colors, isDark, toggleTheme } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const snapshot = useSyncExternalStore(chatEngine.subscribe, chatEngine.getSnapshot);
@@ -452,8 +454,20 @@ export default function ChatScreen() {
     <SafeAreaView style={styles.safe} edges={["top"]}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Yawoto</Text>
+        <View style={styles.brandRow}>
+          <View style={styles.brandTile}>
+            <Ionicons name="scale" size={15} color={colors.gold} />
+          </View>
+          <Text style={styles.headerTitle}>Yawoto</Text>
+        </View>
         <View style={styles.headerActions}>
+          <Pressable
+            onPress={() => router.push("/history")}
+            style={styles.headerButton}
+            accessibilityLabel="Ouvrir l'historique"
+          >
+            <Ionicons name="time-outline" size={18} color={colors.inkSoft} />
+          </Pressable>
           <Pressable
             onPress={() => chatEngine.newConversation()}
             style={styles.newChatButton}
@@ -493,9 +507,10 @@ export default function ChatScreen() {
             keyboardShouldPersistTaps="handled"
           >
             <View style={styles.emptyLogo}>
-              <Ionicons name="scale" size={34} color="#fff" />
+              <Ionicons name="scale" size={34} color={colors.gold} />
             </View>
-            <Text style={styles.emptyTitle}>Le droit, cité à la source.</Text>
+            <Text style={styles.emptyBrand}>Yawoto</Text>
+            <Text style={styles.emptyTagline}>Le droit, cité à la source.</Text>
             <Text style={styles.emptyBody}>
               Posez vos questions en français. Yawoto répond à partir des textes officiels du
               Burkina Faso et de l'OHADA, avec citations vérifiables et traçabilité complète.
@@ -507,6 +522,21 @@ export default function ChatScreen() {
                 </Pressable>
               ))}
             </View>
+            <Pressable
+              onPress={() => router.push("/draft")}
+              style={styles.draftCard}
+              accessibilityRole="button"
+              accessibilityLabel="Ouvrir la rédaction juridique"
+            >
+              <Ionicons name="create-outline" size={20} color={colors.gold} />
+              <View style={styles.draftTextBlock}>
+                <Text style={styles.draftTitle}>Rédaction juridique</Text>
+                <Text style={styles.draftBody}>
+                  Contrats et actes de procédure générés à partir de modèles.
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={14} color={colors.faint} />
+            </Pressable>
           </ScrollView>
         ) : (
           <FlatList
@@ -693,7 +723,16 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
     backgroundColor: colors.surfaceElevated,
     zIndex: 10,
   },
-  headerTitle: { fontSize: 17, fontWeight: "700", color: colors.accent },
+  brandRow: { flexDirection: "row", alignItems: "center", gap: 9 },
+  brandTile: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: colors.goldLight,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerTitle: { fontFamily: serifFont, fontSize: 20, fontWeight: "700", color: colors.ink },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 4 },
   headerButton: { padding: 8, borderRadius: 8 },
   newChatButton: {
@@ -714,12 +753,20 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 20,
-    backgroundColor: colors.accent,
+    backgroundColor: colors.goldLight,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 16,
   },
-  emptyTitle: { fontSize: 22, fontWeight: "600", color: colors.ink, textAlign: "center" },
+  emptyBrand: { fontFamily: serifFont, fontSize: 30, fontWeight: "700", color: colors.ink },
+  emptyTagline: {
+    fontFamily: serifFont,
+    fontSize: 17,
+    fontWeight: "600",
+    color: colors.gold,
+    textAlign: "center",
+    marginTop: 4,
+  },
   emptyBody: {
     fontSize: 14,
     lineHeight: 21,
@@ -737,6 +784,21 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
     padding: 14,
   },
   suggestionText: { fontSize: 13, color: colors.inkSoft },
+  draftCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    alignSelf: "stretch",
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: colors.gold,
+    backgroundColor: colors.goldLight,
+    borderRadius: 12,
+    padding: 14,
+  },
+  draftTextBlock: { flex: 1 },
+  draftTitle: { fontFamily: serifFont, fontSize: 15, fontWeight: "700", color: colors.ink },
+  draftBody: { fontSize: 12, lineHeight: 17, color: colors.muted, marginTop: 2 },
   messageList: { padding: 16, gap: 14, paddingBottom: 8 },
   userRow: { flexDirection: "row", justifyContent: "flex-end" },
   userBubble: {

@@ -11,7 +11,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import Markdown from "../../src/components/Markdown";
+import Markdown from "../src/components/Markdown";
 import {
   deleteBookmark,
   deleteSession,
@@ -19,12 +19,12 @@ import {
   listSessions,
   type Bookmark,
   type ChatSessionSummary,
-} from "../../src/lib/api";
-import { useAuth } from "../../src/lib/auth";
-import { chatEngine } from "../../src/lib/chat";
-import { relativeDate } from "../../src/lib/format";
-import type { ThemeColors } from "../../src/theme";
-import { useTheme } from "../../src/theme-context";
+} from "../src/lib/api";
+import { useAuth } from "../src/lib/auth";
+import { chatEngine } from "../src/lib/chat";
+import { relativeDate } from "../src/lib/format";
+import { serifFont, type ThemeColors } from "../src/theme";
+import { useTheme } from "../src/theme-context";
 
 type Segment = "sessions" | "bookmarks";
 
@@ -153,6 +153,10 @@ export default function HistoryScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
+        <Pressable onPress={() => router.back()} style={styles.backButton} accessibilityLabel="Retour">
+          <Ionicons name="chevron-back" size={20} color={colors.accent} />
+        </Pressable>
+        <Ionicons name="time-outline" size={17} color={colors.gold} />
         <Text style={styles.headerTitle}>Historique</Text>
       </View>
 
@@ -306,13 +310,17 @@ export default function HistoryScreen() {
 const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   header: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     backgroundColor: colors.surfaceElevated,
   },
-  headerTitle: { fontSize: 17, fontWeight: "700", color: colors.ink },
+  headerTitle: { fontFamily: serifFont, fontSize: 20, fontWeight: "700", color: colors.ink },
+  backButton: { paddingVertical: 4, paddingRight: 4, marginLeft: -6 },
   segmentRow: {
     flexDirection: "row",
     gap: 8,
