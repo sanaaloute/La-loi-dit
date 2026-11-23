@@ -59,7 +59,7 @@ curl http://127.0.0.1:8000/health
 | `LEGAL_AI_ENV` | `production` (already the template default) |
 | `LEGAL_AI_SECRET_KEY` | new value — `openssl rand -hex 32` |
 | `LEGAL_AI_WEB_WORKERS` | `1` (RAM) |
-| `POSTGRES_PASSWORD` / `MINIO_ROOT_PASSWORD` | new strong values |
+| `POSTGRES_PASSWORD` / `MINIO_ROOT_PASSWORD` | **copy verbatim from the Mac `.env`** — both volumes store their credentials at first init; mismatches lock the api out of the user DB and panic Milvus |
 | `LEGAL_AI_DEV_USERS` | the one admin account |
 | `LEGAL_AI_CORS_ORIGINS` | `https://yawoto.neobytech.net` (web origin; mobile needs no CORS) |
 | `LEGAL_AI_FRONTEND_URL` | `https://yawoto.neobytech.net` |
