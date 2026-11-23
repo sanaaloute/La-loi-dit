@@ -72,8 +72,9 @@ and role defaults: role-specific token and temperature limits — 0.0 for
 classification, 0.3 for planning, and a near-deterministic 0.2 for analysis
 and synthesis (higher temperatures made the model drift: repeating
 conversation history and varying legal statements between runs). Analysis is
-capped at 120 seconds and 4,096 tokens per call; synthesis keeps the larger
-answer budget (8,192 tokens, so long legal answers are never truncated). The
+capped at 120 seconds and 8,192 tokens per call; synthesis keeps the larger
+answer budget (16,384 tokens, so full case analyses are never truncated; this
+requires a model-server context of ~24k+ tokens per slot, 32,768 recommended). The
 public model catalog derives its IDs from the same constants.
 
 Embeddings, OCR, semantic guardrails, and cross-encoder
