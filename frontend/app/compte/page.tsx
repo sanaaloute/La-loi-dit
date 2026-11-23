@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Building2, Loader2, LogOut, Trash2, UserCircle } from "lucide-react";
-import AppHeader from "@/components/AppHeader";
+import { AlertTriangle, Building2, Loader2, LogOut, Settings, Trash2, UserCircle } from "lucide-react";
+import AppShell from "@/components/AppShell";
 import ErrorCard from "@/components/ui/ErrorCard";
 import GatePanel from "@/components/ui/GatePanel";
 import LoadingState from "@/components/ui/LoadingState";
-import PageShell from "@/components/ui/PageShell";
+
 import { useAuthToken } from "@/lib/useAuth";
 import {
   clearRefreshToken,
@@ -94,10 +94,7 @@ export default function ComptePage() {
   const labelEvery = Math.max(1, Math.ceil(days.length / 6));
 
   return (
-    <PageShell
-      header={<AppHeader token={token} />}
-      disclaimer="Les compteurs sont remis à zéro chaque jour à minuit (UTC)."
-    >
+    <AppShell disclaimer="Les compteurs sont remis à zéro chaque jour à minuit (UTC).">
       {!token ? (
         <GatePanel body="Connectez-vous pour consulter votre profil et votre usage." />
       ) : error ? (
@@ -114,9 +111,19 @@ export default function ComptePage() {
         <LoadingState label="Chargement de votre compte…" />
       ) : (
           <div className="mx-auto max-w-3xl space-y-5">
+            <header className="mb-6">
+              <h1 className="flex items-center gap-2.5 font-serif text-2xl font-bold text-gray-900 sm:text-3xl">
+                <Settings className="h-7 w-7 text-gold" />
+                Paramètres
+              </h1>
+              <p className="mt-1 text-sm text-gray-500">
+                Votre profil, votre consommation et la gestion de votre compte.
+              </p>
+            </header>
+
             {/* Profile card */}
             {profile && (
-              <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-2xl backdrop-blur-xl sm:p-6">
+              <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-panel sm:p-6">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-3">
                     <UserCircle className="h-9 w-9 shrink-0 text-gray-500" />
@@ -156,7 +163,7 @@ export default function ComptePage() {
             )}
 
             {/* Today's usage */}
-            <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-2xl backdrop-blur-xl sm:p-6">
+            <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-panel sm:p-6">
               <h2 className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
                 <span className="h-1.5 w-1.5 rounded-full bg-accent" />
                 Consommation du jour
@@ -192,7 +199,7 @@ export default function ComptePage() {
             </section>
 
             {/* 30-day history */}
-            <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-2xl backdrop-blur-xl sm:p-6">
+            <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-panel sm:p-6">
               <h2 className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
                 <span className="h-1.5 w-1.5 rounded-full bg-accent" />
                 Historique (30 jours)
@@ -230,7 +237,7 @@ export default function ComptePage() {
             </section>
 
             {/* Danger zone */}
-            <section className="rounded-xl border border-red-700/30 bg-white p-5 shadow-2xl backdrop-blur-xl sm:p-6">
+            <section className="rounded-xl border border-red-700/30 bg-white p-5 shadow-panel sm:p-6">
               <h2 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-red-700">
                 <AlertTriangle className="h-3.5 w-3.5" />
                 Zone sensible
@@ -255,6 +262,6 @@ export default function ComptePage() {
             </section>
           </div>
         )}
-    </PageShell>
+    </AppShell>
   );
 }

@@ -4,58 +4,78 @@
 
 /* Theme palettes — "R G B" triplets consumed by tailwind.config.ts. The
    `dark` class on <html> switches to the dark theme (see lib/theme.ts). */
+/* Brand palette — investor-approved direction (navy + gold + cream):
+   1. PRIMARY   warm ink/cream neutrals — text, structure, surfaces.
+   2. ACCENT    deep institutional navy — primary actions, links, actives.
+   3. SUPPORT   bronze gold — premium highlights, badges, key metrics.
+   The sidebar keeps its own fixed deep-navy palette in both themes.
+   Amber stays confined to warnings, muted red to errors/destructive. */
 :root {
   --font-geist-sans: "Geist", system-ui, sans-serif;
 
   --c-white: 255 255 255;
-  --c-gray-50: 249 250 251;
-  --c-gray-100: 243 244 246;
-  --c-gray-200: 229 231 235;
-  --c-gray-300: 209 213 219;
-  --c-gray-400: 156 163 175;
-  --c-gray-500: 107 114 128;
-  --c-gray-600: 75 85 99;
-  --c-gray-700: 55 65 81;
-  --c-gray-800: 31 41 55;
-  --c-gray-900: 17 24 39;
+  --c-gray-50: 246 242 234;
+  --c-gray-100: 240 234 222;
+  --c-gray-200: 228 220 205;
+  --c-gray-300: 208 198 181;
+  --c-gray-400: 160 150 134;
+  --c-gray-500: 115 107 94;
+  --c-gray-600: 82 76 66;
+  --c-gray-700: 62 58 50;
+  --c-gray-800: 42 40 35;
+  --c-gray-900: 26 25 22;
 
-  --c-accent: 30 58 138;
-  --c-accent-hover: 30 64 175;
-  --c-accent-light: 238 242 251;
+  --c-accent: 21 55 90;
+  --c-accent-hover: 15 41 69;
+  --c-accent-light: 231 237 245;
 
-  --c-ink: 17 24 39;
-  --c-ink-soft: 75 85 99;
+  --c-gold: 154 122 30;
+  --c-gold-hover: 124 97 22;
+  --c-gold-light: 247 240 220;
+
+  --c-ink: 26 32 46;
+  --c-ink-soft: 82 76 66;
 
   --c-warn-bg: 254 249 195;
   --c-warn-border: 250 204 21;
   --c-warn-text: 133 77 14;
+
+  --c-sidebar-bg: 18 28 48;
+  --c-sidebar-text: 163 175 199;
 }
 
 .dark {
   color-scheme: dark;
 
-  --c-white: 22 32 48;
-  --c-gray-50: 13 20 32;
-  --c-gray-100: 28 39 56;
-  --c-gray-200: 44 58 79;
-  --c-gray-300: 62 79 105;
-  --c-gray-400: 100 116 139;
-  --c-gray-500: 148 163 184;
-  --c-gray-600: 203 213 225;
-  --c-gray-700: 226 232 240;
-  --c-gray-800: 238 242 247;
-  --c-gray-900: 248 250 252;
+  --c-white: 26 25 22;
+  --c-gray-50: 15 14 12;
+  --c-gray-100: 34 32 28;
+  --c-gray-200: 48 45 40;
+  --c-gray-300: 72 67 59;
+  --c-gray-400: 115 107 94;
+  --c-gray-500: 160 150 134;
+  --c-gray-600: 190 181 166;
+  --c-gray-700: 208 201 189;
+  --c-gray-800: 224 219 208;
+  --c-gray-900: 240 236 228;
 
-  --c-accent: 91 141 239;
-  --c-accent-hover: 125 165 245;
-  --c-accent-light: 30 45 75;
+  --c-accent: 154 122 30;
+  --c-accent-hover: 124 97 22;
+  --c-accent-light: 56 47 28;
 
-  --c-ink: 248 250 252;
-  --c-ink-soft: 203 213 225;
+  --c-gold: 211 172 91;
+  --c-gold-hover: 228 196 128;
+  --c-gold-light: 56 47 28;
+
+  --c-ink: 240 236 228;
+  --c-ink-soft: 190 181 166;
 
   --c-warn-bg: 66 50 10;
   --c-warn-border: 161 98 7;
   --c-warn-text: 253 230 138;
+
+  --c-sidebar-bg: 14 21 37;
+  --c-sidebar-text: 148 160 182;
 }
 
 html {
@@ -171,6 +191,12 @@ textarea:focus,
 button:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px rgb(var(--c-accent) / 0.25);
+}
+
+/* Opt-out for inputs nested inside a styled pill/card (hero search, chat
+   composer): the ring draws a stray border inside the container. */
+.ring-none-focus:focus {
+  box-shadow: none !important;
 }
 
 /* Mobile drawer */

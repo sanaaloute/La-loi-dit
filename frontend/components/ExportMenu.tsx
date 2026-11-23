@@ -117,7 +117,7 @@ export default function ExportMenu({
       )}
       {open && (
         <div
-          className={`absolute bottom-full z-50 mb-2 rounded-xl border border-gray-200 bg-white p-1.5 shadow-2xl backdrop-blur-xl ${
+          className={`absolute bottom-full z-50 mb-2 rounded-xl border border-gray-200 bg-white p-1.5 shadow-panel ${
             iconOnly ? "left-0 w-44" : "left-0 right-0"
           }`}
         >

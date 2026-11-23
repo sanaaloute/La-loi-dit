@@ -2,16 +2,15 @@
 
 import { useEffect, useState } from "react";
 import {
-  Building2,
   ChevronsLeft,
   ChevronsRight,
-  History,
   Loader2,
   MessageSquare,
+  MessageSquarePlus,
   Trash2,
   X,
 } from "lucide-react";
-import { deleteSession, listSessions, me, type ChatSessionSummary } from "@/lib/api";
+import { deleteSession, listSessions, type ChatSessionSummary } from "@/lib/api";
 import { relativeDate } from "@/lib/dates";
 
 interface HistoryPanelProps {
@@ -20,6 +19,8 @@ interface HistoryPanelProps {
   onSelect: (sessionId: string) => void;
   /** Called after a conversation is deleted (so the chat can reset if it was active). */
   onDeleted?: (sessionId: string) => void;
+  /** Starts a fresh conversation (the "Nouvelle conversation" button). */
+  onNewConversation: () => void;
   refreshKey: number;
   open: boolean;
   onClose: () => void;
@@ -32,6 +33,7 @@ export default function HistoryPanel({
   activeSessionId,
   onSelect,
   onDeleted,
+  onNewConversation,
   refreshKey,
   open,
   onClose,
@@ -39,14 +41,12 @@ export default function HistoryPanel({
   onToggleCollapsed,
 }: HistoryPanelProps) {
   const [sessions, setSessions] = useState<ChatSessionSummary[] | null>(null);
-  const [workspaceName, setWorkspaceName] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token) {
       setSessions(null);
-      setWorkspaceName(null);
       return;
     }
     let cancelled = false;
@@ -65,21 +65,6 @@ export default function HistoryPanel({
       cancelled = true;
     };
   }, [token, refreshKey]);
-
-  useEffect(() => {
-    if (!token) return;
-    let cancelled = false;
-    me(token)
-      .then((p) => {
-        if (!cancelled) setWorkspaceName(p.workspace_name ?? null);
-      })
-      .catch(() => {
-        // Nom d'espace indisponible : on affiche simplement "Historique".
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [token]);
 
   async function handleDelete(session: ChatSessionSummary) {
     if (!token || deletingId) return;
@@ -105,20 +90,20 @@ export default function HistoryPanel({
   // so the mobile drawer always shows the full list.
   return (
     <aside
-      className={`absolute inset-y-0 left-0 z-30 flex w-[min(86vw,18rem)] flex-col border-r border-gray-200 bg-white shadow-2xl backdrop-blur-xl transition-all duration-300 md:static md:bg-surface/70 md:shadow-none ${
+      className={`absolute inset-y-0 left-0 z-30 flex w-[min(86vw,18rem)] flex-col border-r border-gray-200 bg-white shadow-panel transition-all duration-300 md:static md:bg-surface/70 md:shadow-none ${
         open ? "translate-x-0" : "-translate-x-full md:translate-x-0"
       } ${collapsed ? "md:w-14" : "md:w-72"}`}
     >
       {/* Header */}
       <div className="flex items-center justify-between gap-2 border-b border-gray-200 px-3 py-3">
         <span
-          className={`flex min-w-0 items-center gap-2 text-xs text-gray-500 ${collapsed ? "md:hidden" : ""}`}
+          className={`flex min-w-0 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500 ${collapsed ? "md:hidden" : ""}`}
         >
-          <Building2 className="h-3.5 w-3.5 shrink-0" />
-          <span className="truncate">{workspaceName ?? "Historique"}</span>
+          <MessageSquare className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">Conversations</span>
         </span>
         {collapsed && (
-          <History className="mx-auto hidden h-4 w-4 shrink-0 text-gray-500 md:block" />
+          <MessageSquare className="mx-auto hidden h-4 w-4 shrink-0 text-gray-500 md:block" />
         )}
         <div className="flex items-center gap-1">
           <button
@@ -138,6 +123,21 @@ export default function HistoryPanel({
             <X className="h-4 w-4" />
           </button>
         </div>
+      </div>
+
+      {/* New conversation */}
+      <div className={`border-b border-gray-200 ${collapsed ? "p-2 md:px-2" : "p-3"}`}>
+        <button
+          type="button"
+          onClick={onNewConversation}
+          className={`flex w-full items-center justify-center gap-2 rounded-lg bg-accent py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover ${
+            collapsed ? "md:h-9 md:w-9 md:p-0" : "px-3"
+          }`}
+          title="Nouvelle conversation"
+        >
+          <MessageSquarePlus className="h-4 w-4 shrink-0" />
+          <span className={collapsed ? "md:hidden" : ""}>Nouvelle conversation</span>
+        </button>
       </div>
 
       {/* Session list */}

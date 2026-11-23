@@ -2,6 +2,7 @@
 
 import { ExternalLink, CheckCircle2, AlertCircle } from "lucide-react";
 import type { Citation } from "@/lib/api";
+import { displayDocName } from "@/lib/docNames";
 
 interface CitationPanelProps {
   citations: Citation[];
@@ -44,7 +45,9 @@ export default function CitationPanel({ citations }: CitationPanelProps) {
                   </span>
                 )}
               </div>
-              <p className="mt-1 truncate text-[11px] text-gray-500">{citation.document_name}</p>
+              <p className="mt-1 truncate text-[11px] text-gray-500">
+                {displayDocName(citation.document_name)}
+              </p>
               {citation.law_number && (
                 <p className="mt-0.5 text-[11px] text-gray-500">Loi n°{citation.law_number}</p>
               )}

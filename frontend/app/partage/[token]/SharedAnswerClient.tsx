@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
-import { ArrowRight, Loader2, Scale } from "lucide-react";
+import { ArrowRight, Loader2 } from "lucide-react";
+import Logo from "@/components/Logo";
 import { ConfidenceBadge } from "@/components/AnswerView";
 import CitationPanel from "@/components/CitationPanel";
 import { getSharedAnswer, type SharedAnswer } from "@/lib/api";
@@ -42,7 +43,7 @@ export default function SharedAnswerClient() {
       <header className="glass z-10 flex items-center justify-between gap-3 px-4 py-3 sm:px-6">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent">
-            <Scale className="h-5 w-5 text-white" />
+            <Logo className="h-5 w-5 text-white" />
           </div>
           <div>
             <span className="block text-base font-semibold text-gray-900">
@@ -78,7 +79,7 @@ export default function SharedAnswerClient() {
           </div>
         ) : (
           <div className="mx-auto max-w-3xl space-y-5">
-            <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-2xl backdrop-blur-xl sm:p-6">
+            <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-panel sm:p-6">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 pb-4">
                 <div className="min-w-0">
                   <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
@@ -98,7 +99,7 @@ export default function SharedAnswerClient() {
             </div>
 
             {shared.citations.length > 0 && (
-              <div className="rounded-xl border border-gray-200 bg-white shadow-2xl backdrop-blur-xl">
+              <div className="rounded-xl border border-gray-200 bg-white shadow-panel">
                 <CitationPanel citations={shared.citations} />
               </div>
             )}

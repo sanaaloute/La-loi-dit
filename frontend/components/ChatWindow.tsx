@@ -5,30 +5,25 @@ import ReactMarkdown from "react-markdown";
 import {
   AlertTriangle,
   ArrowUp,
-  Bot,
   Brain,
-  Calendar,
   ChevronRight,
+  FileSearch,
   History,
   Loader2,
-  Menu,
-  MessageSquarePlus,
-  PanelRight,
+  Quote,
   Square,
   ThumbsDown,
   ThumbsUp,
   User,
-  X,
 } from "lucide-react";
-import AgentTimeline, { type NodeStatus } from "@/components/AgentTimeline";
+import { type NodeStatus } from "@/components/AgentTimeline";
+import AnswerDetailsModal, { type AnswerDetailsTab } from "@/components/AnswerDetailsModal";
 import AnswerView from "@/components/AnswerView";
-import AppHeader from "@/components/AppHeader";
 import BookmarkButton from "@/components/BookmarkButton";
-import CitationPanel from "@/components/CitationPanel";
 import CopyButton from "@/components/CopyButton";
-import EvidenceViewer from "@/components/EvidenceViewer";
 import ExportMenu from "@/components/ExportMenu";
 import HistoryPanel from "@/components/HistoryPanel";
+import Logo from "@/components/Logo";
 import ShareAnswerButton from "@/components/ShareAnswerButton";
 import { useAuthToken } from "@/lib/useAuth";
 import {
@@ -45,10 +40,8 @@ import {
   submitFeedback,
   type ChatResponse,
   type ChatSessionDetail,
-  type ExportItem,
   type StreamEvent,
 } from "@/lib/api";
-import { formatScenarioDate } from "@/lib/dates";
 import { PERSONA_CHANGED_EVENT, readPersona, type PersonaKey } from "@/lib/persona";
 
 interface Message {
@@ -65,8 +58,6 @@ interface Message {
   feedback?: "thumbs-up" | "thumbs-down";
   feedbackPending?: boolean;
 }
-
-type PanelTab = "agents" | "citations" | "preuves";
 
 /** Questions are capped in words (matches backend input_max_words). */
 const MAX_WORDS = 200;
@@ -208,7 +199,21 @@ function formatMessageTime(iso?: string): string {
   return `${d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })} ${time}`;
 }
 
-export default function ChatWindow() {
+interface ChatWindowProps {
+  /** Deep links (from the dashboard): q auto-sends, suggestion only prefills,
+   * session loads a past conversation, openHistory opens the drawer. */
+  initialQuery?: string | null;
+  suggestion?: string | null;
+  sessionParam?: string | null;
+  openHistory?: boolean;
+}
+
+export default function ChatWindow({
+  initialQuery = null,
+  suggestion = null,
+  sessionParam = null,
+  openHistory = false,
+}: ChatWindowProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const wordCount = countWords(input);
@@ -216,17 +221,14 @@ export default function ChatWindow() {
   const [sessionId, setSessionIdState] = useState<string | null>(null);
   const [token] = useAuthToken();
   const [statuses, setStatuses] = useState<Record<string, NodeStatus>>(emptyStatuses);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [tab, setTab] = useState<PanelTab>("agents");
-  const [panelOpen, setPanelOpen] = useState(false);
+  // Citations/preuves dialog: which assistant message + which tab is open.
+  const [details, setDetails] = useState<{ msgId: string; tab: AnswerDetailsTab } | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [historyCollapsed, setHistoryCollapsed] = useState(false);
+  // Collapsed by default: the app sidebar already takes horizontal space, so
+  // the conversation list starts as an icon rail the user can expand.
+  const [historyCollapsed, setHistoryCollapsed] = useState(true);
   const [historyRefresh, setHistoryRefresh] = useState(0);
   const [historyLoading, setHistoryLoading] = useState(false);
-  // Scenario date ("loi en vigueur au …"): sent as scenario_date with every
-  // run of the conversation, cleared for a new conversation.
-  const [scenarioDate, setScenarioDate] = useState<string | null>(null);
-  const [dateOpen, setDateOpen] = useState(false);
   // Onboarding persona: picks the starter questions of the empty screen.
   const [persona, setPersona] = useState<PersonaKey | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -399,7 +401,6 @@ export default function ChatWindow() {
         ? prev.map((m) => (m.id === replaceId ? msg : m))
         : [...prev, msg],
     );
-    setSelectedId(msg.id);
     // Refresh the history list so the new/updated conversation appears.
     setHistoryRefresh((k) => k + 1);
   }, [markAllDone]);
@@ -468,7 +469,6 @@ export default function ChatWindow() {
       setHistoryOpen(false);
       setHistoryLoading(true);
       setMessages([]);
-      setSelectedId(null);
       setStatuses(emptyStatuses());
       try {
         const detail = await getSession(id, token);
@@ -638,8 +638,8 @@ export default function ChatWindow() {
     abortRef.current?.abort();
   }, [sessionId, token]);
 
-  const send = useCallback(async () => {
-    const query = input.trim();
+  const send = useCallback(async (override?: string) => {
+    const query = (override ?? input).trim();
     // A prompt can never be submitted without an authenticated session, nor
     // beyond the word limit.
     if (!query || busy || !token || countWords(query) > MAX_WORDS) return;
@@ -663,7 +663,6 @@ export default function ChatWindow() {
     setInput("");
     setBusy(true);
     setStatuses(emptyStatuses());
-    setTab("agents");
     pinnedRef.current = true; // a new question re-pins the follow-the-stream scroll
     setMessages((prev) => [...prev, { id: nextId(), role: "user", text: query, ts: new Date().toISOString() }]);
 
@@ -671,7 +670,6 @@ export default function ChatWindow() {
       query,
       session_id: sid,
       language: "fr",
-      scenario_date: scenarioDate ?? undefined,
     };
     const sendStart = Date.now();
     inFlightRef.current = { sid, sendStart, query };
@@ -810,18 +808,14 @@ export default function ChatWindow() {
       inFlightRef.current = null;
       setBusy(false);
     }
-  }, [input, busy, sessionId, token, scenarioDate, markNodeDone, markNodeRunning, acceptResponse, appendDelta, appendReasoning, resetDelta, discardStreamingMessage, attemptRecovery, failWith, quotaReached, interrupted]);
+  }, [input, busy, sessionId, token, markNodeDone, markNodeRunning, acceptResponse, appendDelta, appendReasoning, resetDelta, discardStreamingMessage, attemptRecovery, failWith, quotaReached, interrupted]);
 
   function newConversation() {
     setMessages([]);
     setSessionId(null);
     setSessionIdState(null);
-    setSelectedId(null);
     setStatuses(emptyStatuses());
-    setPanelOpen(false);
-    // The scenario date is a per-conversation setting.
-    setScenarioDate(null);
-    setDateOpen(false);
+    setDetails(null);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -831,20 +825,8 @@ export default function ChatWindow() {
     }
   }
 
-  const selectedIndex = messages.findIndex((m) => m.id === selectedId);
-  const selectedMessage = selectedIndex >= 0 ? messages[selectedIndex] : undefined;
-  const selectedAnswer = selectedMessage?.response?.answer;
-
-  // The user question the selected answer replies to (not the answer text).
-  let selectedQuery = "";
-  if (selectedMessage?.role === "assistant") {
-    for (let i = selectedIndex - 1; i >= 0; i--) {
-      if (messages[i].role === "user") {
-        selectedQuery = messages[i].text;
-        break;
-      }
-    }
-  }
+  // The assistant message whose citations/preuves dialog is open (null = closed).
+  const detailsMessage = details ? messages.find((m) => m.id === details.msgId) : undefined;
 
   /** Realtime progress line shown while agents are running (especially on
    * small screens where the full timeline panel is hidden). */
@@ -866,17 +848,14 @@ export default function ChatWindow() {
     return "Préparation du traitement…";
   }, [statuses]);
 
-  // All question/answer exchanges of the conversation, for full-chat exports,
-  // plus the user question each assistant message replies to (per-answer copy
+  // The user question each assistant message replies to (per-answer copy
   // and export actions).
-  const conversationItems: ExportItem[] = [];
   const queryByAssistantId = new Map<string, string>();
   let pendingQuery: string | null = null;
   for (const m of messages) {
     if (m.role === "user") {
       pendingQuery = m.text;
     } else if (m.response && pendingQuery !== null) {
-      conversationItems.push({ query: pendingQuery, answer: m.response.answer });
       queryByAssistantId.set(m.id, pendingQuery);
       pendingQuery = null;
     }
@@ -884,58 +863,86 @@ export default function ChatWindow() {
 
   const suggestions = (persona && persona !== "autre" ? PERSONA_SUGGESTIONS[persona] : undefined) ?? DEFAULT_SUGGESTIONS;
 
-  return (
-    <div className="flex h-dvh flex-col overflow-hidden">
-      {/* Header */}
-      <AppHeader
-        token={token}
-        leftSlot={
-          <>
-            {token && (
-              <button
-                type="button"
-                onClick={() => setHistoryOpen(true)}
-                className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 md:hidden"
-                title="Historique des conversations"
-              >
-                <History className="h-5 w-5" />
-              </button>
-            )}
-            {/* Icon counterpart of the text button below, small screens only. */}
-            <button
-              type="button"
-              onClick={newConversation}
-              className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 sm:hidden"
-              title="Nouvelle conversation"
-            >
-              <MessageSquarePlus className="h-5 w-5" />
-            </button>
-          </>
-        }
-        rightSlot={
-          <button
-            type="button"
-            onClick={() => setPanelOpen((v) => !v)}
-            className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 md:hidden"
-            title="Panneau latéral"
-          >
-            <PanelRight className="h-5 w-5" />
-          </button>
-        }
-      >
+  // Deep links from the dashboard/sidebar: consume them exactly once, after
+  // the auth token resolves (send/loadSession both require it).
+  const deepLinkHandledRef = useRef(false);
+  useEffect(() => {
+    if (deepLinkHandledRef.current || !token) return;
+    if (!initialQuery && !suggestion && !sessionParam && !openHistory) return;
+    deepLinkHandledRef.current = true;
+    if (openHistory) {
+      setHistoryOpen(true); // mobile drawer
+      setHistoryCollapsed(false); // desktop rail
+    }
+    if (sessionParam) {
+      void loadSession(sessionParam);
+    } else if (initialQuery) {
+      void send(initialQuery);
+    } else if (suggestion) {
+      setInput(suggestion);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  // On a fresh chat the input sits directly under the suggestion cards;
+  // once the conversation starts it docks at the bottom.
+  const showInlineInput = !historyLoading && messages.length === 0;
+
+  const inputForm = (
+    <div className="mx-auto w-full max-w-3xl">
+      <div className="relative">
+      <textarea
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={handleKeyDown}
+        rows={2}
+        placeholder="Posez votre question."
+        className="ring-none-focus w-full resize-none rounded-xl border border-gray-200 bg-white py-3 pl-4 pr-14 text-sm text-gray-900 placeholder:text-gray-400 focus:border-accent/60 focus:bg-white focus:outline-none disabled:opacity-60"
+        disabled={busy}
+      />
+      {busy ? (
         <button
           type="button"
-          onClick={newConversation}
-          className="hidden items-center gap-1.5 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-700 backdrop-blur-sm transition-colors hover:border-gray-400 hover:bg-gray-100 sm:flex"
+          onClick={stop}
+          title="Arrêter la génération"
+          aria-label="Arrêter la génération"
+          className="absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-red-700 text-white transition-colors hover:bg-red-800"
         >
-          <MessageSquarePlus className="h-4 w-4" />
-          Nouvelle conversation
+          <Square className="h-4 w-4" />
         </button>
-      </AppHeader>
+      ) : (
+        <button
+          type="button"
+          onClick={() => void send()}
+          disabled={input.trim().length === 0 || wordCount > MAX_WORDS}
+          title={wordCount > MAX_WORDS ? `Limite de ${MAX_WORDS} mots dépassée` : "Envoyer"}
+          aria-label="Envoyer"
+          className={`absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full transition-colors ${
+            input.trim().length === 0 || wordCount > MAX_WORDS
+              ? "cursor-not-allowed bg-gray-200 text-gray-400"
+              : "bg-accent text-white hover:bg-accent-hover"
+          }`}
+        >
+          <ArrowUp className="h-4 w-4" />
+        </button>
+      )}
+      </div>
+      {wordCount > 0 && (
+        <p
+          className={`mt-1 text-right text-xs ${
+            wordCount > MAX_WORDS ? "font-semibold text-red-700" : "text-gray-400"
+          }`}
+        >
+          {wordCount}/{MAX_WORDS} mots
+          {wordCount > MAX_WORDS ? " — raccourcissez votre question" : ""}
+        </p>
+      )}
+    </div>
+  );
 
-      {/* Main area */}
-      <div className="relative flex min-h-0 flex-1">
-        {/* History panel (desktop sidebar + mobile drawer) */}
+  return (
+    <div className="relative flex h-full min-h-0 overflow-hidden">
+      {/* History panel (desktop sidebar + mobile drawer) */}
         <HistoryPanel
           token={token}
           activeSessionId={sessionId}
@@ -944,6 +951,7 @@ export default function ChatWindow() {
             // If the active conversation was deleted, reset to a fresh chat.
             if (id === sessionId) newConversation();
           }}
+          onNewConversation={newConversation}
           refreshKey={historyRefresh}
           open={historyOpen}
           onClose={() => setHistoryOpen(false)}
@@ -953,6 +961,23 @@ export default function ChatWindow() {
 
         {/* Chat column */}
         <main className="flex min-w-0 flex-1 flex-col">
+          {/* Mobile toolbar: history and details drawers (panels are static on md+) */}
+          <div className="flex items-center justify-between border-b border-gray-200 px-4 py-2 md:hidden">
+            {token ? (
+              <button
+                type="button"
+                onClick={() => setHistoryOpen(true)}
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900"
+                title="Historique des conversations"
+              >
+                <History className="h-5 w-5" />
+              </button>
+            ) : (
+              <span className="h-9 w-9" />
+            )}
+            <span className="text-sm font-medium text-gray-900">Recherche juridique</span>
+            <span className="h-9 w-9" />
+          </div>
           <div ref={scrollRef} onScroll={handleChatScroll} className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
             {historyLoading ? (
               <div className="flex h-full items-center justify-center gap-2 text-sm text-gray-500">
@@ -961,16 +986,15 @@ export default function ChatWindow() {
               </div>
             ) : messages.length === 0 ? (
               <div className="mx-auto mt-8 flex max-w-2xl flex-col items-center text-center sm:mt-16">
-                <div className="mb-6 flex h-20 w-20 animate-float items-center justify-center rounded-3xl bg-accent shadow-panel">
-                  <Bot className="h-10 w-10 text-white" />
+                <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-accent shadow-panel">
+                  <Logo className="h-11 w-11 text-white" />
                 </div>
                 <h2 className="mb-3 text-2xl font-semibold text-gray-900 sm:text-3xl">
                   Le droit, cité à la source.
                 </h2>
                 <p className="mb-8 max-w-lg text-sm leading-relaxed text-gray-500 sm:text-base">
-                  Posez vos questions en français. Yawoto répond à partir des textes officiels du
-                  Burkina Faso et de l&apos;OHADA, avec citations vérifiables et traçabilité
-                  complète.
+                  Posez vos questions en français. Yawoto répond à partir des lois et textes
+                  officiels du Burkina Faso, avec des citations vérifiables à chaque réponse.
                 </p>
                 <div className="grid w-full gap-3 sm:grid-cols-3">
                   {suggestions.map((s) => (
@@ -986,6 +1010,7 @@ export default function ChatWindow() {
                     </button>
                   ))}
                 </div>
+                <div className="mt-6 w-full">{inputForm}</div>
               </div>
             ) : (
               <div className="mx-auto max-w-3xl space-y-5">
@@ -1005,21 +1030,16 @@ export default function ChatWindow() {
                   ) : (
                     <div key={msg.id} id={`msg-${msg.id}`} className="flex justify-start gap-3">
                       <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-white">
-                        <Bot className="h-4 w-4" />
+                        <Logo className="h-4 w-4" />
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedId(msg.id)}
-                        className={`relative max-w-[90%] rounded-2xl rounded-bl-sm border px-4 py-3 text-left transition-all sm:max-w-[82%] ${
+                      <div
+                        className={`relative max-w-[90%] rounded-2xl rounded-bl-sm border px-4 py-3 sm:max-w-[82%] ${
                           msg.error
                             ? "border-red-700/30 bg-red-700/10"
                             : msg.quota
                               ? "border-warn-border/60 bg-warn-bg"
-                              : selectedId === msg.id
-                                ? "border-accent/40 bg-surface-elevated"
-                                : "border-gray-200 bg-surface/80 hover:border-gray-400 hover:bg-surface-elevated"
+                              : "border-gray-200 bg-surface/80"
                         }`}
-                        title="Sélectionner pour voir citations et preuves"
                       >
                         {msg.response && (
                           <div
@@ -1068,7 +1088,28 @@ export default function ChatWindow() {
                           <div className="mt-1.5 text-[10px] text-gray-400">{formatMessageTime(msg.ts)}</div>
                         )}
                         {msg.response && (
-                          <div className="mt-2 flex items-center justify-end gap-2">
+                          <div className="mt-2 flex items-center gap-2">
+                            {msg.response.answer.citations.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setDetails({ msgId: msg.id, tab: "citations" })}
+                                className="flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-500 transition-colors hover:border-accent/40 hover:text-accent"
+                              >
+                                <Quote className="h-3 w-3" />
+                                Citations ({msg.response.answer.citations.length})
+                              </button>
+                            )}
+                            {msg.response.answer.evidence.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setDetails({ msgId: msg.id, tab: "preuves" })}
+                                className="flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-500 transition-colors hover:border-accent/40 hover:text-accent"
+                              >
+                                <FileSearch className="h-3 w-3" />
+                                Preuves ({msg.response.answer.evidence.length})
+                              </button>
+                            )}
+                            <span className="flex-1" />
                             <CopyButton text={msg.response.answer.answer} />
                             <ExportMenu
                               response={msg.response}
@@ -1131,7 +1172,7 @@ export default function ChatWindow() {
                           </div>
                         )}
                         </div>
-                      </button>
+                      </div>
                     </div>
                   ),
                 )}
@@ -1151,174 +1192,25 @@ export default function ChatWindow() {
             <div ref={bottomRef} />
           </div>
 
-          {/* Input */}
-          <div className="z-10 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-6">
-            <div className="mx-auto max-w-3xl">
-              {scenarioDate && (
-                <div className="mb-2 flex">
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 py-1 pl-3 pr-1.5 text-xs font-medium text-accent">
-                    <Calendar className="h-3 w-3" />
-                    Loi en vigueur au {formatScenarioDate(scenarioDate)}
-                    <button
-                      type="button"
-                      onClick={() => setScenarioDate(null)}
-                      aria-label="Retirer la date de référence"
-                      title="Retirer la date de référence"
-                      className="rounded-full p-0.5 transition-colors hover:bg-accent/20"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </span>
-                </div>
-              )}
-              {dateOpen && (
-                <div className="mb-2 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-                  <Calendar className="h-4 w-4 shrink-0 text-gray-500" />
-                  <label htmlFor="scenario-date" className="text-xs text-gray-600">
-                    Date de référence
-                  </label>
-                  <input
-                    id="scenario-date"
-                    type="date"
-                    value={scenarioDate ?? ""}
-                    onChange={(e) => setScenarioDate(e.target.value || null)}
-                    className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900 focus:border-accent/60 focus:outline-none"
-                  />
-                </div>
-              )}
-              <div className="relative">
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                rows={2}
-                placeholder="Posez votre question."
-                className={`w-full resize-none rounded-xl border border-gray-200 bg-white py-3 pl-4 text-sm text-gray-900 placeholder:text-gray-400 focus:border-accent/60 focus:bg-white focus:outline-none disabled:opacity-60 ${
-                  busy ? "pr-14" : "pr-24"
-                }`}
-                disabled={busy}
-              />
-              {busy ? (
-                <button
-                  type="button"
-                  onClick={stop}
-                  title="Arrêter la génération"
-                  aria-label="Arrêter la génération"
-                  className="absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-red-700 text-white transition-colors hover:bg-red-800"
-                >
-                  <Square className="h-4 w-4" />
-                </button>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setDateOpen((v) => !v)}
-                    title="Choisir une date de référence (scénario « loi en vigueur au »)"
-                    aria-label="Choisir une date de référence (scénario)"
-                    aria-pressed={dateOpen}
-                    className={`absolute right-14 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full transition-colors ${
-                      scenarioDate
-                        ? "bg-accent/15 text-accent hover:bg-accent/25"
-                        : "bg-gray-200 text-gray-600 hover:bg-gray-300"
-                    }`}
-                  >
-                    <Calendar className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void send()}
-                    disabled={input.trim().length === 0 || wordCount > MAX_WORDS}
-                    title={wordCount > MAX_WORDS ? `Limite de ${MAX_WORDS} mots dépassée` : "Envoyer"}
-                    aria-label="Envoyer"
-                    className={`absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full transition-colors ${
-                      input.trim().length === 0 || wordCount > MAX_WORDS
-                        ? "cursor-not-allowed bg-gray-200 text-gray-400"
-                        : "bg-accent text-white hover:bg-accent-hover"
-                    }`}
-                  >
-                    <ArrowUp className="h-4 w-4" />
-                  </button>
-                </>
-              )}
-              </div>
-              {wordCount > 0 && (
-                <p
-                  className={`mt-1 text-right text-xs ${
-                    wordCount > MAX_WORDS ? "font-semibold text-red-700" : "text-gray-400"
-                  }`}
-                >
-                  {wordCount}/{MAX_WORDS} mots
-                  {wordCount > MAX_WORDS ? " — raccourcissez votre question" : ""}
-                </p>
-              )}
-            </div>
-          </div>
-        </main>
-
-        {/* Side panel (desktop + mobile drawer) */}
-        <aside
-          className={`absolute inset-y-0 right-0 z-30 flex w-[min(86vw,22rem)] flex-col border-l border-gray-200 bg-white shadow-2xl backdrop-blur-xl transition-transform duration-300 md:static md:w-80 md:translate-x-0 md:bg-surface/70 md:shadow-none lg:w-96 ${
-            panelOpen ? "translate-x-0" : "translate-x-full md:translate-x-0"
-          }`}
-        >
-          <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 md:hidden">
-            <span className="text-sm font-medium text-gray-900">Détails de la réponse</span>
-            <button
-              type="button"
-              onClick={() => setPanelOpen(false)}
-              className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-900"
-            >
-              <Menu className="h-5 w-5" />
-            </button>
-          </div>
-          <div className="flex border-b border-gray-200 bg-gray-50">
-            {(
-              [
-                { id: "agents", label: "Agents" },
-                { id: "citations", label: "Citations" },
-                { id: "preuves", label: "Preuves" },
-              ] as { id: PanelTab; label: string }[]
-            ).map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setTab(t.id)}
-                className={`flex-1 px-2 py-3 text-xs font-medium transition-colors sm:text-sm ${
-                  tab === t.id
-                    ? "border-b-2 border-accent text-accent"
-                    : "text-gray-500 hover:text-gray-700"
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-          <div className="flex-1 overflow-y-auto">
-            {tab === "agents" && <AgentTimeline statuses={statuses} active={busy} />}
-            {tab === "citations" && <CitationPanel citations={selectedAnswer?.citations ?? []} />}
-            {tab === "preuves" && <EvidenceViewer evidence={selectedAnswer?.evidence ?? []} />}
-          </div>
-          {selectedMessage?.response && conversationItems.length > 0 && (
-            <div className="border-t border-gray-200 p-3">
-              <ExportMenu
-                response={selectedMessage.response}
-                query={selectedQuery}
-                conversation={conversationItems}
-                scope="conversation"
-              />
+          {/* Input (docked at the bottom once the conversation has started) */}
+          {!showInlineInput && (
+            <div className="z-10 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-6">
+              {inputForm}
             </div>
           )}
-        </aside>
+        </main>
 
-        {/* Mobile overlay */}
-        {panelOpen && (
-          <button
-            type="button"
-            onClick={() => setPanelOpen(false)}
-            className="absolute inset-0 z-20 bg-black/60 backdrop-blur-sm md:hidden"
-            aria-label="Fermer le panneau"
+        {/* Citations / preuves dialog (opened from each answer's buttons) */}
+        {details && detailsMessage?.response && (
+          <AnswerDetailsModal
+            citations={detailsMessage.response.answer.citations}
+            evidence={detailsMessage.response.answer.evidence}
+            initialTab={details.tab}
+            onClose={() => setDetails(null)}
           />
         )}
+
+        {/* Mobile overlay */}
         {historyOpen && (
           <button
             type="button"
@@ -1327,7 +1219,6 @@ export default function ChatWindow() {
             aria-label="Fermer l'historique"
           />
         )}
-      </div>
     </div>
   );
 }

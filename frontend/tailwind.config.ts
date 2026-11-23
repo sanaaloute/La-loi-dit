@@ -8,16 +8,21 @@ function themed(name: string) {
   return `rgb(var(${name}) / <alpha-value>)`;
 }
 
-// Restrained palette (see owner brief): white surfaces, near-black text, ONE
-// navy accent, yellow confined to warnings, muted red (Tailwind red-700 =
-// #b91c1c) confined to errors/destructive actions. No gradients. The dark
-// theme remaps the same variables in globals.css.
+// Restrained palette (investor-approved direction): warm cream surfaces,
+// near-black ink, ONE deep-navy accent, bronze gold as the support hue,
+// yellow confined to warnings, muted red (Tailwind red-700 = #b91c1c)
+// confined to errors/destructive actions. No gradients on surfaces. The dark
+// theme remaps the same variables in globals.css; the sidebar keeps its own
+// fixed deep-navy palette in both themes.
 const config: Config = {
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
         white: themed("--c-white"),
+        // Fixed pure white for text/blocks on always-dark surfaces (sidebar,
+        // hero, veille card) — unlike `white`, it never remaps in dark mode.
+        paper: "#ffffff",
         gray: {
           50: themed("--c-gray-50"),
           100: themed("--c-gray-100"),
@@ -30,11 +35,22 @@ const config: Config = {
           800: themed("--c-gray-800"),
           900: themed("--c-gray-900"),
         },
-        // Single accent: sober deep navy (primary actions, links, active states).
+        // Accent: deep institutional navy (primary actions, links, active states).
         accent: {
           DEFAULT: themed("--c-accent"),
           hover: themed("--c-accent-hover"),
           light: themed("--c-accent-light"),
+        },
+        // Support hue: bronze gold (premium highlights, badges, key metrics).
+        gold: {
+          DEFAULT: themed("--c-gold"),
+          hover: themed("--c-gold-hover"),
+          light: themed("--c-gold-light"),
+        },
+        // App sidebar: fixed deep navy in both themes.
+        sidebar: {
+          DEFAULT: themed("--c-sidebar-bg"),
+          text: themed("--c-sidebar-text"),
         },
         // Text hues: near-black primary, gray secondary.
         ink: {
@@ -65,7 +81,7 @@ const config: Config = {
         ],
       },
       boxShadow: {
-        panel: "0 8px 32px rgba(17, 24, 39, 0.08)",
+        panel: "0 8px 32px rgba(28, 25, 23, 0.08)",
       },
       animation: {
         float: "float 6s ease-in-out infinite",

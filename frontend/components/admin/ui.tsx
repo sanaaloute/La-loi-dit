@@ -64,7 +64,7 @@ interface SectionCardProps {
 /** Bordered section card with an uppercase accent-dotted title. */
 export function SectionCard({ title, actions, children }: SectionCardProps) {
   return (
-    <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-2xl backdrop-blur-xl sm:p-6">
+    <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-panel sm:p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
           <span className="h-1.5 w-1.5 rounded-full bg-accent" />

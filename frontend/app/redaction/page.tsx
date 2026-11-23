@@ -16,12 +16,12 @@ import {
   ShieldAlert,
   Sparkles,
 } from "lucide-react";
-import AppHeader from "@/components/AppHeader";
+import AppShell from "@/components/AppShell";
 import CitationPanel from "@/components/CitationPanel";
 import ErrorCard from "@/components/ui/ErrorCard";
 import GatePanel from "@/components/ui/GatePanel";
 import LoadingState from "@/components/ui/LoadingState";
-import PageShell from "@/components/ui/PageShell";
+
 import { useAuthToken } from "@/lib/useAuth";
 import {
   ApiError,
@@ -215,10 +215,7 @@ export default function RedactionPage() {
   }
 
   return (
-    <PageShell
-      header={<AppHeader token={token} />}
-      disclaimer="Avertissement : les documents générés sont des aides à la rédaction. Ils ne constituent pas un conseil juridique."
-    >
+    <AppShell disclaimer="Avertissement : les documents générés sont des aides à la rédaction. Ils ne constituent pas un conseil juridique.">
       {!token ? (
         <GatePanel body="La rédaction de documents nécessite un compte. Connectez-vous depuis l'icône de compte en haut à droite." />
       ) : loadError ? (
@@ -235,13 +232,17 @@ export default function RedactionPage() {
         <LoadingState label="Chargement des modèles…" />
       ) : step === "templates" ? (
           <div className="mx-auto max-w-4xl">
+            <header className="mb-6">
+              <h1 className="flex items-center gap-2.5 font-serif text-2xl font-bold text-gray-900 sm:text-3xl">
+                <FilePenLine className="h-7 w-7 text-gold" />
+                Rédaction assistée
+              </h1>
+              <p className="mt-1 text-sm text-gray-500">
+                Le document est généré à partir de vos réponses et de sources vérifiées.
+              </p>
+            </header>
             <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 className="text-xl font-semibold text-gray-900">Choisissez un modèle</h2>
-                <p className="mt-1 text-sm text-gray-500">
-                  Le document est généré à partir de vos réponses et de sources vérifiées.
-                </p>
-              </div>
+              <h2 className="text-sm font-semibold text-gray-900">Choisissez un modèle</h2>
               <div className="relative sm:w-64">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
                 <input
@@ -270,7 +271,7 @@ export default function RedactionPage() {
                         key={t.id}
                         type="button"
                         onClick={() => pickTemplate(t)}
-                        className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-left backdrop-blur-sm transition-all hover:border-accent/50 hover:bg-gray-100"
+                        className="rounded-xl border border-gray-200 bg-white p-4 text-left transition-all hover:border-accent/40 hover:shadow-panel"
                       >
                         <span className="mb-2 flex h-9 w-9 items-center justify-center rounded-lg bg-accent/10 text-accent">
                           <FilePenLine className="h-4 w-4" />
@@ -305,7 +306,7 @@ export default function RedactionPage() {
                 <p className="text-xs text-warn-text">{quotaError}</p>
               </div>
             )}
-            <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-2xl backdrop-blur-xl sm:p-6">
+            <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-panel sm:p-6">
               <h2 className="text-lg font-semibold text-gray-900">{template.label}</h2>
               <p className="mb-5 mt-1 text-sm text-gray-500">{template.description}</p>
               <form onSubmit={handleGenerate} className="space-y-4">
@@ -384,7 +385,7 @@ export default function RedactionPage() {
               </button>
             </div>
 
-            <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-2xl backdrop-blur-xl sm:p-6">
+            <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-panel sm:p-6">
               <div className="mb-4 flex flex-wrap items-start justify-between gap-3 border-b border-gray-200 pb-4">
                 <div>
                   <h2 className="text-lg font-semibold text-gray-900">{draft.title}</h2>
@@ -463,12 +464,12 @@ export default function RedactionPage() {
             </div>
 
             {draft.citations.length > 0 && (
-              <div className="rounded-xl border border-gray-200 bg-white shadow-2xl backdrop-blur-xl">
+              <div className="rounded-xl border border-gray-200 bg-white shadow-panel">
                 <CitationPanel citations={draft.citations} />
               </div>
             )}
           </div>
         ) : null}
-    </PageShell>
+    </AppShell>
   );
 }

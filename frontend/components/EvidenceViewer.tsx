@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ChevronDown, FileText, Layers } from "lucide-react";
 import type { EvidenceChunk } from "@/lib/api";
+import { displayDocName } from "@/lib/docNames";
 
 interface EvidenceViewerProps {
   evidence: EvidenceChunk[];
@@ -63,7 +64,7 @@ function MetaRow({ label, value }: { label: string; value?: string | number | nu
 
 function EvidenceCard({ chunk, index }: { chunk: EvidenceChunk; index: number }) {
   const [open, setOpen] = useState(false);
-  const title = chunk.document_name || "Document inconnu";
+  const title = displayDocName(chunk.document_name) || "Document inconnu";
   // Backend stamps metadata.expansion = "parent" on chunks expanded to their
   // parent context around a retrieved excerpt.
   const expandedParent = chunk.metadata?.expansion === "parent";

@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Cpu, FileText, Gauge, LayoutDashboard, Search, Users } from "lucide-react";
-import AppHeader from "@/components/AppHeader";
+import { Cpu, FileText, Gauge, LayoutDashboard, Search, ShieldCheck, Users } from "lucide-react";
+import AppShell from "@/components/AppShell";
 import DocumentsTab from "@/components/admin/DocumentsTab";
 import OverviewTab from "@/components/admin/OverviewTab";
 import PromptsTab from "@/components/admin/PromptsTab";
@@ -12,7 +12,7 @@ import UsersTab from "@/components/admin/UsersTab";
 import ErrorCard from "@/components/ui/ErrorCard";
 import GatePanel from "@/components/ui/GatePanel";
 import LoadingState from "@/components/ui/LoadingState";
-import PageShell from "@/components/ui/PageShell";
+
 import { useAuthToken } from "@/lib/useAuth";
 import { me, type UserProfile } from "@/lib/api";
 
@@ -57,10 +57,7 @@ export default function AdminPage() {
   const isAdmin = profile?.role === "admin";
 
   return (
-    <PageShell
-      header={<AppHeader token={token} />}
-      disclaimer="Administration — les actions effectuées ici (ingestion, suppression, rôles) sont immédiates."
-    >
+    <AppShell disclaimer="Administration — les actions effectuées ici (ingestion, suppression, rôles) sont immédiates.">
       {!token ? (
         <GatePanel body="Connectez-vous depuis l'icône de compte en haut à droite pour accéder au tableau de bord d'administration." />
       ) : error ? (
@@ -82,8 +79,18 @@ export default function AdminPage() {
         />
       ) : (
         <div className="mx-auto max-w-5xl space-y-5">
+          <header>
+            <h1 className="flex items-center gap-2.5 font-serif text-2xl font-bold text-gray-900 sm:text-3xl">
+              <ShieldCheck className="h-7 w-7 text-gold" />
+              Administration
+            </h1>
+            <p className="mt-1 text-sm text-gray-500">
+              Corpus, utilisateurs, quotas et fournisseurs de modèles.
+            </p>
+          </header>
+
           {/* Tab bar */}
-          <div className="flex flex-wrap gap-1 rounded-xl border border-gray-200 bg-white p-1.5 shadow-2xl backdrop-blur-xl">
+          <div className="flex flex-wrap gap-1 rounded-xl border border-gray-200 bg-white p-1.5 shadow-panel">
             {TABS.map((t) => {
               const active = tab === t.id;
               return (
@@ -112,6 +119,6 @@ export default function AdminPage() {
           {tab === "fournisseurs" && <ProvidersTab />}
         </div>
       )}
-    </PageShell>
+    </AppShell>
   );
 }

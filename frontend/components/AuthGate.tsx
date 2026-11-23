@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
-import { Scale } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import Logo from "@/components/Logo";
 import AuthCard from "@/components/AuthCard";
 import PersonaOnboarding from "@/components/PersonaOnboarding";
 import { useAuthToken } from "@/lib/useAuth";
@@ -24,6 +24,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [token] = useAuthToken();
   const [hydrated, setHydrated] = useState(false);
   const pathname = usePathname();
+  const router = useRouter();
   const isPublic = PUBLIC_PREFIXES.some((prefix) => pathname?.startsWith(prefix));
 
   useEffect(() => {
@@ -72,7 +73,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   if (!hydrated) {
     return (
       <div className="flex h-dvh items-center justify-center bg-gray-100">
-        <Scale className="h-8 w-8 animate-pulse text-accent" />
+        <Logo className="h-8 w-8 animate-pulse text-accent" />
       </div>
     );
   }
@@ -80,10 +81,10 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   if (!token) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-gray-100 px-4 py-10">
-        <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl backdrop-blur-xl sm:p-8">
+        <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-panel sm:p-8">
           <div className="mb-6 flex flex-col items-center gap-3 text-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-accent">
-              <Scale className="h-6 w-6 text-white" />
+              <Logo className="h-7 w-7 text-white" />
             </div>
             <div>
               <h1 className="text-lg font-semibold text-gray-900">Yawoto</h1>
@@ -92,7 +93,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
               </p>
             </div>
           </div>
-          <AuthCard idPrefix="gate" />
+          <AuthCard idPrefix="gate" onSuccess={() => router.push("/")} />
         </div>
       </div>
     );

@@ -3,32 +3,35 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   ExternalLink,
   FileText,
+  Landmark,
   Loader2,
-  Newspaper,
   Search,
 } from "lucide-react";
-import AppHeader from "@/components/AppHeader";
+import AppShell from "@/components/AppShell";
 import ErrorCard from "@/components/ui/ErrorCard";
 import GatePanel from "@/components/ui/GatePanel";
 import LoadingState from "@/components/ui/LoadingState";
-import PageShell from "@/components/ui/PageShell";
+
 import { useAuthToken } from "@/lib/useAuth";
 import {
   ApiError,
   getArticle,
-  listFreshnessEvents,
+  getSourceContent,
   listSourceArticles,
   listSources,
   searchCorpus,
   type ArticleIndexEntry,
   type ArticleLookupResponse,
   type EvidenceChunk,
-  type FreshnessEvent,
+  type SourceContent,
   type SourceListItem,
 } from "@/lib/api";
-import { formatLongDate, relativeDate } from "@/lib/dates";
+import { formatLongDate } from "@/lib/dates";
+import { displayDocName } from "@/lib/docNames";
 
 // ---------------------------------------------------------------------------
 // Display vocabularies (same French labels as the admin ingestion form and
@@ -70,12 +73,16 @@ const DOC_TYPE_LABELS: Record<string, string> = {
   decision: "Décision",
   case_law: "Jurisprudence",
   law: "Loi",
+  parliamentary_record: "Document parlementaire",
   other: "Autre",
 };
 
 const SEARCH_DEBOUNCE_MS = 350;
-const SEARCH_TOP_K = 10;
-const FRESHNESS_LIMIT = 6;
+const SEARCH_TOP_K = 24;
+/** Cards shown per category section in the "Tout" overview. */
+const SECTION_PREVIEW = 8;
+/** Cards per page when a single category is selected. */
+const PAGE_SIZE = 24;
 
 /** publication_date can be date-only ("YYYY-MM-DD"): anchor it at noon UTC
  * so it never rolls back a day in negative-offset timezones. */
@@ -88,6 +95,52 @@ function Badge({ label }: { label: string }) {
     <span className="rounded-full border border-gray-300 bg-gray-50 px-2 py-0.5 text-[10px] font-medium text-gray-600">
       {label}
     </span>
+  );
+}
+
+/** Document card used in the category grid and the section previews. */
+function DocCard({
+  doc,
+  active,
+  onOpen,
+}: {
+  doc: SourceListItem;
+  active: boolean;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className={`group flex flex-col rounded-xl border p-4 text-left transition-all ${
+        active
+          ? "border-accent/50 bg-accent-light"
+          : "border-gray-200 bg-white hover:border-accent/40 hover:shadow-panel"
+      }`}
+    >
+      <span className="mb-2 flex items-center justify-between gap-2">
+        <FileText
+          className={`h-4 w-4 shrink-0 transition-colors ${
+            active ? "text-accent" : "text-gray-400 group-hover:text-accent"
+          }`}
+        />
+        {doc.publication_date && (
+          <span className="text-[10px] text-gray-400">{formatPubDate(doc.publication_date)}</span>
+        )}
+      </span>
+      <span className="line-clamp-3 text-sm font-medium leading-snug text-gray-900">
+        {displayDocName(doc.document_name)}
+      </span>
+      <span className="mt-auto flex flex-wrap items-center gap-1 pt-3">
+        {doc.document_type && (
+          <Badge label={DOC_TYPE_LABELS[doc.document_type] ?? doc.document_type} />
+        )}
+        {doc.authority && <Badge label={AUTHORITY_LABELS[doc.authority] ?? doc.authority} />}
+      </span>
+      {doc.law_number && (
+        <span className="pt-1.5 text-[11px] text-gray-500">n° {doc.law_number}</span>
+      )}
+    </button>
   );
 }
 
@@ -114,12 +167,15 @@ export default function ExplorerPage() {
   const [token] = useAuthToken();
   const [sources, setSources] = useState<SourceListItem[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [events, setEvents] = useState<FreshnessEvent[] | null>(null);
 
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState<EvidenceChunk[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+
+  /** "" = overview of every category; otherwise a folder key ("bf", …). */
+  const [category, setCategory] = useState("");
+  const [page, setPage] = useState(1);
 
   const [selectedDoc, setSelectedDoc] = useState<SourceListItem | null>(null);
   const [articles, setArticles] = useState<ArticleIndexEntry[] | null>(null);
@@ -132,8 +188,13 @@ export default function ExplorerPage() {
   const [articleError, setArticleError] = useState<string | null>(null);
   /** Search hit opened directly in the reader (chunk without article). */
   const [looseChunk, setLooseChunk] = useState<EvidenceChunk | null>(null);
+  /** Full text shown when the document has no article structure. */
+  const [docContent, setDocContent] = useState<SourceContent | null>(null);
+  const [contentLoading, setContentLoading] = useState(false);
+  /** Mobile only: user tapped back from the full-text reader to the index. */
+  const [contentDismissed, setContentDismissed] = useState(false);
 
-  // Sources + freshness feed load once the session is known.
+  // Sources load once the session is known.
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
@@ -146,19 +207,12 @@ export default function ExplorerPage() {
           setLoadError(err instanceof Error ? err.message : "Une erreur est survenue.");
         }
       });
-    listFreshnessEvents(FRESHNESS_LIMIT, token)
-      .then((rows) => {
-        if (!cancelled) setEvents(rows);
-      })
-      .catch(() => {
-        // Le fil de nouveautés est optionnel : la carte reste masquée.
-      });
     return () => {
       cancelled = true;
     };
   }, [token]);
 
-  // Debounced corpus search; an empty query restores the document list.
+  // Debounced corpus search; an empty query restores the document grid.
   useEffect(() => {
     const q = search.trim();
     if (!token || q.length === 0) {
@@ -200,36 +254,27 @@ export default function ExplorerPage() {
     });
     return folders.map((folder) => ({
       folder,
-      label: FOLDER_LABELS[folder] ?? (folder ? folder.toUpperCase() : "Autres"),
+      label:
+        FOLDER_LABELS[folder] ??
+        (folder
+          ? folder.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+          : "Autres"),
       docs: byFolder.get(folder) ?? [],
     }));
   }, [sources]);
 
-  function openDocument(doc: SourceListItem) {
-    setSelectedDoc(doc);
-    setSelectedArticle(null);
-    setArticleData(null);
-    setArticleError(null);
-    setLooseChunk(null);
-    setArticles(null);
-    setArticlesError(null);
-    setArticlesLoading(true);
-    listSourceArticles(doc.document_id, token)
-      .then((entries) => setArticles(entries))
-      .catch((err) =>
-        setArticlesError(err instanceof Error ? err.message : "Échec du chargement des articles."),
-      )
-      .finally(() => setArticlesLoading(false));
+  function selectCategory(next: string) {
+    setCategory(next);
+    setPage(1);
   }
 
-  function openArticle(article: string) {
-    if (!selectedDoc) return;
+  function loadArticle(docId: string, article: string) {
     setSelectedArticle(article);
     setLooseChunk(null);
     setArticleData(null);
     setArticleError(null);
     setArticleLoading(true);
-    getArticle(selectedDoc.document_id, article, token)
+    getArticle(docId, article, token)
       .then((data) => setArticleData(data))
       .catch((err) =>
         setArticleError(
@@ -241,6 +286,53 @@ export default function ExplorerPage() {
         ),
       )
       .finally(() => setArticleLoading(false));
+  }
+
+  function openDocument(doc: SourceListItem) {
+    setSelectedDoc(doc);
+    setSelectedArticle(null);
+    setArticleData(null);
+    setArticleError(null);
+    setLooseChunk(null);
+    setArticles(null);
+    setArticlesError(null);
+    setDocContent(null);
+    setContentLoading(false);
+    setContentDismissed(false);
+    setArticlesLoading(true);
+    listSourceArticles(doc.document_id, token)
+      .then((entries) => {
+        setArticles(entries);
+        if (entries.length > 0) {
+          loadArticle(doc.document_id, entries[0].article);
+        } else {
+          // No article structure (parliamentary records, reports): show the
+          // document's full text instead of a dead end.
+          setContentLoading(true);
+          getSourceContent(doc.document_id, token)
+            .then((content) => setDocContent(content))
+            .catch(() => setDocContent(null))
+            .finally(() => setContentLoading(false));
+        }
+      })
+      .catch((err) =>
+        setArticlesError(err instanceof Error ? err.message : "Échec du chargement des articles."),
+      )
+      .finally(() => setArticlesLoading(false));
+  }
+
+  function backToDocuments() {
+    setSelectedDoc(null);
+    setSelectedArticle(null);
+    setArticleData(null);
+    setLooseChunk(null);
+    setDocContent(null);
+    setContentDismissed(false);
+  }
+
+  function openArticle(article: string) {
+    if (!selectedDoc) return;
+    loadArticle(selectedDoc.document_id, article);
   }
 
   function openSearchHit(chunk: EvidenceChunk) {
@@ -287,18 +379,20 @@ export default function ExplorerPage() {
   }
 
   // Mobile navigation: one pane at a time (documents → articles → reader);
-  // all three columns are shown side by side from lg up.
-  const view: "docs" | "articles" | "reader" = !selectedDoc
-    ? "docs"
-    : selectedArticle === null && looseChunk === null
+  // articles and reader sit side by side from lg up.
+  const mobilePane: "articles" | "reader" =
+    selectedArticle === null && looseChunk === null && (docContent === null || contentDismissed)
       ? "articles"
       : "reader";
 
+  const activeGroup = grouped.find((g) => g.folder === category) ?? null;
+  const pageCount = activeGroup ? Math.max(1, Math.ceil(activeGroup.docs.length / PAGE_SIZE)) : 1;
+  const pageDocs = activeGroup
+    ? activeGroup.docs.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+    : [];
+
   return (
-    <PageShell
-      header={<AppHeader token={token} />}
-      disclaimer="Textes indexés à titre informatif — seule la version publiée au Journal officiel fait foi."
-    >
+    <AppShell disclaimer="Textes indexés à titre informatif — seule la version publiée au Journal officiel fait foi.">
       {!token ? (
         <GatePanel body="L'exploration du corpus nécessite un compte. Connectez-vous depuis l'icône de compte en haut à droite." />
       ) : loadError ? (
@@ -313,234 +407,298 @@ export default function ExplorerPage() {
         </ErrorCard>
       ) : sources === null ? (
         <LoadingState label="Chargement du corpus…" />
-      ) : (
-        <div className="mx-auto grid h-full max-w-7xl gap-4 lg:grid-cols-[19rem_17rem_minmax(0,1fr)]">
-          {/* Column 1 — search, nouveautés, documents */}
-          <section
-            className={`${view === "docs" ? "flex" : "hidden"} min-h-0 flex-col overflow-y-auto lg:flex`}
-            aria-label="Documents du corpus"
-          >
-            <div className="relative mb-3">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Rechercher dans le corpus…"
-                aria-label="Rechercher dans le corpus"
-                className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-8 text-sm text-gray-900 placeholder:text-gray-400 focus:border-accent/60 focus:outline-none"
-              />
-              {searching && (
-                <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-accent" />
-              )}
-            </div>
+      ) : selectedDoc === null ? (
+        <div className="mx-auto max-w-7xl">
+          <header className="mb-6">
+            <h1 className="flex items-center gap-2.5 font-serif text-2xl font-bold text-gray-900 sm:text-3xl">
+              <Landmark className="h-7 w-7 text-gold" />
+              Sources officielles
+            </h1>
+            <p className="mt-1 text-sm text-gray-500">
+              Lois, décrets et textes de référence indexés à partir des publications officielles.
+            </p>
+          </header>
 
-            {searchResults === null && events !== null && events.length > 0 && (
-              <section className="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
-                <h2 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  <Newspaper className="h-3.5 w-3.5" />
-                  Nouveautés
-                </h2>
-                <ul className="space-y-2.5">
-                  {events.map((ev, i) => (
-                    <li key={`${ev.source_name}-${i}`}>
-                      <a
-                        href={ev.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="group block"
-                      >
-                        <span className="flex items-start justify-between gap-2 text-xs font-medium text-gray-800">
-                          <span className="min-w-0">{ev.source_name}</span>
-                          <ExternalLink className="mt-0.5 h-3 w-3 shrink-0 text-gray-400 transition-colors group-hover:text-accent" />
-                        </span>
-                        {ev.detail && (
-                          <span className="mt-0.5 line-clamp-2 block text-[11px] text-gray-500">
-                            {ev.detail}
-                          </span>
-                        )}
-                        <span className="mt-0.5 block text-[10px] text-gray-400">
-                          {relativeDate(ev.detected_at)}
-                        </span>
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </section>
+          {/* Search */}
+          <div className="relative mb-4 max-w-xl">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Rechercher dans le corpus…"
+              aria-label="Rechercher dans le corpus"
+              className="w-full rounded-lg border border-gray-300 bg-white py-2.5 pl-9 pr-8 text-sm text-gray-900 placeholder:text-gray-400 focus:border-accent/60 focus:outline-none"
+            />
+            {searching && (
+              <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-accent" />
             )}
+          </div>
 
-            {searchError && (
-              <p className="mb-3 rounded-lg border border-red-700/30 bg-red-700/10 px-3 py-2 text-xs text-red-700">
-                {searchError}
+          {searchError && (
+            <p className="mb-4 rounded-lg border border-red-700/30 bg-red-700/10 px-3 py-2 text-xs text-red-700">
+              {searchError}
+            </p>
+          )}
+
+          {searchResults !== null ? (
+            <>
+              <p className="mb-3 text-xs text-gray-500">
+                {searchResults.length} résultat{searchResults.length > 1 ? "s" : ""} pour «{" "}
+                {search.trim()} »
               </p>
-            )}
-
-            {searchResults !== null ? (
-              <div className="space-y-1.5">
-                <p className="px-1 text-[11px] text-gray-500">
-                  {searchResults.length} résultat{searchResults.length > 1 ? "s" : ""}
-                </p>
                 {searchResults.length === 0 ? (
-                  <p className="px-1 py-6 text-center text-xs text-gray-500">
-                    Aucun passage ne correspond à votre recherche.
-                  </p>
-                ) : (
-                  searchResults.map((chunk) => (
+                <p className="py-10 text-center text-sm text-gray-500">
+                  Aucun passage ne correspond à votre recherche.
+                </p>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {searchResults.map((chunk) => (
                     <button
                       key={chunk.chunk_id}
                       type="button"
                       onClick={() => openSearchHit(chunk)}
-                      className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-left transition-colors hover:border-accent/40 hover:bg-gray-50"
+                      className="rounded-xl border border-gray-200 bg-white p-4 text-left transition-all hover:border-accent/40 hover:shadow-panel"
                     >
                       <span className="flex items-center gap-1.5">
                         <span className="min-w-0 flex-1 truncate text-xs font-medium text-gray-800">
-                          {chunk.document_name}
+                          {displayDocName(chunk.document_name)}
                         </span>
                         {chunk.article && <Badge label={`Art. ${chunk.article}`} />}
                       </span>
-                      <span className="mt-1 line-clamp-2 block text-[11px] leading-relaxed text-gray-500">
+                      <span className="mt-2 line-clamp-3 block text-[11px] leading-relaxed text-gray-500">
                         {chunk.content}
                       </span>
                     </button>
-                  ))
-                )}
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {/* Category chips */}
+              <div className="mb-6 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => selectCategory("")}
+                  className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors ${
+                    category === ""
+                      ? "bg-accent text-white"
+                      : "border border-gray-300 bg-white text-gray-600 hover:border-gray-400 hover:text-gray-900"
+                  }`}
+                >
+                  Tout
+                </button>
+                {grouped.map((g) => (
+                  <button
+                    key={g.folder || "autres"}
+                    type="button"
+                    onClick={() => selectCategory(g.folder)}
+                    className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors ${
+                      category === g.folder
+                        ? "bg-accent text-white"
+                        : "border border-gray-300 bg-white text-gray-600 hover:border-gray-400 hover:text-gray-900"
+                    }`}
+                  >
+                    {g.label}
+                    <span
+                      className={`ml-1.5 ${category === g.folder ? "text-white/70" : "text-gray-400"}`}
+                    >
+                      {g.docs.length}
+                    </span>
+                  </button>
+                ))}
               </div>
-            ) : (
-              grouped.map((group) => (
-                <section key={group.folder || "autres"} className="mb-5">
-                  <h2 className="mb-2 flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-                    {group.label}
-                  </h2>
-                  <div className="space-y-1.5">
-                    {group.docs.map((doc) => {
-                      const active = selectedDoc?.document_id === doc.document_id;
-                      return (
-                        <button
-                          key={doc.document_id}
-                          type="button"
-                          onClick={() => openDocument(doc)}
-                          className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
-                            active
-                              ? "border-accent/40 bg-accent/10"
-                              : "border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50"
-                          }`}
-                        >
-                          <span className="block text-xs font-medium leading-snug text-gray-800">
-                            {doc.document_name}
-                          </span>
-                          {(doc.document_type || doc.authority) && (
-                            <span className="mt-1.5 flex flex-wrap gap-1">
-                              {doc.document_type && (
-                                <Badge label={DOC_TYPE_LABELS[doc.document_type] ?? doc.document_type} />
-                              )}
-                              {doc.authority && (
-                                <Badge label={AUTHORITY_LABELS[doc.authority] ?? doc.authority} />
-                              )}
-                            </span>
-                          )}
-                          {doc.publication_date && (
-                            <span className="mt-1 block text-[10px] text-gray-400">
-                              Publié le {formatPubDate(doc.publication_date)}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </section>
-              ))
-            )}
-          </section>
 
-          {/* Column 2 — article index of the selected document */}
+              {grouped.length === 0 ? (
+                <p className="py-10 text-center text-sm text-gray-500">
+                  Aucun document indexé pour le moment.
+                </p>
+              ) : category === "" ? (
+                /* Overview: one section per category, preview cards + "voir tout". */
+                grouped.map((group) => (
+                  <section key={group.folder || "autres"} className="mb-8">
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                        <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+                        {group.label}
+                        <span className="text-xs font-normal text-gray-400">
+                          {group.docs.length} document{group.docs.length > 1 ? "s" : ""}
+                        </span>
+                      </h2>
+                      {group.docs.length > SECTION_PREVIEW && (
+                        <button
+                          type="button"
+                          onClick={() => selectCategory(group.folder)}
+                          className="flex items-center gap-1 text-xs font-medium text-accent transition-colors hover:text-accent-hover"
+                        >
+                          Tout voir
+                          <ChevronRight className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {group.docs.slice(0, SECTION_PREVIEW).map((doc) => (
+                        <DocCard
+                          key={doc.document_id}
+                          doc={doc}
+                          active={false}
+                          onOpen={() => openDocument(doc)}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                ))
+              ) : (
+                /* Single category: full paginated grid. */
+                activeGroup && (
+                  <section>
+                    <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-900">
+                      <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+                      {activeGroup.label}
+                      <span className="text-xs font-normal text-gray-400">
+                        {activeGroup.docs.length} document{activeGroup.docs.length > 1 ? "s" : ""}
+                      </span>
+                    </h2>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {pageDocs.map((doc) => (
+                        <DocCard
+                          key={doc.document_id}
+                          doc={doc}
+                          active={false}
+                          onOpen={() => openDocument(doc)}
+                        />
+                      ))}
+                    </div>
+                    {pageCount > 1 && (
+                      <div className="mt-6 flex items-center justify-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setPage((p) => Math.max(1, p - 1))}
+                          disabled={page === 1}
+                          className="flex h-9 w-9 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 transition-colors hover:bg-gray-100 disabled:opacity-40"
+                          title="Page précédente"
+                          aria-label="Page précédente"
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </button>
+                        <span className="text-xs text-gray-500">
+                          Page {page} sur {pageCount}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                          disabled={page === pageCount}
+                          className="flex h-9 w-9 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 transition-colors hover:bg-gray-100 disabled:opacity-40"
+                          title="Page suivante"
+                          aria-label="Page suivante"
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
+                  </section>
+                )
+              )}
+            </>
+          )}
+        </div>
+      ) : (
+        /* Reading view: article index + reader, side by side from lg up. */
+        <div className="mx-auto grid h-full max-w-7xl gap-4 lg:grid-cols-[19rem_minmax(0,1fr)]">
+          {/* Articles index */}
           <section
-            className={`${view === "articles" ? "flex" : "hidden"} min-h-0 flex-col overflow-y-auto lg:flex`}
+            className={`${mobilePane === "articles" ? "flex" : "hidden"} min-h-0 flex-col overflow-y-auto lg:flex`}
             aria-label="Index des articles"
           >
             <button
               type="button"
-              onClick={() => {
-                setSelectedDoc(null);
-                setSelectedArticle(null);
-                setArticleData(null);
-                setLooseChunk(null);
-              }}
-              className="mb-3 flex items-center gap-1.5 text-xs text-gray-500 transition-colors hover:text-gray-900 lg:hidden"
+              onClick={backToDocuments}
+              className="mb-3 flex items-center gap-1.5 text-xs font-medium text-gray-500 transition-colors hover:text-accent"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
               Tous les documents
             </button>
-            {selectedDoc ? (
-              <>
-                <div className="mb-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
-                  <p className="text-xs font-medium leading-snug text-gray-800">
-                    {selectedDoc.document_name}
-                  </p>
-                  {selectedDoc.law_number && (
-                    <p className="mt-0.5 text-[11px] text-gray-500">Loi n°{selectedDoc.law_number}</p>
-                  )}
-                </div>
-                {articlesLoading ? (
-                  <div className="flex items-center justify-center gap-2 py-8 text-xs text-gray-500">
-                    <Loader2 className="h-4 w-4 animate-spin text-accent" />
-                    Chargement des articles…
-                  </div>
-                ) : articlesError ? (
-                  <p className="rounded-lg border border-red-700/30 bg-red-700/10 px-3 py-2 text-xs text-red-700">
-                    {articlesError}
-                  </p>
-                ) : !articles || articles.length === 0 ? (
-                  <p className="px-1 py-6 text-center text-xs text-gray-500">
-                    Aucun article indexé pour ce document.
-                  </p>
-                ) : (
-                  <div className="space-y-1.5">
-                    {articles.map((entry) => {
-                      const active = selectedArticle === entry.article;
-                      return (
-                        <button
-                          key={entry.article}
-                          type="button"
-                          onClick={() => openArticle(entry.article)}
-                          className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
-                            active
-                              ? "border-accent/40 bg-accent/10"
-                              : "border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50"
-                          }`}
-                        >
-                          <span className="block text-xs font-semibold text-gray-900">
-                            Article {entry.article}
-                          </span>
-                          {entry.section && (
-                            <span className="mt-0.5 block truncate text-[10px] text-gray-400">
-                              {entry.section}
-                            </span>
-                          )}
-                          {entry.preview && (
-                            <span className="mt-0.5 line-clamp-2 block text-[11px] leading-relaxed text-gray-500">
-                              {entry.preview}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </>
-            ) : (
-              <p className="hidden px-2 py-10 text-center text-xs text-gray-400 lg:block">
-                Sélectionnez un document pour parcourir ses articles.
+            <div className="mb-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
+              <p className="text-xs font-medium leading-snug text-gray-800">
+                {displayDocName(selectedDoc.document_name)}
               </p>
+              {selectedDoc.law_number && (
+                <p className="mt-0.5 text-[11px] text-gray-500">Loi n°{selectedDoc.law_number}</p>
+              )}
+            </div>
+            {articlesLoading ? (
+              <div className="flex items-center justify-center gap-2 py-8 text-xs text-gray-500">
+                <Loader2 className="h-4 w-4 animate-spin text-accent" />
+                Chargement des articles…
+              </div>
+            ) : articlesError ? (
+              <p className="rounded-lg border border-red-700/30 bg-red-700/10 px-3 py-2 text-xs text-red-700">
+                {articlesError}
+              </p>
+            ) : !articles || articles.length === 0 ? (
+              contentLoading ? (
+                <div className="flex items-center justify-center gap-2 py-8 text-xs text-gray-500">
+                  <Loader2 className="h-4 w-4 animate-spin text-accent" />
+                  Chargement du texte…
+                </div>
+              ) : docContent && docContent.blocks.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setContentDismissed(false)}
+                  className="w-full rounded-lg border border-accent/40 bg-accent-light px-3 py-2 text-left"
+                >
+                  <span className="block text-xs font-semibold text-gray-900">Texte intégral</span>
+                  <span className="mt-0.5 block text-[11px] leading-relaxed text-gray-500">
+                    Document non structuré en articles — affichage du texte dans le lecteur.
+                  </span>
+                </button>
+              ) : (
+                <p className="px-1 py-6 text-center text-xs text-gray-500">
+                  Aucun article indexé pour ce document.
+                </p>
+              )
+            ) : (
+              <div className="space-y-1.5">
+                {articles.map((entry) => {
+                  const active = selectedArticle === entry.article;
+                  return (
+                    <button
+                      key={entry.article}
+                      type="button"
+                      onClick={() => openArticle(entry.article)}
+                      className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
+                        active
+                          ? "border-accent/40 bg-accent-light"
+                          : "border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50"
+                      }`}
+                    >
+                      <span className="block text-xs font-semibold text-gray-900">
+                        Article {entry.article}
+                      </span>
+                      {entry.section && (
+                        <span className="mt-0.5 block truncate text-[10px] text-gray-400">
+                          {entry.section}
+                        </span>
+                      )}
+                      {entry.preview && (
+                        <span className="mt-0.5 line-clamp-2 block text-[11px] leading-relaxed text-gray-500">
+                          {entry.preview}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             )}
           </section>
 
-          {/* Column 3 — reader */}
+          {/* Reader */}
           <section
-            className={`${view === "reader" ? "flex" : "hidden"} min-h-0 flex-col overflow-y-auto lg:flex`}
+            className={`${mobilePane === "reader" ? "flex" : "hidden"} min-h-0 flex-col overflow-y-auto lg:flex`}
             aria-label="Texte de l'article"
           >
-            {(selectedArticle !== null || looseChunk !== null) && (
+            {(selectedArticle !== null || looseChunk !== null || (docContent !== null && !contentDismissed)) && (
               <button
                 type="button"
                 onClick={() => {
@@ -548,6 +706,7 @@ export default function ExplorerPage() {
                   setArticleData(null);
                   setArticleError(null);
                   setLooseChunk(null);
+                  setContentDismissed(true);
                 }}
                 className="mb-3 flex items-center gap-1.5 text-xs text-gray-500 transition-colors hover:text-gray-900 lg:hidden"
               >
@@ -566,7 +725,9 @@ export default function ExplorerPage() {
               </p>
             ) : articleData ? (
               <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-panel">
-                <p className="text-xs text-gray-500">{articleData.chunks[0]?.document_name}</p>
+                <p className="text-xs text-gray-500">
+                  {displayDocName(articleData.chunks[0]?.document_name ?? "")}
+                </p>
                 <h2 className="mt-1 text-lg font-semibold text-gray-900">
                   Article {articleData.article}
                 </h2>
@@ -604,13 +765,43 @@ export default function ExplorerPage() {
               </article>
             ) : looseChunk ? (
               <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-panel">
-                <p className="text-xs text-gray-500">{looseChunk.document_name}</p>
+                <p className="text-xs text-gray-500">{displayDocName(looseChunk.document_name)}</p>
                 <h2 className="mt-1 text-lg font-semibold text-gray-900">
                   {looseChunk.article ? `Article ${looseChunk.article}` : "Extrait"}
                 </h2>
                 <p className="mt-4 whitespace-pre-wrap border-t border-gray-200 pt-4 text-sm leading-relaxed text-gray-800">
                   {looseChunk.content}
                 </p>
+              </article>
+            ) : docContent && docContent.blocks.length > 0 ? (
+              <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-panel">
+                <p className="text-xs text-gray-500">
+                  {displayDocName(selectedDoc?.document_name ?? "")}
+                </p>
+                <h2 className="mt-1 text-lg font-semibold text-gray-900">Texte intégral</h2>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Badge label="Document non structuré en articles" />
+                  {selectedDoc?.publication_date && (
+                    <span className="text-[11px] text-gray-500">
+                      Publié le {formatPubDate(selectedDoc.publication_date)}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-4 space-y-4 border-t border-gray-200 pt-4">
+                  {docContent.blocks.map((block, i) => (
+                    <p
+                      key={i}
+                      className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800"
+                    >
+                      {block.page !== null && (
+                        <span className="mr-2 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-400">
+                          p. {block.page}
+                        </span>
+                      )}
+                      {block.text}
+                    </p>
+                  ))}
+                </div>
               </article>
             ) : (
               <div className="hidden flex-1 flex-col items-center justify-center gap-3 text-center lg:flex">
@@ -623,6 +814,6 @@ export default function ExplorerPage() {
           </section>
         </div>
       )}
-    </PageShell>
+    </AppShell>
   );
 }
