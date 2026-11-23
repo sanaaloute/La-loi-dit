@@ -27,6 +27,10 @@ data/stt_models/
 # Uploaded source documents (re-ingest after deploy; do not commit).
 data/legal_docs/**
 
+# Personal dossier uploads and extracted text (per-user runtime data).
+data/user_dossiers/
+data/uploads/
+
 # Track the directory skeleton and compulsory configuration files.
 !data/.gitkeep
 !data/legal_docs/.gitkeep

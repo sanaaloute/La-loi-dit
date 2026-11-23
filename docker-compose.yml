@@ -123,6 +123,9 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     command: minio server /minio_data --console-address ":9001"
+    # Cache-heavy by default (~2 GB seen idle); it is only Milvus's blob
+    # store, so a hard cap is safe and keeps small VMs out of OOM.
+    mem_limit: 512m
     ports:
       - "127.0.0.1:9001:9001"
     volumes:
@@ -153,6 +156,8 @@ services:
       - "127.0.0.1:9091:9091"
     volumes:
       - milvus-data:/var/lib/milvus
+      # mmap overrides for low-RAM servers (see docker/milvus-user.yaml).
+      - ./docker/milvus-user.yaml:/milvus/configs/user.yaml:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
       interval: 30s

@@ -308,6 +308,42 @@ require a registered account (dev-store/anonymous → 400/401).
 
 ### DELETE /api/v1/bookmarks/{bookmark_id} → `204` (owner-scoped; `404` when foreign/unknown).
 
+## Dossiers (`backend/api/routers/dossiers.py`)
+
+Personal documents ("Mes dossiers") uploaded for AI analysis — unlike
+`POST /documents` (expert corpus ingestion), these are per-user and never
+enter the shared corpus. Files and extracted text live on disk under
+`data/user_dossiers/<user_id>/<dossier_id>/`; the `user_dossiers` table is
+the index. All endpoints require a registered account and are owner-scoped
+(`404` when foreign/unknown).
+
+### POST /api/v1/dossiers
+
+Multipart `file` (PDF/TXT/MD/DOCX, capped by `max_upload_bytes_user`) +
+optional `title`. Extracts the text immediately (scanned/image-only files
+yield `status="error"` with a French message).
+
+→ `201` `{id, name, original_name, extension, size_bytes, char_count, page_count, status, error, created_at}`.
+`415` for unsupported extensions, `413` when over the size cap.
+
+### GET /api/v1/dossiers → the current user's dossiers (newest first).
+
+### GET /api/v1/dossiers/{dossier_id}/text → `{dossier, text}` (extracted text).
+
+### DELETE /api/v1/dossiers/{dossier_id} → `204` (row + files on disk).
+
+### POST /api/v1/dossiers/{dossier_id}/analyze
+
+```json
+{ "question": "Quel est le montant du loyer ?" }
+```
+
+One LLM call grounded exclusively on the extracted text (first ~32 000
+chars; longer documents come back flagged). Enforces the daily budget like
+chat and meters token usage.
+
+→ `{answer, truncated, chars_used}`. `422` when the dossier has no usable text.
+
 ## Share (`backend/api/routers/share.py`)
 
 ### POST /api/v1/share

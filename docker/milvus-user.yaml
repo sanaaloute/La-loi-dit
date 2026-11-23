@@ -1,0 +1,16 @@
+# Milvus user config — loaded after the image's /milvus/configs/milvus.yaml
+# and overrides it (standard Milvus mechanism).
+#
+# Why: the cloud VM has 12 GB RAM shared with other services. With the
+# defaults (vectorIndex: false), Milvus keeps the whole HNSW index in RAM,
+# which grows with the corpus and would OOM the VM once the full
+# official-documents corpus is ingested. mmap keeps the index and fields
+# mapped on disk instead; the cost is slightly higher query latency.
+mmap:
+  vectorField: true
+  vectorIndex: true
+  scalarField: true
+  scalarIndex: true
+  # mmap newly added (growing) segments too, so bulk ingestion does not
+  # pile unsealed data into RAM before segments are sealed.
+  growingMmapEnabled: true
