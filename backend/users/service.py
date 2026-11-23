@@ -67,6 +67,33 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _dossier_row(r: Any) -> dict[str, Any]:
+    """Normalize a user_dossiers row into the API payload shape."""
+    return {
+        "id": r.id,
+        "name": r.name or "",
+        "original_name": r.original_name or "",
+        "extension": r.extension or "",
+        "size_bytes": int(r.size_bytes or 0),
+        "char_count": int(r.char_count or 0),
+        "page_count": int(r.page_count or 0),
+        "status": r.status or "ready",
+        "error": r.error or "",
+        "folder_id": getattr(r, "folder_id", None) or "",
+        "created_at": r.created_at or "",
+    }
+
+
+def _folder_row(r: Any) -> dict[str, Any]:
+    """Normalize a dossier_folders row into the API payload shape."""
+    return {
+        "id": r.id,
+        "name": r.name or "",
+        "description": getattr(r, "description", None) or "",
+        "created_at": r.created_at or "",
+    }
+
+
 class UserRecord(BaseModel):
     """A persisted user account."""
 
@@ -489,6 +516,9 @@ class UserStore:
             )
             await session.execute(delete(TABLES["bookmarks"]).where(TABLES["bookmarks"].c.user_id == user_id))
             await session.execute(
+                delete(TABLES["user_dossiers"]).where(TABLES["user_dossiers"].c.user_id == user_id)
+            )
+            await session.execute(
                 delete(TABLES["shared_answers"]).where(TABLES["shared_answers"].c.user_id == user_id)
             )
             await session.execute(
@@ -559,6 +589,223 @@ class UserStore:
             )
             await session.commit()
         return bool(result.rowcount)
+
+    # ------------------------------------------------------------------
+    # User dossiers (personal documents for AI analysis)
+    # ------------------------------------------------------------------
+
+    async def add_dossier(self, user_id: str, record: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """Insert one dossier index row; returns it (None when DB down)."""
+        if not await self._ensure_db():
+            return None
+        row = {
+            "id": record.get("id") or uuid.uuid4().hex,
+            "user_id": user_id,
+            "folder_id": record.get("folder_id", ""),
+            "name": record.get("name", ""),
+            "original_name": record.get("original_name", ""),
+            "extension": record.get("extension", ""),
+            "size_bytes": int(record.get("size_bytes", 0)),
+            "char_count": int(record.get("char_count", 0)),
+            "page_count": int(record.get("page_count", 0)),
+            "status": record.get("status", "ready"),
+            "error": record.get("error", ""),
+            "created_at": _utcnow_iso(),
+        }
+        async with self._session_factory() as session:
+            await session.execute(TABLES["user_dossiers"].insert(), row)
+            await session.commit()
+        return row
+
+    async def list_dossiers(self, user_id: str, folder_id: Optional[str] = None) -> list[dict[str, Any]]:
+        """Newest-first dossiers of one user ([] when DB down).
+
+        ``folder_id=None`` lists everything; ``""`` lists only unfiled
+        documents; any other value lists one folder's documents.
+        """
+        if not await self._ensure_db():
+            return []
+        from sqlalchemy import select
+
+        t = TABLES["user_dossiers"]
+        stmt = select(t).where(t.c.user_id == user_id)
+        if folder_id is not None:
+            stmt = stmt.where(t.c.folder_id == folder_id)
+        async with self._session_factory() as session:
+            rows = (await session.execute(stmt.order_by(t.c.created_at.desc()))).all()
+        return [_dossier_row(r) for r in rows]
+
+    async def get_dossier(self, user_id: str, dossier_id: str) -> Optional[dict[str, Any]]:
+        """Owner-scoped lookup; None when not found/foreign or DB down."""
+        if not await self._ensure_db():
+            return None
+        from sqlalchemy import select
+
+        t = TABLES["user_dossiers"]
+        async with self._session_factory() as session:
+            row = (
+                await session.execute(
+                    select(t).where(t.c.id == dossier_id).where(t.c.user_id == user_id)
+                )
+            ).first()
+        return _dossier_row(row) if row is not None else None
+
+    async def delete_dossier(self, user_id: str, dossier_id: str) -> bool:
+        """Owner-scoped delete; False when not found/foreign or DB down."""
+        if not await self._ensure_db():
+            return False
+        from sqlalchemy import delete
+
+        t = TABLES["user_dossiers"]
+        async with self._session_factory() as session:
+            result = await session.execute(
+                delete(t).where(t.c.id == dossier_id).where(t.c.user_id == user_id)
+            )
+            await session.commit()
+        return bool(result.rowcount)
+
+    async def update_dossier_folder(self, user_id: str, dossier_id: str, folder_id: str) -> bool:
+        """Move one dossier into a folder ("" = unfiled); owner-scoped."""
+        if not await self._ensure_db():
+            return False
+        from sqlalchemy import update
+
+        t = TABLES["user_dossiers"]
+        async with self._session_factory() as session:
+            result = await session.execute(
+                update(t)
+                .where(t.c.id == dossier_id)
+                .where(t.c.user_id == user_id)
+                .values(folder_id=folder_id)
+            )
+            await session.commit()
+        return bool(result.rowcount)
+
+    # ------------------------------------------------------------------
+    # Dossier folders (cases grouping several documents)
+    # ------------------------------------------------------------------
+
+    async def add_folder(self, user_id: str, record: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """Insert one folder row; returns it (None when DB down)."""
+        if not await self._ensure_db():
+            return None
+        row = {
+            "id": record.get("id") or uuid.uuid4().hex,
+            "user_id": user_id,
+            "name": record.get("name", ""),
+            "description": record.get("description", ""),
+            "created_at": _utcnow_iso(),
+        }
+        async with self._session_factory() as session:
+            await session.execute(TABLES["dossier_folders"].insert(), row)
+            await session.commit()
+        return row
+
+    async def list_folders(self, user_id: str) -> list[dict[str, Any]]:
+        """Newest-first folders of one user, each with its document count."""
+        if not await self._ensure_db():
+            return []
+        from sqlalchemy import func, select
+
+        folders = TABLES["dossier_folders"]
+        docs = TABLES["user_dossiers"]
+        async with self._session_factory() as session:
+            rows = (
+                await session.execute(
+                    select(folders)
+                    .where(folders.c.user_id == user_id)
+                    .order_by(folders.c.created_at.desc())
+                )
+            ).all()
+            counts = (
+                await session.execute(
+                    select(docs.c.folder_id, func.count())
+                    .where(docs.c.user_id == user_id)
+                    .group_by(docs.c.folder_id)
+                )
+            ).all()
+        count_by_folder = {r[0]: int(r[1]) for r in counts}
+        return [
+            {**_folder_row(r), "document_count": count_by_folder.get(r.id, 0)} for r in rows
+        ]
+
+    async def get_folder(self, user_id: str, folder_id: str) -> Optional[dict[str, Any]]:
+        """Owner-scoped lookup; None when not found/foreign or DB down."""
+        if not await self._ensure_db():
+            return None
+        from sqlalchemy import select
+
+        t = TABLES["dossier_folders"]
+        async with self._session_factory() as session:
+            row = (
+                await session.execute(
+                    select(t).where(t.c.id == folder_id).where(t.c.user_id == user_id)
+                )
+            ).first()
+        return _folder_row(row) if row is not None else None
+
+    async def update_folder(
+        self, user_id: str, folder_id: str, *, name: Optional[str] = None, description: Optional[str] = None
+    ) -> bool:
+        """Rename/redescribe one folder; owner-scoped."""
+        if not await self._ensure_db():
+            return False
+        from sqlalchemy import update
+
+        values: dict[str, Any] = {}
+        if name is not None:
+            values["name"] = name
+        if description is not None:
+            values["description"] = description
+        if not values:
+            return True
+        t = TABLES["dossier_folders"]
+        async with self._session_factory() as session:
+            result = await session.execute(
+                update(t).where(t.c.id == folder_id).where(t.c.user_id == user_id).values(**values)
+            )
+            await session.commit()
+        return bool(result.rowcount)
+
+    async def delete_folder(self, user_id: str, folder_id: str, *, delete_documents: bool) -> Optional[list[str]]:
+        """Delete one folder; returns the ids of documents to remove from disk.
+
+        With ``delete_documents=False`` the folder's documents become unfiled
+        (folder_id reset to ""); with True their rows are deleted too and the
+        caller removes their files. None when DB down.
+        """
+        if not await self._ensure_db():
+            return None
+        from sqlalchemy import delete, select, update
+
+        folders = TABLES["dossier_folders"]
+        docs = TABLES["user_dossiers"]
+        async with self._session_factory() as session:
+            owned = (
+                await session.execute(
+                    select(docs.c.id).where(docs.c.user_id == user_id).where(docs.c.folder_id == folder_id)
+                )
+            ).all()
+            doc_ids = [r[0] for r in owned]
+            if delete_documents:
+                await session.execute(
+                    delete(docs).where(docs.c.user_id == user_id).where(docs.c.folder_id == folder_id)
+                )
+            else:
+                await session.execute(
+                    update(docs)
+                    .where(docs.c.user_id == user_id)
+                    .where(docs.c.folder_id == folder_id)
+                    .values(folder_id="")
+                )
+                doc_ids = []
+            result = await session.execute(
+                delete(folders).where(folders.c.id == folder_id).where(folders.c.user_id == user_id)
+            )
+            await session.commit()
+        if not result.rowcount:
+            return []
+        return doc_ids
 
     async def create_share(
         self, user_id: str, query: str, answer: str, citations_json: str, confidence: float

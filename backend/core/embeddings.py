@@ -26,6 +26,8 @@ litellm.suppress_debug_info = True
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 logging.getLogger("litellm").setLevel(logging.WARNING)
 
+logger = logging.getLogger(__name__)
+
 
 
 class EmbeddingProvider(Protocol):
@@ -41,11 +43,28 @@ class LiteLLMEmbeddings:
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         # Batched API calls: providers cap batch sizes (NVIDIA via OpenRouter
-        # caps at 256); the default of 200 stays below that.
+        # caps at 256); the default of 200 stays below that. Batches are also
+        # char-budgeted: dense French OCR runs ≈1 token/char, so a count-only
+        # batch of 1400-char children overflows the model's 8192-token ctx.
         batch_size = max(1, self.settings.embedding_batch_size)
+        max_chars = max(500, self.settings.embedding_batch_max_chars)
         vectors: list[list[float]] = []
-        for start in range(0, len(texts), batch_size):
-            vectors.extend(await self._embed_batch(texts[start : start + batch_size]))
+        batch: list[str] = []
+        batch_chars = 0
+        for text in texts:
+            if len(text) > max_chars:
+                # A single text over the budget would go solo and overflow the
+                # model's context window (seen: 12.7k tokens vs 8192), failing
+                # the whole call — truncate to the budget instead.
+                logger.warning("truncating oversized embed input: %d -> %d chars", len(text), max_chars)
+                text = text[:max_chars]
+            if batch and (len(batch) >= batch_size or batch_chars + len(text) > max_chars):
+                vectors.extend(await self._embed_batch(batch))
+                batch, batch_chars = [], 0
+            batch.append(text)
+            batch_chars += len(text)
+        if batch:
+            vectors.extend(await self._embed_batch(batch))
         return vectors
 
     async def _embed_batch(self, texts: list[str]) -> list[list[float]]:

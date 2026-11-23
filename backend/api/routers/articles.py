@@ -39,6 +39,31 @@ async def get_article(
             detail=f"no chunks found for document '{document_id}', article '{article}'",
         )
 
+    # Milvus returns chunks in arbitrary order; the reader needs ingestion
+    # order (``metadata["seq"]``), e.g. for amending laws that quote an
+    # article's old wording then its new one under the same number.
+    def _order(chunk) -> tuple:
+        seq = (chunk.metadata or {}).get("seq")
+        if isinstance(seq, int):
+            return (0, seq)
+        return (1, chunk.page if chunk.page is not None else -1)
+
+    matched.sort(key=_order)
+
+    # Children are retrieval excerpts of their parent (whitespace-normalized,
+    # so the client's exact-substring dedup cannot catch them); showing both
+    # duplicates the article in the reader. Drop a child when its parent is
+    # in the result; an orphan child stays so the article is never empty.
+    parent_ids = {
+        c.chunk_id for c in matched if (c.metadata or {}).get("role") == "parent"
+    }
+    matched = [
+        c
+        for c in matched
+        if (c.metadata or {}).get("role") != "child"
+        or c.parent_chunk_id not in parent_ids
+    ]
+
     return ArticleLookupResponse(
         document_id=document_id,
         article=article,

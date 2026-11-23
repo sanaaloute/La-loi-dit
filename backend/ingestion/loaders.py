@@ -72,6 +72,10 @@ def load_pdf(path: Union[str, Path]) -> ExtractedDocument:
     ``metadata["ocr_recovered_pages"]`` / ``metadata["ocr_skipped_pages"]``.
     Before OCR, textless pages are retried with pypdf, which tolerates some
     corrupt streams PyMuPDF rejects.
+    Pages with plenty of text but a *broken* embedded layer (garbage words,
+    lost spaces, orphan "Article" headings — old Assemblée scans) are also
+    re-OCR'd when the page actually carries an image; they are noted in
+    ``metadata["ocr_badlayer_pages"]``.
     """
     p = Path(path)
     if not p.is_file():
@@ -105,9 +109,13 @@ def load_pdf(path: Union[str, Path]) -> ExtractedDocument:
                 ocr_needed = [
                     i + 1 for i, text in enumerate(pages) if len(text) < _OCR_TEXT_THRESHOLD
                 ]
+            bad_layer = _bad_layer_pages(pdf, pages)
+            if bad_layer:
+                metadata["ocr_badlayer_pages"] = bad_layer
+                ocr_needed = sorted(set(ocr_needed) | set(bad_layer))
             if ocr_needed:
                 metadata["ocr_needed_pages"] = ocr_needed
-                _ocr_scanned_pages(pdf, pages, ocr_needed, metadata)
+                _ocr_scanned_pages(pdf, pages, ocr_needed, metadata, replace_pages=frozenset(bad_layer))
     except IngestionError:
         raise
     except Exception as exc:
@@ -158,6 +166,37 @@ def _pypdf_recover_pages(
         metadata["pypdf_recovered_pages"] = recovered
 
 
+def _bad_layer_pages(pdf: Any, pages: list[str]) -> list[int]:
+    """Pages whose embedded text layer is too broken to keep (bad source OCR).
+
+    A page is flagged when its text scores below
+    ``ocr_bad_layer_min_score`` (trigram coverage) or carries an orphan
+    "Article" heading — but only when the page holds an image, since OCR of
+    a re-rendered text-only page would read the same broken layer back.
+    Best-effort, never raises.
+    """
+    from backend.core.config import get_settings
+    from backend.ingestion import text_quality
+
+    settings = get_settings()
+    if not settings.ocr_bad_layer_enabled:
+        return []
+    min_score = settings.ocr_bad_layer_min_score
+    flagged: list[int] = []
+    for i, text in enumerate(pages):
+        if len(text) < _OCR_TEXT_THRESHOLD:
+            continue  # already in the scanned-pages bucket
+        if not text_quality.page_needs_ocr(text, min_score):
+            continue
+        try:
+            if not pdf[i].get_images():
+                continue  # no image to OCR: re-rendering changes nothing
+        except Exception:
+            continue
+        flagged.append(i + 1)
+    return flagged
+
+
 def _load_pdf_pypdf(p: Path, mupdf_error: Exception) -> ExtractedDocument:
     """Whole-document pypdf fallback when PyMuPDF cannot open/read the file."""
     reader = _pypdf_reader(p)
@@ -184,7 +223,13 @@ def _load_pdf_pypdf(p: Path, mupdf_error: Exception) -> ExtractedDocument:
     return ExtractedDocument(name=p.name, text="\n\n".join(pages), pages=pages, metadata=metadata)
 
 
-def _ocr_scanned_pages(pdf: Any, pages: list[str], ocr_needed: list[int], metadata: dict[str, Any]) -> None:
+def _ocr_scanned_pages(
+    pdf: Any,
+    pages: list[str],
+    ocr_needed: list[int],
+    metadata: dict[str, Any],
+    replace_pages: frozenset[int] = frozenset(),
+) -> None:
     """OCR textless pages with PaddleOCR. Best-effort, never raises.
 
     Pages are processed in batches of ``ocr_batch_pages``: each batch runs in
@@ -192,6 +237,11 @@ def _ocr_scanned_pages(pdf: Any, pages: list[str], ocr_needed: list[int], metada
     document — and per-run memory stays bounded regardless of document length.
     ``ocr_max_pages`` > 0 restores the old hard cap (skipped pages noted in
     metadata); the default (0) OCRs every page.
+
+    OCR text replaces a page only when it is longer than what the embedded
+    layer gave — except for ``replace_pages`` (broken embedded layers flagged
+    by :func:`_bad_layer_pages`), which are replaced by any non-trivial OCR
+    result: their embedded text is garbage by definition, whatever its length.
     """
     from backend.ingestion import ocr as ocr_engine
 
@@ -229,7 +279,8 @@ def _ocr_scanned_pages(pdf: Any, pages: list[str], ocr_needed: list[int], metada
             results = ocr_engine.ocr_images([image_path for _, image_path in rendered])
             for page_no, image_path in rendered:
                 text = results.get(str(image_path), "").strip()
-                if len(text) > len(pages[page_no - 1]):
+                replaces_bad_layer = page_no in replace_pages and len(text) >= _OCR_TEXT_THRESHOLD
+                if len(text) > len(pages[page_no - 1]) or replaces_bad_layer:
                     pages[page_no - 1] = text
                     recovered.append(page_no)
                 # Delete rendered pages as we go: disk stays bounded on long documents.

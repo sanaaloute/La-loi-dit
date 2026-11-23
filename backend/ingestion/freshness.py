@@ -54,18 +54,22 @@ class ChangeEvent(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-#: Official Burkina Faso / OHADA sources monitored when the legal-sources
-#: file is unavailable (embedded fallback).
+#: Official Burkina Faso legal-text sources monitored when the legal-sources
+#: file is unavailable (embedded fallback). Press/news feeds are deliberately
+#: excluded: the veille tracks laws, decrees and regulations only.
 _EMBEDDED_REGISTRY: list[SourceSpec] = [
     SourceSpec(
-        name="OHADA — Actualités",
-        url="https://www.ohada.org/feed/",
-        kind="rss",
-        metadata={"authority": "treaty_ohada", "government_body": "OHADA"},
+        name="Journal Officiel du Burkina Faso (JOBF)",
+        url="https://jobf.gov.bf/",
+        kind="web",
+        metadata={
+            "authority": "official_gazette",
+            "government_body": "Secrétariat général du Gouvernement",
+        },
     ),
     SourceSpec(
         name="Législation du Burkina Faso (LégiBurkina)",
-        url="https://www.legiburkina.bf/",
+        url="https://legiburkina.gov.bf/",
         kind="web",
         metadata={"authority": "law", "government_body": "Gouvernement du Burkina Faso"},
     ),
@@ -74,12 +78,6 @@ _EMBEDDED_REGISTRY: list[SourceSpec] = [
         url="https://www.assembleenationale.bf/",
         kind="web",
         metadata={"authority": "law", "government_body": "Assemblée Nationale"},
-    ),
-    SourceSpec(
-        name="Portail du Gouvernement du Burkina Faso",
-        url="https://www.gouvernement.gov.bf/",
-        kind="web",
-        metadata={"authority": "official_news", "government_body": "Gouvernement du Burkina Faso"},
     ),
 ]
 

@@ -133,6 +133,8 @@ _BOILERPLATE_PATTERNS = [
     re.compile(r"^\s*page\s+\d+(\s*(/|de|sur|of)\s*\d+)?\s*$", re.IGNORECASE),
     re.compile(r"^\s*[-–—]\s*\d+\s*[-–—]\s*$"),
     re.compile(r"^\s*\d+\s*/\s*\d+\s*$"),
+    # Runs of dashes/underscores only ("-- -- --", "____"): scan/OCR artifacts.
+    re.compile(r"^\s*(?:[-–—_]\s*){2,}$"),
 ]
 
 
@@ -335,11 +337,30 @@ def clean_text(text: str) -> str:
     return normalize_whitespace("\n".join(lines))
 
 
+def _strip_page_number_lines(pages: list[str]) -> list[str]:
+    """Remove printed page numbers: bare 1-4 digit lines at a page's very
+    top/bottom whose value matches the page's position (i, i+1 or i+2, to
+    tolerate unnumbered cover pages). Mid-page numbers (budget account codes
+    etc.) are never touched.
+    """
+    out = []
+    for i, page in enumerate(pages):
+        candidates = {str(i), str(i + 1), str(i + 2)}
+        lines = page.split("\n")
+        while lines and lines[0].strip() in candidates:
+            lines.pop(0)
+        while lines and lines[-1].strip() in candidates:
+            lines.pop()
+        out.append("\n".join(lines))
+    return out
+
+
 def clean_pages(pages: list[str]) -> list[str]:
-    """Clean each page: strip repeated headers/footers, rejoin words split
-    across page breaks, then normalize."""
+    """Clean each page: strip repeated headers/footers and printed page
+    numbers, rejoin words split across page breaks, then normalize."""
     pages = [normalize_unicode(p) for p in pages]
     pages = strip_repeated_headers_footers(pages)
+    pages = _strip_page_number_lines(pages)
     pages = join_page_break_words(pages)
     return [clean_text(p) for p in pages]
 

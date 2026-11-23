@@ -72,6 +72,29 @@ USER_MIGRATIONS = [
     "created_at VARCHAR(64), "
     "metadata TEXT DEFAULT ''"
     ")",
+    "CREATE TABLE IF NOT EXISTS user_dossiers ("
+    "id VARCHAR(64) PRIMARY KEY, "
+    "user_id VARCHAR(64), "
+    "name VARCHAR(500) DEFAULT '', "
+    "original_name VARCHAR(500) DEFAULT '', "
+    "extension VARCHAR(16) DEFAULT '', "
+    "size_bytes INTEGER DEFAULT 0, "
+    "char_count INTEGER DEFAULT 0, "
+    "page_count INTEGER DEFAULT 0, "
+    "status VARCHAR(32) DEFAULT 'ready', "
+    "error TEXT DEFAULT '', "
+    "created_at VARCHAR(64)"
+    ")",
+    # Case folders ("Mes dossiers" restructure): a folder groups several
+    # uploaded documents into one case the AI can analyse as a whole.
+    "CREATE TABLE IF NOT EXISTS dossier_folders ("
+    "id VARCHAR(64) PRIMARY KEY, "
+    "user_id VARCHAR(64), "
+    "name VARCHAR(500) DEFAULT '', "
+    "description TEXT DEFAULT '', "
+    "created_at VARCHAR(64)"
+    ")",
+    "ALTER TABLE user_dossiers ADD COLUMN folder_id VARCHAR(64) DEFAULT ''",
 ]
 
 workspaces = Table(
@@ -147,6 +170,40 @@ shared_answers = Table(
     Column("created_at", String(64)),
 )
 
+# Personal documents ("Mes dossiers"): user-uploaded files for AI analysis.
+# The extracted text and the original file live on disk under
+# data_dir/user_dossiers/<user_id>/<dossier_id>/; this table is the index.
+# folder_id groups documents into a case folder ("" = unfiled).
+user_dossiers = Table(
+    "user_dossiers",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("user_id", String(64), index=True),
+    Column("folder_id", String(64), default="", index=True),
+    Column("name", String(500), default=""),
+    Column("original_name", String(500), default=""),
+    Column("extension", String(16), default=""),
+    Column("size_bytes", Integer, default=0),
+    Column("char_count", Integer, default=0),
+    Column("page_count", Integer, default=0),
+    Column("status", String(32), default="ready"),  # ready | error
+    Column("error", Text, default=""),
+    Column("created_at", String(64)),
+)
+
+# Case folders ("Mes dossiers"): a named folder groups several uploaded
+# documents into one case; the AI can answer questions or produce a full case
+# analysis across every document in the folder plus the legal corpus.
+dossier_folders = Table(
+    "dossier_folders",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("user_id", String(64), index=True),
+    Column("name", String(500), default=""),
+    Column("description", Text, default=""),
+    Column("created_at", String(64)),
+)
+
 # Expo push tokens (ExponentPushToken[...]) for freshness notifications.
 push_tokens = Table(
     "push_tokens",
@@ -166,4 +223,6 @@ TABLES = {
     "bookmarks": bookmarks,
     "shared_answers": shared_answers,
     "push_tokens": push_tokens,
+    "user_dossiers": user_dossiers,
+    "dossier_folders": dossier_folders,
 }

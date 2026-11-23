@@ -205,6 +205,10 @@ class Settings(BaseSettings):
     milvus_connect_attempts: int = 3  # Milvus connection attempts before in-memory fallback
     milvus_connect_backoff_seconds: float = 1.0  # backoff sleep multiplier (x attempt number)
     embedding_batch_size: int = 200  # texts per embedding API call (NVIDIA via OpenRouter caps at 256)
+    # Char budget per embedding API call: dense French OCR and digit soup run
+    # above 1 token/char, so a pure count-based batch can overflow the model's
+    # 8192-token context. (4000 + one 1400-char child) × ~1.3 stays below it.
+    embedding_batch_max_chars: int = 4000
     ranking_relevance_weight: float = 0.55
     ranking_authority_weight: float = 0.30
     ranking_confidence_weight: float = 0.15
@@ -288,6 +292,13 @@ class Settings(BaseSettings):
     # paddleocr release's default det/rec models for ocr_lang.
     ocr_det_model_name: str = "PP-OCRv5_mobile_det"  # mobile: server_det OOMs on small hosts
     ocr_rec_model_name: str = "latin_PP-OCRv5_mobile_rec"
+    # Broken embedded text layers (bad OCR baked into the source PDF): pages
+    # whose text scores below ocr_bad_layer_min_score (trigram coverage, see
+    # ingestion/text_quality.py) or with orphan "Article" headings are
+    # re-OCR'd like scanned pages. 0.92 sits between the observed corpus
+    # clusters (garbage < 0.90, clean pages >= 0.93).
+    ocr_bad_layer_enabled: bool = True
+    ocr_bad_layer_min_score: float = 0.92
     # Last-resort LLM classification at ingest: one completion, only when the
     # heuristics found neither legal domains nor authority (never runs on the
     # happy path for known documents, never with the mock provider).
@@ -400,9 +411,10 @@ class Settings(BaseSettings):
     answer_llm_timeout_seconds: float = 300.0
     # Legal answers must never be truncated. The provider caps reasoning
     # server-side at 1024 tokens (client-guide.md), so this budget is
-    # effectively all answer; with the bounded evidence prompt (~6-7k tokens)
-    # the request stays inside the ~16k per-slot context share.
-    answer_max_tokens: int = 8192
+    # effectively all answer. 16384 output tokens + the bounded evidence
+    # prompt (~6-7k tokens) require the model server to expose ~24k+ context
+    # per slot — set --ctx-size accordingly (32768 recommended).
+    answer_max_tokens: int = 16384
     answer_max_excerpt_chars: int = 1000  # per-excerpt char cap; response_generator also hard-caps at 1000
     answer_child_preview_chars: int = 200  # child-chunk preview length inside a parent excerpt
     confidence_citation_weight: float = 0.6  # weight of citation accuracy in the aggregate confidence

@@ -1,17 +1,15 @@
 """Chunking strategies producing :class:`EvidenceChunk` objects.
 
-- :func:`legal_parent_child_chunk` — parents follow legal boundaries (a whole
-  article or section, kept intact); children are split on alinéa boundaries
-  and linked via ``parent_chunk_id`` for dense retrieval.  Bare heading
-  segments (``article is None``) get ``role="heading"`` so both dense and
-  keyword retrieval skip them, and article children carry a contextual
-  ``retrieval_text`` prefix used for embedding/indexing.
+- :func:`legal_parent_child_chunk` — parents follow article boundaries (a
+  whole article, kept intact with its headings and tables); children are
+  split on alinéa boundaries and linked via ``parent_chunk_id`` for dense
+  retrieval.  Article children carry a contextual ``retrieval_text`` prefix
+  used for embedding/indexing.
 - :func:`parent_child_chunk` — size-based parents/children for unstructured
   text (fallback when no legal structure is detected).
-- :func:`semantic_chunk` — splits on legal structure boundaries
-  (``Article N``, ``Art. N``, ``Section``, ``Chapitre``, ``Titre``,
-  ``Partie``, ``Livre``, ``Annexe``) and stamps ``article``/``section``
-  on each chunk; oversized articles fall back to size-based splitting.
+- :func:`semantic_chunk` — splits on article boundaries and stamps
+  ``article``/``section`` on each chunk; oversized articles fall back to
+  size-based splitting.
 
 Heading levels are tracked separately: every chunk also carries a
 ``hierarchy`` map (``{"livre": "I", "titre": "II", ...}``) with the ordered
@@ -35,22 +33,29 @@ from backend.ingestion.loaders import ExtractedDocument
 
 # Article numbers: "1", "1.2", "123-4", ordinal forms "1er"/"1ère" and the
 # spelled-out "premier"/"première" used for the first article of French codes.
-_ARTICLE_NUM_RE = r"([0-9]+(?:[.\-][0-9A-Za-z]+)*|premier|premi[èe]re)(?:er|[èe]re)?"
+# "ler"/"ter" are systematic OCR misreads of "1er" (tesseract l/t confusion on
+# the leading 1, scanned gazettes); they are not French words, so accepting
+# them after a line-anchored "Article" is safe. "unique" is the drafting
+# convention for one-article instruments ("Article unique : …").
+_ARTICLE_NUM_RE = r"([0-9]+(?:[.\-][0-9A-Za-z]+)*|premier|premi[èe]re|ler|ter|unique)(?:er|[èe]re)?"
 
 _ARTICLE_HEADING_RE = re.compile(
     r"^[ \t]*(?:article|art\.)\s*(?:n[°o]?\s*)?" + _ARTICLE_NUM_RE + r"\b",
     re.IGNORECASE | re.MULTILINE,
 )
 _SECTION_HEADING_RE = re.compile(
-    r"^[ \t]*(section|chapitre|titre|partie|livre|annexe)\s+([IVXLCDM]+|[0-9]+)\b",
+    r"^[ \t]*(section|chapitre|titre|partie|livre|annexe)\s+([IVXLCDM]+|[0-9]{1,3})\b",
     re.IGNORECASE | re.MULTILINE,
 )
 # Boundary groups: 1=article word, 2=article number, 3=level word,
 # 4=level number, 5=annexe word, 6=annexe number (optional).
+# Heading numbers cap at 3 digits: finance-law budget lines carry 4-8-digit
+# account codes ("Chapitre 1218241 : Bureau du Médiateur") that are table
+# rows, not structure.
 _BOUNDARY_RE = re.compile(
     r"^[ \t]*(?:(article|art\.)\s*(?:n[°o]?\s*)?" + _ARTICLE_NUM_RE + r"\b"
-    r"|(section|chapitre|titre|partie|livre)\s+([IVXLCDM]+|[0-9]+)\b"
-    r"|(annexe)\b(?:[ \t]+([IVXLCDM]+|[0-9]+)\b)?)",
+    r"|(section|chapitre|titre|partie|livre)\s+([IVXLCDM]+|[0-9]{1,3})\b"
+    r"|(annexe)\b(?:[ \t]+([IVXLCDM]+|[0-9]{1,3})\b)?)",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -58,11 +63,16 @@ _BOUNDARY_RE = re.compile(
 # (an annexe replaces the whole heading path instead of nesting under it).
 _HIERARCHY_LEVELS = ("livre", "partie", "titre", "chapitre", "section")
 
-_FR_ORDINAL_ONE = {"premier", "première", "premiere"}
+_FR_ORDINAL_ONE = {"premier", "première", "premiere", "ler", "ter", "unique"}
+
+# Hard cap on a legal parent chunk's size: chunks serialize into Milvus's
+# 65535-char ``chunk_json`` varchar (text + metadata), so parents must stay
+# well below it. Legal parents otherwise keep whole articles intact.
+_LEGAL_PARENT_MAX = 30_000
 
 
 def _normalize_article_number(raw: str) -> str:
-    """Canonical article key: "1er"/"premier" collapse to "1"."""
+    """Canonical article key: "1er"/"premier"/"unique"/OCR-"ler" collapse to "1"."""
     lowered = raw.strip().lower()
     if lowered in _FR_ORDINAL_ONE:
         return "1"
@@ -122,43 +132,111 @@ def _context_prefix(
     return f"{prefix} — Article {article}. »"
 
 
+# A document opening its own article numbering ("Article 1er :", "Article
+# unique :", OCR variants) at a line start is structured legal text even when
+# it has a single article — ratification laws genuinely do.
+_ARTICLE_ONE_RE = re.compile(
+    r"^[ \t]*(?:article|art\.)\s*(?:n[°o]?\s*)?"
+    r"(1(?:er|[èe]re)?|premier|premi[èe]re|ler|ter|unique)\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# Amendment marker stranded at a segment's tail ("Au lieu de :", "Lire :").
+_AMENDMENT_MARKER_RE = re.compile(r"\s*(?:au lieu de|lire)\s*:\s*$", re.IGNORECASE)
+
+
 def looks_like_legal(text: str) -> bool:
-    """Heuristic: at least two article/section headings => structured legal text."""
+    """Heuristic: structured legal text detection.
+
+    Certain when at least two article/section headings exist; a single line-
+    anchored "Article 1" (any ordinal form) suffices — non-legal documents
+    (reports, minutes) cite articles inline, never at a line start, and never
+    open their own article numbering.
+    """
+    if _ARTICLE_ONE_RE.search(text):
+        return True
     return len(_BOUNDARY_RE.findall(text)) >= 2
 
 
 def _boundary_segments(
     text: str,
 ) -> list[tuple[int, str, Optional[str], Optional[str], dict[str, str]]]:
-    """Split ``text`` on legal boundaries.
+    """Split ``text`` at article headings.
 
-    Returns ``(start, body, article, section, hierarchy)`` tuples. ``section``
-    is the deepest heading in force (compat behavior); ``hierarchy`` is the
-    ordered level map (``{"titre": "II", "chapitre": "1", ...}``) stamped on
-    every chunk.  Text before the first heading is kept as a preamble segment.
+    Returns ``(start, body, article, section, hierarchy)`` tuples. Only
+    articles open a segment: section-level headings (Titre, Chapitre,
+    Section...) update the running hierarchy but stay inline in the body, so
+    an article keeps everything up to the next article — in finance laws the
+    tables between "Article 1" and "Article 2" ARE article 1's content.
+    ``section`` is the deepest heading in force at the article's position
+    (compat behavior); ``hierarchy`` is the ordered level map
+    (``{"titre": "II", "chapitre": "1", ...}``) stamped on every chunk. Text
+    before the first article heading is kept as a preamble segment; a
+    document with no article heading at all yields one preamble segment.
     """
     matches = list(_BOUNDARY_RE.finditer(text))
-    segments: list[tuple[int, str, Optional[str], Optional[str], dict[str, str]]] = []
     hierarchy: dict[str, str] = {}
-
-    if matches and matches[0].start() > 0:
-        preamble = text[: matches[0].start()].strip()
-        if preamble:
-            segments.append((0, preamble, None, None, {}))
-
-    for i, match in enumerate(matches):
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        body = text[match.start() : end].strip()
-        if not body:
-            continue
+    arts: list[tuple[re.Match, str, Optional[str], dict[str, str]]] = []
+    for match in matches:
         if match.group(1) is not None:  # article / art.
             article = _normalize_article_number(match.group(2))
-            segments.append((match.start(), body, article, _deepest_heading(hierarchy), dict(hierarchy)))
+            arts.append((match, article, _deepest_heading(hierarchy), dict(hierarchy)))
         else:  # section / chapitre / titre / partie / livre / annexe
             level = (match.group(3) or match.group(5)).lower()
             number = match.group(4) or match.group(6) or ""
             hierarchy = _update_hierarchy(hierarchy, level, number)
-            segments.append((match.start(), body, None, _deepest_heading(hierarchy), dict(hierarchy)))
+
+    segments: list[tuple[int, str, Optional[str], Optional[str], dict[str, str]]] = []
+    if not arts:
+        body = text.strip()
+        return [(0, body, None, None, {})] if body else []
+    if arts[0][0].start() > 0:
+        preamble = text[: arts[0][0].start()].strip()
+        if preamble:
+            segments.append((0, preamble, None, None, {}))
+    for i, (match, article, section, hie) in enumerate(arts):
+        end = arts[i + 1][0].start() if i + 1 < len(arts) else len(text)
+        body = text[match.start() : end].strip()
+        if body:
+            segments.append((match.start(), body, article, section, hie))
+
+    # Amending laws quote each modified article as "Au lieu de : <old> Lire :
+    # <new>". The marker precedes the article heading, so plain boundary
+    # splitting strands it at the previous segment's tail; move it onto the
+    # article block it introduces.
+    for i in range(1, len(segments)):
+        start, body, article, section, hie = segments[i]
+        if article is None:
+            continue
+        prev_start, prev_body, prev_art, prev_sec, prev_hie = segments[i - 1]
+        marker = _AMENDMENT_MARKER_RE.search(prev_body)
+        if not marker:
+            continue
+        segments[i - 1] = (prev_start, prev_body[: marker.start()].rstrip(), prev_art, prev_sec, prev_hie)
+        segments[i] = (start, f"{marker.group(0).strip()}\n\n{body}", article, section, hie)
+
+    # Budget nomenclature in finance laws repeats one line ("Article 62 :
+    # Achats de biens et services") per ministry — dozens of times across the
+    # document, mostly mid-line where no segment opens. Real instruments
+    # never restate a number beyond an amendment's old/new pair (2 colon-form
+    # headings), so count the heading form "Article N :" in the full text:
+    # past 3 occurrences the lines are table text, not article headings, and
+    # their segments fold into the previous one (searchable, out of the index).
+    counts: dict[str, int] = {}
+    for _, _, art, _, _ in segments:
+        if art is not None and art not in counts:
+            counts[art] = len(re.findall(rf"(?i)article\s*{re.escape(art)}\s*:", text))
+    noisy = {a for a, n in counts.items() if n > 3}
+    if noisy:
+        merged: list[tuple[int, str, Optional[str], Optional[str], dict[str, str]]] = []
+        for start, body, art, sec, hie in segments:
+            if art is not None and art in noisy and merged:
+                p_start, p_body, p_art, p_sec, p_hie = merged[-1]
+                merged[-1] = (p_start, f"{p_body}\n\n{body}", p_art, p_sec, p_hie)
+            else:
+                merged.append((start, body, art, sec, hie))
+        segments = merged
+
     return segments
 
 
@@ -368,6 +446,10 @@ def parent_child_chunk(
                     **{**prov, "metadata": {**prov["metadata"], "role": "child"}},
                 )
             )
+    # ``seq`` is the reading order within the document; the full-text view
+    # sorts on it (page alone cannot order several parents sharing a page).
+    for seq, chunk in enumerate(chunks):
+        chunk.metadata["seq"] = seq
     return chunks
 
 
@@ -387,22 +469,22 @@ def legal_parent_child_chunk(
     child_size: Optional[int] = None,
     child_overlap: Optional[int] = None,
 ) -> list[EvidenceChunk]:
-    """Parent-child chunking where parents follow legal article/section boundaries.
+    """Parent-child chunking where parents follow legal article boundaries.
 
-    Parents are created at legal headings (Article N, Section, Chapitre, Titre,
-    Partie, Livre) and always keep the whole article/section intact.  Children
-    are split on alinéa boundaries (never mid-line), so a short article yields
-    a single child and ``child_size`` only caps oversized articles.  This
-    gives the RAG layer meaningful context (whole article or section) while
-    keeping the retrieval units small and precise.
+    Parents are created at article headings (Article N) and always keep the
+    whole article intact, including any Titre/Chapitre/Section headings and
+    tables that appear before the next article (finance-law budget tables are
+    their article's content); section headings only stamp the ``section`` /
+    ``hierarchy`` metadata. Children are split on alinéa boundaries (never
+    mid-line), so a short article yields a single child and ``child_size``
+    only caps oversized articles.  This gives the RAG layer meaningful
+    context (the whole article) while keeping the retrieval units small and
+    precise.
 
-    Bare heading segments (``article is None``, e.g. "LIVRE IV : ...") get
-    ``role="heading"`` on every chunk instead of parent/child roles: the
-    chunks stay in the store for structure browsing but are excluded from
-    dense (role="child" filter) and keyword retrieval.  Children of real
-    articles carry ``retrieval_text`` = one-line context prefix + raw
-    ``content``; it is the text embedded and BM25-indexed, while ``content``
-    stays the raw display/citation text.
+    The segment before the first article (long title, visas) is the preamble;
+    it stays retrievable like articles.  Children carry ``retrieval_text`` =
+    one-line context prefix + raw ``content``; it is the text embedded and
+    BM25-indexed, while ``content`` stays the raw display/citation text.
     """
     cfg = _settings()
     child_size = child_size if child_size is not None else cfg.chunk_child_size
@@ -432,40 +514,58 @@ def legal_parent_child_chunk(
         )
 
     segments = _boundary_segments(text)
+    # The segment before the first article heading is the preamble (long
+    # title, visas, ceremonial clause): it carries the instrument's best
+    # keyword text, so it stays retrievable (role parent/child).
+    has_preamble = bool(segments) and segments[0][2] is None
 
     chunks: list[EvidenceChunk] = []
-    for start, body, article, section, hierarchy in segments:
-        # Legal parents follow article/section boundaries. Keep the whole segment
-        # as one parent so the LLM always sees the complete article/section context.
-        piece_text = body
-        piece_offset = 0
-        heading = article is None
-        parent = EvidenceChunk(
-            content=piece_text,
-            article=article,
-            section=section,
-            hierarchy=dict(hierarchy),
-            page=_page_for_offset(offsets, start + piece_offset),
-            **{**prov, "metadata": {**prov["metadata"], "role": "heading" if heading else "parent"}},
+    for seg_index, (start, body, article, section, hierarchy) in enumerate(segments):
+        # Legal parents follow article boundaries. Keep the whole segment as
+        # one parent so the LLM always sees the complete article context —
+        # but cap it: a serialized chunk must fit Milvus's 65535-char
+        # varchar, and a pathological segment (a session report's whole
+        # preamble, an annexed budget table) can be several times that.
+        preamble = seg_index == 0 and has_preamble
+        parent_pieces = (
+            _split_alineas(body, _LEGAL_PARENT_MAX, child_overlap)
+            if len(body) > _LEGAL_PARENT_MAX
+            else [(0, body)]
         )
-        chunks.append(parent)
-        prefix = (
-            None if heading
-            else _context_prefix(prov["document_name"], law_number, hierarchy, article)
-        )
-        for child_offset, child_text in _split_alineas(piece_text, child_size, child_overlap):
-            chunks.append(
-                EvidenceChunk(
-                    content=child_text,
-                    retrieval_text=None if heading else f"{prefix}\n{child_text}",
-                    article=article,
-                    section=section,
-                    hierarchy=dict(hierarchy),
-                    parent_chunk_id=parent.chunk_id,
-                    page=_page_for_offset(offsets, start + piece_offset + child_offset),
-                    **{**prov, "metadata": {**prov["metadata"], "role": "heading" if heading else "child"}},
-                )
+        for piece_offset, piece_text in parent_pieces:
+            parent = EvidenceChunk(
+                content=piece_text,
+                article=article,
+                section=section,
+                hierarchy=dict(hierarchy),
+                page=_page_for_offset(offsets, start + piece_offset),
+                **{**prov, "metadata": {**prov["metadata"], "role": "parent"}},
             )
+            chunks.append(parent)
+            if preamble:
+                source = prov["document_name"] or ""
+                if law_number:
+                    source += f" ({law_number})"
+                prefix = f"« {source}. »" if source else None
+            else:
+                prefix = _context_prefix(prov["document_name"], law_number, hierarchy, article)
+            for child_offset, child_text in _split_alineas(piece_text, child_size, child_overlap):
+                chunks.append(
+                    EvidenceChunk(
+                        content=child_text,
+                        retrieval_text=None if prefix is None else f"{prefix}\n{child_text}",
+                        article=article,
+                        section=section,
+                        hierarchy=dict(hierarchy),
+                        parent_chunk_id=parent.chunk_id,
+                        page=_page_for_offset(offsets, start + piece_offset + child_offset),
+                        **{**prov, "metadata": {**prov["metadata"], "role": "child"}},
+                    )
+                )
+    # ``seq`` is the reading order within the document; the full-text view
+    # sorts on it (page alone cannot order several parents sharing a page).
+    for seq, chunk in enumerate(chunks):
+        chunk.metadata["seq"] = seq
     return chunks
 
 
@@ -484,13 +584,14 @@ def semantic_chunk(
     max_chunk_size: Optional[int] = None,
     overlap: Optional[int] = None,
 ) -> list[EvidenceChunk]:
-    """Split on legal boundaries (Article/Art./Section/Chapitre/Titre...).
+    """Split on article boundaries (``Article N``, ``Art. N``).
 
     Each chunk gets ``article`` and/or ``section`` set from the heading that
-    opened its segment (articles inherit the section in force). Segments
-    larger than ``max_chunk_size`` fall back to size-based splitting while
-    keeping their article/section metadata. Text before the first heading is
-    kept as a preamble chunk.
+    opened its segment (articles inherit the section in force; section
+    headings stay inline in the body). Segments larger than
+    ``max_chunk_size`` fall back to size-based splitting while keeping their
+    article/section metadata. Text before the first article heading is kept
+    as a preamble chunk.
     """
     cfg = _settings()
     max_chunk_size = max_chunk_size if max_chunk_size is not None else cfg.chunk_max_size

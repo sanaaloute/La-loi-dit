@@ -313,7 +313,7 @@ def create_app() -> FastAPI:
         return PlainTextResponse(generate_latest().decode("utf-8"), media_type=CONTENT_TYPE_LATEST)
 
     # --- routers under /api/v1 ---
-    from backend.api.routers import admin, articles, auth, bookmarks, chat, citations, documents, draft, export, freshness, legal, mobile, models, push, search, share, sources, usage
+    from backend.api.routers import admin, articles, auth, bookmarks, chat, citations, documents, dossiers, draft, export, freshness, legal, mobile, models, push, search, share, sources, usage
 
     app.include_router(admin.router, prefix="/api/v1")
     app.include_router(articles.router, prefix="/api/v1")
@@ -322,6 +322,7 @@ def create_app() -> FastAPI:
     app.include_router(chat.router, prefix="/api/v1")
     app.include_router(citations.router, prefix="/api/v1")
     app.include_router(documents.router, prefix="/api/v1")
+    app.include_router(dossiers.router, prefix="/api/v1")
     app.include_router(draft.router, prefix="/api/v1")
     app.include_router(export.router, prefix="/api/v1")
     app.include_router(freshness.router, prefix="/api/v1")

@@ -42,6 +42,17 @@ class ArticleIndexEntry(BaseModel):
     preview: str = ""  # first ~120 chars of the article text
 
 
+class SourceContentBlock(BaseModel):
+    page: int | None = None
+    text: str
+
+
+class SourceContent(BaseModel):
+    document_id: str
+    structured: bool = False  # True when the document has an article index
+    blocks: list[SourceContentBlock] = []
+
+
 @router.get("", response_model=list[SourceListItem])
 async def list_sources(
     request: Request,
@@ -79,8 +90,15 @@ async def list_sources(
             parts = path.split("/legal_docs/", 1)[1].split("/")
             if len(parts) > 1:
                 folder = parts[0]
+        if folder == "to_ingest":
+            # `to_ingest/` is the staging dir of the bulk official-source
+            # downloads (Assemblée, LégiBurkina) — an implementation detail,
+            # not a legal category: they are Burkina Faso official texts.
+            folder = "bf"
         meta = doc_meta.get(path.rsplit("/", 1)[-1], {}) if path else {}
-        name = jentry.get("document_name") or meta.get("document_name") or document_id
+        # The manifest title (curated or backfilled) wins over the journal's
+        # ingest-time name, which is the raw crawler filename for bulk downloads.
+        name = meta.get("document_name") or jentry.get("document_name") or document_id
         items.append(
             SourceListItem(
                 document_id=document_id,
@@ -141,6 +159,53 @@ async def list_articles(
             return (1, entry.article)
 
     return sorted(by_article.values(), key=_sort_key)
+
+
+@router.get("/{document_id}/content", response_model=SourceContent)
+async def get_source_content(
+    document_id: str,
+    request: Request,
+    user: TokenPayload = Depends(require_role(Role.VIEWER)),
+) -> SourceContent:
+    """Full text of a document in reading order (parent chunks only).
+
+    Powers the explorer's full-text view for documents without an article
+    structure (parliamentary records, reports). Reading order comes from the
+    ingestion sequence number (``metadata["seq"]``); legacy chunks without it
+    fall back to page order. Children are sub-splits of their parents, so
+    showing parents covers the whole text without duplication.
+    """
+    ctx = get_ctx(request)
+    if ctx.vector_store is None:
+        raise HTTPException(status_code=503, detail="vector store unavailable")
+    chunks = await ctx.vector_store.get_by_document_id(document_id)
+    if not chunks:
+        raise HTTPException(status_code=404, detail=f"unknown source: {document_id}")
+
+    parents = [c for c in chunks if c.parent_chunk_id is None]
+    pool = parents or chunks
+    # Deduplicate identical segments (an interrupted re-ingest can leave a
+    # document's previous chunks next to its new ones).
+    seen: set[str] = set()
+    unique = []
+    for chunk in pool:
+        if chunk.content in seen:
+            continue
+        seen.add(chunk.content)
+        unique.append(chunk)
+
+    def _order(chunk) -> tuple:
+        seq = (chunk.metadata or {}).get("seq")
+        if isinstance(seq, int):
+            return (0, seq)
+        return (1, chunk.page if chunk.page is not None else -1)
+
+    unique.sort(key=_order)
+    return SourceContent(
+        document_id=document_id,
+        structured=any(bool(c.article) for c in chunks),
+        blocks=[SourceContentBlock(page=c.page, text=c.content) for c in unique],
+    )
 
 
 @router.get("/{document_id}", response_model=SourceRecord)

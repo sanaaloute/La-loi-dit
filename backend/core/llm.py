@@ -68,16 +68,17 @@ ROLE_MODEL_CONFIGS: dict[str, dict[str, Any]] = {
     },
     "analysis": {
         "model": SYNTHESIS_MODEL,
-        # 1024-token server reasoning cap + room for the analysis notes.
-        "max_tokens": 4096,
+        # 1024-token server reasoning cap + room for full case-analysis notes.
+        "max_tokens": 8192,
         "temperature": 0.2,
         "timeout_seconds": 120.0,
     },
     "synthesis": {
         "model": SYNTHESIS_MODEL,
         # Legal answers must never be truncated; reasoning is capped
-        # server-side, so this budget is essentially all answer.
-        "max_tokens": 8192,
+        # server-side, so this budget is essentially all answer. Requires a
+        # model-server context of ~24k+ tokens per slot (32768 recommended).
+        "max_tokens": 16384,
         # Near-deterministic drafting: at 0.7 the model drifted — repeating
         # conversation history and varying legal statements between runs.
         "temperature": 0.2,
@@ -645,10 +646,28 @@ class LLMClient:
             # A minimal citation-grounded answer, so tests exercise the real
             # LLM-synthesis path — there is no template fallback anymore.
             return self._mock_grounded_answer(user)
+        if "document personnel" in s or "documents personnels" in s:
+            # Dossier analysis (routers/dossiers.py): restate the excerpt.
+            return self._mock_dossier_answer(user)
         return json.dumps({}) if "json" in s else ""
 
     #: Cap on each quoted excerpt in the mock answer (excerpts can be long).
     _MOCK_QUOTE_CHARS = 1500
+
+    def _mock_dossier_answer(self, user: str) -> str:
+        """Offline dossier analysis: restate the provided document excerpt."""
+        match = re.search(
+            r"DÉBUT DU DOCUMENT.*?---\s*(.*?)--- FIN DU DOCUMENT", user, re.DOTALL
+        )
+        excerpt = " ".join(match.group(1).split()) if match else ""
+        if not excerpt:
+            return "Le document fourni ne contient aucun texte exploitable."
+        return (
+            "Voici ce que contient le document fourni : « "
+            + excerpt[:800]
+            + " ». Cette analyse est fournie à titre informatif et ne constitue "
+            "pas un conseil juridique."
+        )
 
     def _mock_grounded_answer(self, user: str) -> str:
         """Quote each numbered evidence excerpt with its [n] citation marker.

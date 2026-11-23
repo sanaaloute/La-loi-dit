@@ -917,13 +917,37 @@ class IngestionPipeline:
         embedder = getattr(self.ctx, "embedder", None)
         if embedder is None or not hasattr(embedder, "embed"):
             raise IngestionError("ctx.embedder is missing or does not provide embed()")
+        # Only retrieval units need real vectors: dense and keyword search
+        # filter on role="child", so parents (whole articles — a long one can
+        # exceed the embedding model's context window on its own) and bare
+        # headings are stored with a zero vector. Their text remains available
+        # for display and parent expansion, and skipping their embedding
+        # removes about half of the embedding load of a run.
         # retrieval_text carries the contextual prefix when set; raw content
-        # remains the fallback (headings, parents, legacy/semantic chunks).
-        vectors = await embedder.embed([c.retrieval_text or c.content for c in chunks])
-        if len(vectors) != len(chunks):
-            raise IngestionError(
-                f"Embedder returned {len(vectors)} vectors for {len(chunks)} chunks"
+        # remains the fallback (legacy/semantic chunks without a role).
+        dim = int(getattr(embedder, "dimension", 0) or 0)
+        retrievable = [
+            (i, c)
+            for i, c in enumerate(chunks)
+            if dim > 0 and (c.metadata or {}).get("role") not in ("parent", "heading")
+        ]
+        if dim <= 0 or len(retrievable) == len(chunks):
+            vectors = await embedder.embed([c.retrieval_text or c.content for c in chunks])
+            if len(vectors) != len(chunks):
+                raise IngestionError(
+                    f"Embedder returned {len(vectors)} vectors for {len(chunks)} chunks"
+                )
+        else:
+            vectors = [[0.0] * dim for _ in chunks]
+            embedded = await embedder.embed(
+                [(c.retrieval_text or c.content) for _, c in retrievable]
             )
+            if len(embedded) != len(retrievable):
+                raise IngestionError(
+                    f"Embedder returned {len(embedded)} vectors for {len(retrievable)} chunks"
+                )
+            for (i, _), vec in zip(retrievable, embedded):
+                vectors[i] = list(vec)
         model_name = self._embedding_model_name()
         if model_name:
             for chunk in chunks:
