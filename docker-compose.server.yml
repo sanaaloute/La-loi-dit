@@ -1,0 +1,41 @@
+# Cloud-server overrides for the production VM.
+#
+#   - api: pull the CI-built image from GHCR (see .github/workflows/publish.yml)
+#     instead of building on the VM — builds are RAM-hungry and the VM is small.
+#   - frontend: not deployed here; the web app is hosted on Cloudflare. The
+#     "never" profile keeps it out of every `up` on this stack.
+#   - Memory caps keep the stack inside a small shared VM (target ~4 GB total).
+#
+# Requires Docker Compose v2.24+ (for `!reset`). Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.server.yml pull
+#   docker compose -f docker-compose.yml -f docker-compose.server.yml up -d
+#
+# One-time on the server: `docker login ghcr.io` with a GitHub PAT that has
+# read:packages (or mark the package public in the repo's package settings).
+
+name: legal-ai-burkina
+
+services:
+  api:
+    image: ghcr.io/sanaaloute/legal-ai-burkina-api:latest
+    build: !reset null
+    pull_policy: always
+    mem_limit: 3g
+    mem_reservation: 1g
+
+  frontend:
+    profiles: ["never"]
+
+  milvus:
+    mem_limit: 3g
+    mem_reservation: 1g
+
+  etcd:
+    mem_limit: 256m
+
+  # minio is already capped at 512m in the base file.
+  postgres:
+    mem_limit: 512m
+
+  redis:
+    mem_limit: 128m
