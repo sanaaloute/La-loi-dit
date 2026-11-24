@@ -16,6 +16,6 @@
     // search). The generic rewrite destination is baked at BUILD time from
     // the same variable — set API_PROXY_TARGET in the shell when running
     // `npm run build:cloudflare` (see package.json).
-    "API_PROXY_TARGET": "https://api.yawoto.neobytech.net"
+    "API_PROXY_TARGET": "https://api-yawoto.neobytech.net"
   }
 }
