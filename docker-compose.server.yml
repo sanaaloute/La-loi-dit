@@ -42,3 +42,23 @@ services:
 
   redis:
     mem_limit: 128m
+
+  # Cloudflare Tunnel (remotely-managed tunnel "yawoto-vm" in the Zero Trust
+  # dashboard). Reaches the api inside the compose network as http://api:8000 —
+  # no open host ports, no nginx/certbot. Public hostnames are configured in
+  # the dashboard (api2-yawoto for testing, api-yawoto after cutover), both
+  # pointing to http://api:8000. The token is a dashboard secret: put
+  # CLOUDFLARE_TUNNEL_TOKEN=eyJ... in the VM's .env.
+  # Image tag 2025.8.1 is already cached on the VM; bump when convenient.
+  cloudflared:
+    image: cloudflare/cloudflared:2025.8.1
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?Set CLOUDFLARE_TUNNEL_TOKEN in .env}
+    restart: unless-stopped
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
