@@ -20,7 +20,9 @@ services:
     image: ghcr.io/sanaaloute/legal-ai-burkina-api:latest
     build: !reset null
     pull_policy: always
-    mem_limit: 3g
+    # 6g: ingestion (`compose run api ...`) and heavy requests share this cap
+    # with uvicorn when exec'd into the same container; 3g OOM-killed uvicorn.
+    mem_limit: 6g
     mem_reservation: 1g
 
   frontend:
