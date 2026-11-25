@@ -17,6 +17,7 @@ data/ingestion_results.json
 data/versions.json
 data/freshness_state.json
 data/.ingest-on-startup.lock
+migration/
 data/tmp/
 data/eval/**
 
