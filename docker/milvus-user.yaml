@@ -6,11 +6,16 @@
 # which grows with the corpus and would OOM the VM once the full
 # official-documents corpus is ingested. mmap keeps the index and fields
 # mapped on disk instead; the cost is slightly higher query latency.
-mmap:
-  vectorField: true
-  vectorIndex: true
-  scalarField: true
-  scalarIndex: true
-  # mmap newly added (growing) segments too, so bulk ingestion does not
-  # pile unsealed data into RAM before segments are sealed.
-  growingMmapEnabled: true
+#
+# Milvus 2.6 reads these keys under `queryNode.mmap` — a top-level `mmap:`
+# section is silently ignored (observed: enable_mmap="false" in the CGO
+# segment-load logs and mmapFieldCount=0 in load-memory predictions).
+queryNode:
+  mmap:
+    vectorField: true
+    vectorIndex: true
+    scalarField: true
+    scalarIndex: true
+    # mmap newly added (growing) segments too, so bulk ingestion does not
+    # pile unsealed data into RAM before segments are sealed.
+    growingMmapEnabled: true
