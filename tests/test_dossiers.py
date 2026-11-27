@@ -242,3 +242,84 @@ def test_folder_analyze_empty_folder_fails(dossier_client):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert res.status_code == 422
+
+
+def _wait_job(client: TestClient, url: str, headers: dict, timeout: float = 10.0) -> dict:
+    """Poll an analysis job until it leaves ``running`` (or fail the test)."""
+    import time
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        res = client.get(url, headers=headers)
+        assert res.status_code == 200, res.text
+        data = res.json()
+        if data["status"] != "running":
+            return data
+        time.sleep(0.1)
+    raise AssertionError("analysis job did not complete in time")
+
+
+def test_dossier_analyze_job_completes(dossier_client):
+    token = _token(dossier_client)
+    headers = {"Authorization": f"Bearer {token}"}
+    dossier = _upload(dossier_client, token)
+
+    res = dossier_client.post(
+        f"/api/v1/dossiers/{dossier['id']}/analyze/jobs",
+        json={"question": "Que dit l'article 1 ?"},
+        headers=headers,
+    )
+    assert res.status_code == 202, res.text
+    job_id = res.json()["job_id"]
+
+    done = _wait_job(
+        dossier_client, f"/api/v1/dossiers/{dossier['id']}/analyze/jobs/{job_id}", headers
+    )
+    assert done["status"] == "done"
+    assert done["result"]["answer"].strip()
+    assert done["result"]["chars_used"] > 0
+
+
+def test_folder_analyze_job_completes(dossier_client):
+    token = _token(dossier_client)
+    headers = {"Authorization": f"Bearer {token}"}
+    folder = _create_folder(dossier_client, token)
+    dossier = _upload(dossier_client, token)
+    dossier_client.patch(
+        f"/api/v1/dossiers/{dossier['id']}", json={"folder_id": folder["id"]}, headers=headers
+    )
+
+    res = dossier_client.post(
+        f"/api/v1/dossiers/folders/{folder['id']}/analyze/jobs",
+        json={"question": "Que dit le contrat sur le loyer ?", "mode": "documents"},
+        headers=headers,
+    )
+    assert res.status_code == 202, res.text
+    job_id = res.json()["job_id"]
+
+    done = _wait_job(
+        dossier_client, f"/api/v1/dossiers/folders/{folder['id']}/analyze/jobs/{job_id}", headers
+    )
+    assert done["status"] == "done"
+    assert done["result"]["mode"] == "documents"
+    assert done["result"]["documents_used"] == ["Contrat de bail"]
+
+
+def test_analyze_job_unknown_is_404(dossier_client):
+    import uuid
+
+    token = _token(dossier_client)
+    headers = {"Authorization": f"Bearer {token}"}
+    dossier = _upload(dossier_client, token)
+    res = dossier_client.get(
+        f"/api/v1/dossiers/{dossier['id']}/analyze/jobs/{uuid.uuid4().hex}",
+        headers=headers,
+    )
+    assert res.status_code == 404
+
+
+def test_analyze_job_requires_auth(dossier_client):
+    res = dossier_client.post(
+        "/api/v1/dossiers/some-id/analyze/jobs", json={"question": "Q ?"}
+    )
+    assert res.status_code in (401, 403)

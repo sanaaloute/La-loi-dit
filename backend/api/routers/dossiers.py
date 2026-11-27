@@ -14,10 +14,20 @@ Two analysis modes exist:
   folder's documents (map-step extraction for long documents, cached on
   disk), then fed with the question into the legal corpus pipeline so the
   answer applies the indexed law to the case facts, with [n] citations.
+
+Each analyze endpoint also has an async ``.../analyze/jobs`` variant: the POST
+returns a job id immediately and the analysis runs in the background, with its
+state kept in the shared cache so any uvicorn worker can answer the polling
+GET. The web client uses the job variant because the synchronous endpoint
+blocks for the whole analysis (often several minutes), which exceeds the 100 s
+proxy timeout of the Cloudflare tunnel in front of the API — the caller saw a
+524 while the backend kept working. The blocking endpoints are kept for the
+mobile app.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -31,6 +41,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Resp
 from pydantic import BaseModel, Field
 
 from backend.api.deps import get_ctx, get_graph, require_user
+from backend.core.context import AppContext
 from backend.core.llm import LLMClient
 from backend.core.model_router import check_budget, resolve_llm
 from backend.security.jwt import TokenPayload
@@ -62,6 +73,13 @@ _BRIEF_RAW_CHARS = 6_000
 _BRIEF_TOTAL_CHARS = 8_000
 _BRIEF_EXTRACT_CHARS = 24_000
 
+#: Analysis job state lives in the shared cache under this prefix so any
+#: uvicorn worker can answer the polling GET, whichever worker runs the job.
+_ANALYSIS_JOB_PREFIX = "analysis_job:"
+_ANALYSIS_JOB_TTL_SECONDS = 3600
+
+_JOB_FAILURE_DETAIL = "L'analyse a échoué. Réessayez dans quelques instants."
+
 _ANALYSIS_SYSTEM_PROMPT = (
     "Tu es Yawoto, un avocat senior du barreau du Burkina Faso. L'utilisateur "
     "t'a confié un ou plusieurs documents personnels dans le cadre de son "
@@ -77,9 +95,9 @@ _ANALYSIS_SYSTEM_PROMPT = (
 )
 
 _CASE_BRIEF_SYSTEM = (
-    "Tu es Yawoto, un avocat senior du Burkina Faso. On te donne le texte "
-    "extrait d'un document personnel d'un client. Produis une fiche de faits "
-    "structurée et concise (10-20 lignes) : parties concernées, dates, "
+    "Tu es Yawoto, un avocat senior du barreau du Burkina Faso. On te donne le "
+    "texte extrait d'un document personnel d'un client. Produis une fiche de "
+    "faits structurée et concise (10-20 lignes) : parties concernées, dates, "
     "montants, objets juridiques, clauses ou éléments pertinents pour une "
     "analyse de droit burkinabè. Ne commente pas, n'invente rien : rapporte "
     "uniquement ce que le document établit. Écris en français."
@@ -151,23 +169,33 @@ class FolderAnalyzeOut(BaseModel):
     truncated: bool = False  # the case brief was capped to fit the context window
 
 
-def _user_store(request: Request):
-    store = getattr(get_ctx(request), "user_store", None)
+class AnalysisJobOut(BaseModel):
+    job_id: str
+
+
+class AnalysisJobStatusOut(BaseModel):
+    status: str  # running | done | failed
+    result: Optional[dict[str, Any]] = None  # AnalyzeOut / FolderAnalyzeOut payload
+    error: Optional[str] = None
+
+
+def _user_store(ctx: AppContext):
+    store = getattr(ctx, "user_store", None)
     if store is None:
         raise HTTPException(status_code=503, detail="user store unavailable")
     return store
 
 
-def _user_root(request: Request, user_id: str) -> Path:
-    return Path(get_ctx(request).settings.data_dir) / "user_dossiers" / user_id
+def _user_root(ctx: AppContext, user_id: str) -> Path:
+    return Path(ctx.settings.data_dir) / "user_dossiers" / user_id
 
 
-def _dossier_dir(request: Request, user_id: str, dossier_id: str) -> Path:
-    return _user_root(request, user_id) / dossier_id
+def _dossier_dir(ctx: AppContext, user_id: str, dossier_id: str) -> Path:
+    return _user_root(ctx, user_id) / dossier_id
 
 
-def _folder_dir(request: Request, user_id: str, folder_id: str) -> Path:
-    return _user_root(request, user_id) / "folders" / folder_id
+def _folder_dir(ctx: AppContext, user_id: str, folder_id: str) -> Path:
+    return _user_root(ctx, user_id) / "folders" / folder_id
 
 
 def _extract_text(path: Path, extension: str) -> tuple[str, int]:
@@ -186,30 +214,29 @@ def _extract_text(path: Path, extension: str) -> tuple[str, int]:
     return doc.text, page_count
 
 
-async def _owned_dossier(request: Request, user: TokenPayload, dossier_id: str) -> dict[str, Any]:
-    dossier = await _user_store(request).get_dossier(user.user_id, dossier_id)
+async def _owned_dossier(ctx: AppContext, user: TokenPayload, dossier_id: str) -> dict[str, Any]:
+    dossier = await _user_store(ctx).get_dossier(user.user_id, dossier_id)
     if dossier is None:
         raise HTTPException(status_code=404, detail="Dossier introuvable.")
     return dossier
 
 
-async def _owned_folder(request: Request, user: TokenPayload, folder_id: str) -> dict[str, Any]:
-    folder = await _user_store(request).get_folder(user.user_id, folder_id)
+async def _owned_folder(ctx: AppContext, user: TokenPayload, folder_id: str) -> dict[str, Any]:
+    folder = await _user_store(ctx).get_folder(user.user_id, folder_id)
     if folder is None:
         raise HTTPException(status_code=404, detail="Dossier introuvable.")
     return folder
 
 
-def _dossier_text(request: Request, user_id: str, dossier_id: str) -> str:
-    text_path = _dossier_dir(request, user_id, dossier_id) / "text.txt"
+def _dossier_text(ctx: AppContext, user_id: str, dossier_id: str) -> str:
+    text_path = _dossier_dir(ctx, user_id, dossier_id) / "text.txt"
     return text_path.read_text(encoding="utf-8") if text_path.is_file() else ""
 
 
 async def _record_metering(
-    request: Request, user: TokenPayload, before: dict[str, int], *, query: str, answer: str, source: str
+    ctx: AppContext, user: TokenPayload, before: dict[str, int], *, query: str, answer: str, source: str
 ) -> None:
     """Record this request's token usage; never breaks the answer path."""
-    ctx = get_ctx(request)
     if ctx.user_store is None:
         return
     tokens_in = ctx.llm.usage_totals["tokens_in"] - before.get("tokens_in", 0)
@@ -222,6 +249,20 @@ async def _record_metering(
         await ctx.user_store.record_prompt(user.user_id, query, source=source, session_id="")
     except Exception:
         pass  # metering must never break the answer path
+
+
+async def _job_save(ctx: AppContext, job_id: str, payload: dict[str, Any]) -> None:
+    await ctx.cache.set(_ANALYSIS_JOB_PREFIX + job_id, payload, ttl=_ANALYSIS_JOB_TTL_SECONDS)
+
+
+async def _job_status(request: Request, user: TokenPayload, job_id: str) -> AnalysisJobStatusOut:
+    """Shared polling handler for both analyze job GETs (owner-scoped)."""
+    job = await get_ctx(request).cache.get(_ANALYSIS_JOB_PREFIX + job_id)
+    if not isinstance(job, dict) or job.get("user_id") != user.user_id:
+        raise HTTPException(status_code=404, detail="Analyse introuvable ou expirée.")
+    return AnalysisJobStatusOut(
+        status=job.get("status", "running"), result=job.get("result"), error=job.get("error")
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +279,7 @@ async def create_folder(
     """Create one case folder."""
     if not user.user_id:
         raise HTTPException(status_code=400, detail="registered account required")
-    row = await _user_store(request).add_folder(
+    row = await _user_store(get_ctx(request)).add_folder(
         user.user_id, {"id": uuid.uuid4().hex, "name": payload.name.strip(), "description": payload.description}
     )
     if row is None:
@@ -255,7 +296,7 @@ async def list_folders(
     """Newest-first folders of the current user, with document counts."""
     if not user.user_id:
         return []
-    rows = await _user_store(request).list_folders(user.user_id)
+    rows = await _user_store(get_ctx(request)).list_folders(user.user_id)
     return [FolderOut(**r) for r in rows]
 
 
@@ -268,8 +309,9 @@ async def get_folder(
     """One folder plus its documents (owner-scoped)."""
     if not user.user_id:
         raise HTTPException(status_code=400, detail="registered account required")
-    folder = await _owned_folder(request, user, folder_id)
-    docs = await _user_store(request).list_dossiers(user.user_id, folder_id)
+    ctx = get_ctx(request)
+    folder = await _owned_folder(ctx, user, folder_id)
+    docs = await _user_store(ctx).list_dossiers(user.user_id, folder_id)
     return FolderDetailOut(
         folder=FolderOut(**folder, document_count=len(docs)),
         documents=[DossierOut(**d) for d in docs],
@@ -286,8 +328,9 @@ async def update_folder(
     """Rename or redescribe one folder."""
     if not user.user_id:
         raise HTTPException(status_code=400, detail="registered account required")
-    folder = await _owned_folder(request, user, folder_id)
-    store = _user_store(request)
+    ctx = get_ctx(request)
+    folder = await _owned_folder(ctx, user, folder_id)
+    store = _user_store(ctx)
     updated = await store.update_folder(
         user.user_id,
         folder_id,
@@ -311,7 +354,8 @@ async def delete_folder(
     """Delete one folder; its documents become unfiled unless ``delete_documents``."""
     if not user.user_id:
         raise HTTPException(status_code=400, detail="registered account required")
-    store = _user_store(request)
+    ctx = get_ctx(request)
+    store = _user_store(ctx)
     folder = await store.get_folder(user.user_id, folder_id)
     if folder is None:
         raise HTTPException(status_code=404, detail="Dossier introuvable.")
@@ -319,9 +363,30 @@ async def delete_folder(
     if doc_ids is None:
         raise HTTPException(status_code=503, detail="user store unavailable")
     for dossier_id in doc_ids:
-        shutil.rmtree(_dossier_dir(request, user.user_id, dossier_id), ignore_errors=True)
-    shutil.rmtree(_folder_dir(request, user.user_id, folder_id), ignore_errors=True)
+        shutil.rmtree(_dossier_dir(ctx, user.user_id, dossier_id), ignore_errors=True)
+    shutil.rmtree(_folder_dir(ctx, user.user_id, folder_id), ignore_errors=True)
     return Response(status_code=204)
+
+
+async def _ready_folder_docs(
+    ctx: AppContext, user: TokenPayload, folder_id: str
+) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, str]]:
+    """Owned folder plus its analyzable documents and their extracted texts."""
+    folder = await _owned_folder(ctx, user, folder_id)
+    store = _user_store(ctx)
+    docs = [
+        d
+        for d in await store.list_dossiers(user.user_id, folder_id)
+        if d["status"] == "ready"
+    ]
+    texts = {d["id"]: _dossier_text(ctx, user.user_id, d["id"]) for d in docs}
+    docs = [d for d in docs if texts.get(d["id"], "").strip()]
+    if not docs:
+        raise HTTPException(
+            status_code=422,
+            detail="Aucun document exploitable dans ce dossier (texte non extrait).",
+        )
+    return folder, docs, texts
 
 
 @router.post("/folders/{folder_id}/analyze", response_model=FolderAnalyzeOut)
@@ -341,34 +406,92 @@ async def analyze_folder(
         raise HTTPException(status_code=400, detail="registered account required")
     ctx = get_ctx(request)
     await check_budget(ctx.user_store, user, ctx.settings)
-    folder = await _owned_folder(request, user, folder_id)
-    store = _user_store(request)
-    docs = [
-        d
-        for d in await store.list_dossiers(user.user_id, folder_id)
-        if d["status"] == "ready"
-    ]
-    texts = {d["id"]: _dossier_text(request, user.user_id, d["id"]) for d in docs}
-    docs = [d for d in docs if texts.get(d["id"], "").strip()]
-    if not docs:
-        raise HTTPException(
-            status_code=422,
-            detail="Aucun document exploitable dans ce dossier (texte non extrait).",
-        )
+    folder, docs, texts = await _ready_folder_docs(ctx, user, folder_id)
 
     usage_before = dict(ctx.llm.usage_totals)
     if payload.mode == "documents":
-        out = await _answer_from_documents(request, user, folder, docs, texts, payload.question)
+        out = await _answer_from_documents(ctx, user, folder, docs, texts, payload.question)
     else:
-        out = await _answer_case(request, user, folder, docs, texts, payload.question)
+        out = await _answer_case(ctx, get_graph(request), user, folder, docs, texts, payload.question)
     await _record_metering(
-        request, user, usage_before, query=payload.question, answer=out.answer, source="dossier_folder_analyze"
+        ctx, user, usage_before, query=payload.question, answer=out.answer, source="dossier_folder_analyze"
     )
     return out
 
 
-async def _answer_from_documents(
+@router.post("/folders/{folder_id}/analyze/jobs", response_model=AnalysisJobOut, status_code=202)
+async def start_folder_analysis_job(
+    folder_id: str,
+    payload: FolderAnalyzeIn,
     request: Request,
+    user: TokenPayload = Depends(require_user),
+) -> AnalysisJobOut:
+    """Async variant of ``analyze_folder``: start the analysis, poll the GET.
+
+    Same validation as the synchronous endpoint (budget, ownership, usable
+    documents) so a job that starts is a job that can run to completion.
+    """
+    if not user.user_id:
+        raise HTTPException(status_code=400, detail="registered account required")
+    ctx = get_ctx(request)
+    await check_budget(ctx.user_store, user, ctx.settings)
+    folder, docs, texts = await _ready_folder_docs(ctx, user, folder_id)
+    graph = get_graph(request) if payload.mode == "case" else None
+
+    job_id = uuid.uuid4().hex
+    await _job_save(ctx, job_id, {"status": "running", "user_id": user.user_id})
+    asyncio.create_task(
+        _run_folder_analysis_job(ctx, graph, job_id, user, folder, docs, texts, payload)
+    )
+    return AnalysisJobOut(job_id=job_id)
+
+
+@router.get("/folders/{folder_id}/analyze/jobs/{job_id}", response_model=AnalysisJobStatusOut)
+async def get_folder_analysis_job(
+    folder_id: str,
+    job_id: str,
+    request: Request,
+    user: TokenPayload = Depends(require_user),
+) -> AnalysisJobStatusOut:
+    """Poll one folder analysis job (answered from the shared cache)."""
+    return await _job_status(request, user, job_id)
+
+
+async def _run_folder_analysis_job(
+    ctx: AppContext,
+    graph,
+    job_id: str,
+    user: TokenPayload,
+    folder: dict[str, Any],
+    docs: list[dict[str, Any]],
+    texts: dict[str, str],
+    payload: FolderAnalyzeIn,
+) -> None:
+    """Background body of the folder analysis job; ends in the shared cache."""
+    try:
+        usage_before = dict(ctx.llm.usage_totals)
+        if payload.mode == "documents":
+            out = await _answer_from_documents(ctx, user, folder, docs, texts, payload.question)
+        else:
+            out = await _answer_case(ctx, graph, user, folder, docs, texts, payload.question)
+        await _record_metering(
+            ctx, user, usage_before, query=payload.question, answer=out.answer, source="dossier_folder_analyze"
+        )
+        result: dict[str, Any] = {
+            "status": "done",
+            "user_id": user.user_id,
+            "result": out.model_dump(),
+        }
+    except HTTPException as exc:
+        result = {"status": "failed", "user_id": user.user_id, "error": str(exc.detail)}
+    except Exception:
+        logger.exception("folder analysis job failed", extra={"job_id": job_id, "user": user.sub})
+        result = {"status": "failed", "user_id": user.user_id, "error": _JOB_FAILURE_DETAIL}
+    await _job_save(ctx, job_id, result)
+
+
+async def _answer_from_documents(
+    ctx: AppContext,
     user: TokenPayload,
     folder: dict[str, Any],
     docs: list[dict[str, Any]],
@@ -376,7 +499,6 @@ async def _answer_from_documents(
     question: str,
 ) -> FolderAnalyzeOut:
     """Documents-only answer: one LLM call over the combined excerpts."""
-    ctx = get_ctx(request)
     per_doc = max(2000, _ANALYZE_CONTEXT_CHARS // max(1, len(docs)))
     truncated = False
     sections = []
@@ -404,7 +526,8 @@ async def _answer_from_documents(
 
 
 async def _answer_case(
-    request: Request,
+    ctx: AppContext,
+    graph,
     user: TokenPayload,
     folder: dict[str, Any],
     docs: list[dict[str, Any]],
@@ -414,8 +537,7 @@ async def _answer_case(
     """Case analysis: case brief + question through the legal corpus pipeline."""
     from backend.workflows.graph import GRAPH_RECURSION_LIMIT, initial_state
 
-    ctx = get_ctx(request)
-    brief, truncated = await _build_case_brief(request, user, folder, docs, texts)
+    brief, truncated = await _build_case_brief(ctx, user, folder, docs, texts)
     query = (
         f"{question.strip()}\n\n"
         f"--- FICHE DE CAS (documents du dossier « {folder['name']} » fournis par l'utilisateur) ---\n"
@@ -423,7 +545,6 @@ async def _answer_case(
         f"--- FIN DE LA FICHE DE CAS ---"
     )
     state = initial_state(query, user_id=user.user_id, language="fr")
-    graph = get_graph(request)
     final_state = await graph.ainvoke(state, config={"recursion_limit": GRAPH_RECURSION_LIMIT})
     answer = final_state["final_answer"]
     return FolderAnalyzeOut(
@@ -437,7 +558,7 @@ async def _answer_case(
 
 
 async def _build_case_brief(
-    request: Request,
+    ctx: AppContext,
     user: TokenPayload,
     folder: dict[str, Any],
     docs: list[dict[str, Any]],
@@ -449,14 +570,13 @@ async def _build_case_brief(
     (falling back to a raw head excerpt when the LLM call fails). The cache is
     keyed by the folder's document fingerprint so edits invalidate it.
     """
-    ctx = get_ctx(request)
     fingerprint = hashlib.sha256(
         json.dumps(
             sorted((d["id"], d["char_count"], d["size_bytes"]) for d in docs),
             ensure_ascii=False,
         ).encode()
     ).hexdigest()
-    folder_dir = _folder_dir(request, user.user_id, folder["id"])
+    folder_dir = _folder_dir(ctx, user.user_id, folder["id"])
     cache_path = folder_dir / "brief.json"
     if cache_path.is_file():
         try:
@@ -551,14 +671,14 @@ async def upload_dossier(
 
     folder = ""
     if folder_id:
-        folder_row = await _user_store(request).get_folder(user.user_id, folder_id)
+        folder_row = await _user_store(ctx).get_folder(user.user_id, folder_id)
         if folder_row is None:
             raise HTTPException(status_code=404, detail="Dossier introuvable.")
         folder = folder_row["id"]
 
     dossier_id = uuid.uuid4().hex
     safe_name = _SAFE_NAME.sub("_", original_name)
-    dest_dir = _dossier_dir(request, user.user_id, dossier_id)
+    dest_dir = _dossier_dir(ctx, user.user_id, dossier_id)
     dest_dir.mkdir(parents=True, exist_ok=True)
     original_path = dest_dir / f"original{extension}"
     original_path.write_bytes(content)
@@ -584,7 +704,7 @@ async def upload_dossier(
         record["status"] = "error"
         record["error"] = "Le texte du document n'a pas pu être extrait."
 
-    row = await _user_store(request).add_dossier(user.user_id, {"id": dossier_id, **record})
+    row = await _user_store(ctx).add_dossier(user.user_id, {"id": dossier_id, **record})
     if row is None:
         raise HTTPException(status_code=503, detail="user store unavailable")
     logger.info(
@@ -607,7 +727,7 @@ async def list_dossiers(
     """
     if not user.user_id:
         return []
-    rows = await _user_store(request).list_dossiers(user.user_id, folder_id)
+    rows = await _user_store(get_ctx(request)).list_dossiers(user.user_id, folder_id)
     return [DossierOut(**r) for r in rows]
 
 
@@ -620,8 +740,9 @@ async def dossier_text(
     """Return the extracted text of one dossier (owner-scoped)."""
     if not user.user_id:
         raise HTTPException(status_code=400, detail="registered account required")
-    dossier = await _owned_dossier(request, user, dossier_id)
-    text = _dossier_text(request, user.user_id, dossier_id)
+    ctx = get_ctx(request)
+    dossier = await _owned_dossier(ctx, user, dossier_id)
+    text = _dossier_text(ctx, user.user_id, dossier_id)
     return {"dossier": dossier, "text": text}
 
 
@@ -635,8 +756,9 @@ async def move_dossier(
     """Move one dossier into a folder (``folder_id=""`` unfiles it)."""
     if not user.user_id:
         raise HTTPException(status_code=400, detail="registered account required")
-    dossier = await _owned_dossier(request, user, dossier_id)
-    store = _user_store(request)
+    ctx = get_ctx(request)
+    dossier = await _owned_dossier(ctx, user, dossier_id)
+    store = _user_store(ctx)
     if payload.folder_id:
         folder = await store.get_folder(user.user_id, payload.folder_id)
         if folder is None:
@@ -656,11 +778,45 @@ async def delete_dossier(
     """Delete one dossier: index row plus files on disk."""
     if not user.user_id:
         raise HTTPException(status_code=400, detail="registered account required")
-    deleted = await _user_store(request).delete_dossier(user.user_id, dossier_id)
+    ctx = get_ctx(request)
+    deleted = await _user_store(ctx).delete_dossier(user.user_id, dossier_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Dossier introuvable.")
-    shutil.rmtree(_dossier_dir(request, user.user_id, dossier_id), ignore_errors=True)
+    shutil.rmtree(_dossier_dir(ctx, user.user_id, dossier_id), ignore_errors=True)
     return Response(status_code=204)
+
+
+async def _analyze_dossier(
+    ctx: AppContext, user: TokenPayload, dossier: dict[str, Any], question: str
+) -> AnalyzeOut:
+    """Answer one question grounded exclusively on the dossier's text."""
+    text = _dossier_text(ctx, user.user_id, dossier["id"])
+    if not text:
+        raise HTTPException(status_code=422, detail="Le texte de ce document n'est pas disponible.")
+
+    truncated = len(text) > _ANALYZE_CONTEXT_CHARS
+    excerpt = text[:_ANALYZE_CONTEXT_CHARS]
+    user_prompt = (
+        f"--- DÉBUT DU DOCUMENT « {dossier['name']} » ---\n"
+        f"{excerpt}\n"
+        f"--- FIN DU DOCUMENT ---\n\n"
+        f"Question : {question.strip()}"
+    )
+
+    usage_before = dict(ctx.llm.usage_totals)
+    llm = resolve_llm(ctx, user, None, query=question)
+    answer = (
+        await llm.complete(
+            _ANALYSIS_SYSTEM_PROMPT, user_prompt, max_tokens=ctx.settings.answer_max_tokens
+        )
+    ).strip()
+    if not answer:
+        raise HTTPException(status_code=502, detail="Le modèle n'a renvoyé aucune réponse.")
+
+    await _record_metering(
+        ctx, user, usage_before, query=question, answer=answer, source="dossier_analyze"
+    )
+    return AnalyzeOut(answer=answer, truncated=truncated, chars_used=len(excerpt))
 
 
 @router.post("/{dossier_id}/analyze", response_model=AnalyzeOut)
@@ -675,41 +831,65 @@ async def analyze_dossier(
         raise HTTPException(status_code=400, detail="registered account required")
     ctx = get_ctx(request)
     await check_budget(ctx.user_store, user, ctx.settings)
-    dossier = await _owned_dossier(request, user, dossier_id)
+    dossier = await _owned_dossier(ctx, user, dossier_id)
     if dossier["status"] != "ready":
         raise HTTPException(
             status_code=422,
             detail=dossier["error"] or "Le texte de ce document n'est pas disponible.",
         )
-    text = _dossier_text(request, user.user_id, dossier_id)
-    if not text:
-        raise HTTPException(status_code=422, detail="Le texte de ce document n'est pas disponible.")
+    return await _analyze_dossier(ctx, user, dossier, payload.question)
 
-    truncated = len(text) > _ANALYZE_CONTEXT_CHARS
-    excerpt = text[:_ANALYZE_CONTEXT_CHARS]
-    user_prompt = (
-        f"--- DÉBUT DU DOCUMENT « {dossier['name']} » ---\n"
-        f"{excerpt}\n"
-        f"--- FIN DU DOCUMENT ---\n\n"
-        f"Question : {payload.question.strip()}"
-    )
 
-    usage_before = dict(ctx.llm.usage_totals)
-    llm = resolve_llm(ctx, user, None, query=payload.question)
-    answer = (
-        await llm.complete(
-            _ANALYSIS_SYSTEM_PROMPT, user_prompt, max_tokens=ctx.settings.answer_max_tokens
+@router.post("/{dossier_id}/analyze/jobs", response_model=AnalysisJobOut, status_code=202)
+async def start_dossier_analysis_job(
+    dossier_id: str,
+    payload: AnalyzeIn,
+    request: Request,
+    user: TokenPayload = Depends(require_user),
+) -> AnalysisJobOut:
+    """Async variant of ``analyze_dossier``: start the analysis, poll the GET."""
+    if not user.user_id:
+        raise HTTPException(status_code=400, detail="registered account required")
+    ctx = get_ctx(request)
+    await check_budget(ctx.user_store, user, ctx.settings)
+    dossier = await _owned_dossier(ctx, user, dossier_id)
+    if dossier["status"] != "ready":
+        raise HTTPException(
+            status_code=422,
+            detail=dossier["error"] or "Le texte de ce document n'est pas disponible.",
         )
-    ).strip()
-    if not answer:
-        raise HTTPException(status_code=502, detail="Le modèle n'a renvoyé aucune réponse.")
 
-    await _record_metering(
-        request,
-        user,
-        usage_before,
-        query=payload.question,
-        answer=answer,
-        source="dossier_analyze",
-    )
-    return AnalyzeOut(answer=answer, truncated=truncated, chars_used=len(excerpt))
+    job_id = uuid.uuid4().hex
+    await _job_save(ctx, job_id, {"status": "running", "user_id": user.user_id})
+    asyncio.create_task(_run_dossier_analysis_job(ctx, job_id, user, dossier, payload.question))
+    return AnalysisJobOut(job_id=job_id)
+
+
+@router.get("/{dossier_id}/analyze/jobs/{job_id}", response_model=AnalysisJobStatusOut)
+async def get_dossier_analysis_job(
+    dossier_id: str,
+    job_id: str,
+    request: Request,
+    user: TokenPayload = Depends(require_user),
+) -> AnalysisJobStatusOut:
+    """Poll one dossier analysis job (answered from the shared cache)."""
+    return await _job_status(request, user, job_id)
+
+
+async def _run_dossier_analysis_job(
+    ctx: AppContext, job_id: str, user: TokenPayload, dossier: dict[str, Any], question: str
+) -> None:
+    """Background body of the dossier analysis job; ends in the shared cache."""
+    try:
+        out = await _analyze_dossier(ctx, user, dossier, question)
+        result: dict[str, Any] = {
+            "status": "done",
+            "user_id": user.user_id,
+            "result": out.model_dump(),
+        }
+    except HTTPException as exc:
+        result = {"status": "failed", "user_id": user.user_id, "error": str(exc.detail)}
+    except Exception:
+        logger.exception("dossier analysis job failed", extra={"job_id": job_id, "user": user.sub})
+        result = {"status": "failed", "user_id": user.user_id, "error": _JOB_FAILURE_DETAIL}
+    await _job_save(ctx, job_id, result)

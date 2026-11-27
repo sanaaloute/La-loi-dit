@@ -193,11 +193,43 @@ cd frontend && npm run deploy:cloudflare
 Nothing mobile-related runs on the server. Point the apps at
 `https://api-yawoto.neobytech.net` and build new EAS releases.
 
+## Tuning timeouts, restarting safely
+
+The useful knobs (all in `.env`, prefix `LEGAL_AI_`, defaults in
+`backend/core/config.py`):
+
+| Variable | Default | Covers |
+| --- | --- | --- |
+| `LEGAL_AI_LLM_TIMEOUT_SECONDS` | 180 | one LLM call (any role) |
+| `LEGAL_AI_ANSWER_LLM_TIMEOUT_SECONDS` | 300 | answer synthesis specifically |
+| `LEGAL_AI_CHAT_RUN_TIMEOUT_SECONDS` | 280 | whole chat run (hard cap) |
+
+Raising the chat cap is safe behind the tunnel: chat streams heartbeats
+(`chat_heartbeat_seconds`), so Cloudflare's 100 s time-to-first-byte limit
+never engages. What `.env` can NOT fix is any *blocking* endpoint slower than
+100 s — that is exactly why dossier/folder analysis runs as async jobs
+(`POST .../analyze/jobs` + polling GET); each poll is answered in
+milliseconds.
+
+To apply a `.env` change, recreate ONLY the api container:
+
+```bash
+cd ~/legal-ai-burkina
+docker compose -f docker-compose.yml -f docker-compose.server.yml up -d api
+```
+
+~5–10 s of API downtime; postgres/milvus/redis/minio/cloudflared and any
+`docker compose run` companions (crawls, ingestion) are untouched. Two
+traps:
+
+- `docker compose restart api` does NOT reload `.env` — a container's env is
+  frozen at creation; only `up -d` recreates it.
+- `docker compose down` would also remove companion containers created with
+  `docker compose run` (corpus crawls, ingestion supervisor). Never use it
+  while those run; `up -d api` is always the right tool.
+
 ## Notes / caveats
 
-- **524 risk** on non-streaming endpoints slower than ~100 s (dossier
-  analysis): accepted for now, fix planned (async job + poll, or heartbeat
-  streaming). Chat SSE is unaffected.
 - The VM footprint with the shipped caps is ≈ 3–4 GB plus Milvus (3 g cap is a
   ceiling, not a reservation); the VM has no swap — watch `docker stats`
   during the first days.

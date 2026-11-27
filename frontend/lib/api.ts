@@ -1243,23 +1243,70 @@ export async function deleteDossier(id: string, token?: string | null): Promise<
   }
 }
 
+// --- Analysis jobs (async) -------------------------------------------------
+//
+// Analyses routinely run for several minutes, beyond the 100 s proxy timeout
+// of the Cloudflare tunnel in front of the API — a blocking POST got a 524
+// while the backend kept working. The backend therefore exposes job
+// endpoints: the POST starts the analysis and returns a job id immediately,
+// and each polling GET is answered in milliseconds from the shared cache.
+
+interface AnalysisJobStatus {
+  status: "running" | "done" | "failed";
+  result?: unknown;
+  error?: string | null;
+}
+
+const ANALYSIS_POLL_INTERVAL_MS = 4_000;
+const ANALYSIS_MAX_WAIT_MS = 12 * 60 * 1_000;
+
+async function startAnalysisJob(path: string, body: unknown, token?: string | null): Promise<string> {
+  const res = await apiFetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    token,
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const detail = await safeDetail(res);
+    throw new ApiError(detail ?? `Impossible de lancer l'analyse (${res.status})`, res.status);
+  }
+  return ((await res.json()) as { job_id: string }).job_id;
+}
+
+async function pollAnalysisJob<T>(path: string, token?: string | null): Promise<T> {
+  const deadline = Date.now() + ANALYSIS_MAX_WAIT_MS;
+  for (;;) {
+    const res = await apiFetch(path, { token });
+    if (res.ok) {
+      const job = (await res.json()) as AnalysisJobStatus;
+      if (job.status === "done" && job.result) return job.result as T;
+      if (job.status === "failed") {
+        throw new Error(job.error || "L'analyse a échoué. Réessayez dans quelques instants.");
+      }
+    } // 404: the job record has not propagated to this worker yet — keep polling
+    if (Date.now() >= deadline) {
+      throw new Error("L'analyse prend plus de temps que prévu. Réessayez dans quelques instants.");
+    }
+    await new Promise((resolve) => setTimeout(resolve, ANALYSIS_POLL_INTERVAL_MS));
+  }
+}
+
 /** Ask one question grounded exclusively on the dossier's text. */
 export async function analyzeDossier(
   id: string,
   question: string,
   token?: string | null,
 ): Promise<DossierAnalysis> {
-  const res = await apiFetch(`/dossiers/${encodeURIComponent(id)}/analyze`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+  const jobId = await startAnalysisJob(
+    `/dossiers/${encodeURIComponent(id)}/analyze/jobs`,
+    { question },
     token,
-    body: JSON.stringify({ question }),
-  });
-  if (!res.ok) {
-    const detail = await safeDetail(res);
-    throw new ApiError(detail ?? `Échec de l'analyse (${res.status})`, res.status);
-  }
-  return (await res.json()) as DossierAnalysis;
+  );
+  return pollAnalysisJob<DossierAnalysis>(
+    `/dossiers/${encodeURIComponent(id)}/analyze/jobs/${jobId}`,
+    token,
+  );
 }
 
 // --- Case folders: group several documents into one case ---
@@ -1375,17 +1422,15 @@ export async function analyzeFolder(
   mode: "case" | "documents",
   token?: string | null,
 ): Promise<FolderAnalysis> {
-  const res = await apiFetch(`/dossiers/folders/${encodeURIComponent(id)}/analyze`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+  const jobId = await startAnalysisJob(
+    `/dossiers/folders/${encodeURIComponent(id)}/analyze/jobs`,
+    { question, mode },
     token,
-    body: JSON.stringify({ question, mode }),
-  });
-  if (!res.ok) {
-    const detail = await safeDetail(res);
-    throw new ApiError(detail ?? `Échec de l'analyse (${res.status})`, res.status);
-  }
-  return (await res.json()) as FolderAnalysis;
+  );
+  return pollAnalysisJob<FolderAnalysis>(
+    `/dossiers/folders/${encodeURIComponent(id)}/analyze/jobs/${jobId}`,
+    token,
+  );
 }
 
 // ---------------------------------------------------------------------------

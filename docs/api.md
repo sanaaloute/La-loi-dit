@@ -344,6 +344,26 @@ chat and meters token usage.
 
 → `{answer, truncated, chars_used}`. `422` when the dossier has no usable text.
 
+### Async analysis jobs (used by the web app)
+
+Analyses routinely take several minutes — beyond the 100 s proxy timeout of
+the Cloudflare tunnel, where a blocking POST gets a 524 while the backend
+keeps working. Both analyze endpoints (dossier and folder) therefore have a
+job variant; the folder variant additionally takes `mode: "case" | "documents"`.
+
+```
+POST /api/v1/dossiers/{dossier_id}/analyze/jobs          → 202 {job_id}
+GET  /api/v1/dossiers/{dossier_id}/analyze/jobs/{job_id} → {status, result?, error?}
+POST /api/v1/dossiers/folders/{folder_id}/analyze/jobs          → 202 {job_id}
+GET  /api/v1/dossiers/folders/{folder_id}/analyze/jobs/{job_id} → {status, result?, error?}
+```
+
+`status` is `running` → `done` (with `result` = the synchronous endpoint's
+payload) or `failed` (with a French user-facing `error`). Jobs live in the
+shared cache (1 h TTL), are owner-scoped (`404` for anyone else), and are
+lost if the API restarts mid-run — the client then sees `404` and should
+retry. The blocking endpoints remain for the mobile app.
+
 ## Share (`backend/api/routers/share.py`)
 
 ### POST /api/v1/share
