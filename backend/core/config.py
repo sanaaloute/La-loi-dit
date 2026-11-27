@@ -88,6 +88,10 @@ class Settings(BaseSettings):
     embedding_dimension: int = 384
     embedding_api_base: str = ""  # separate from llm_api_base for split providers
     embedding_api_key: str = ""
+    # Batch ingestion: long gaps between calls let a pooled keep-alive connection
+    # die silently at the tunnel; reusing it stalls the call until the (long)
+    # timeout. True sends Connection: close — one fresh connection per batch.
+    embedding_connection_close: bool = False
 
     # --- Milvus ---
     milvus_host: str = "localhost"

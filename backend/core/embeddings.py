@@ -109,6 +109,10 @@ class LiteLLMEmbeddings:
             safe_app_name = self.settings.app_name.encode("ascii", "ignore").decode("ascii")
             extra_headers.setdefault("HTTP-Referer", safe_app_name)
             extra_headers.setdefault("X-Title", safe_app_name)
+        if self.settings.embedding_connection_close:
+            # Never reuse a pooled connection: a keep-alive socket that died
+            # silently at the gateway hangs the request until the full timeout.
+            extra_headers.setdefault("Connection", "close")
         if extra_headers:
             kwargs["extra_headers"] = extra_headers
         # Hard per-call timeout: without it a wedged embedding server (or a
