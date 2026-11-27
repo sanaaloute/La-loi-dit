@@ -45,3 +45,6 @@ yarn-error.*
 
 # misc
 *.log
+
+# monorepo root junk that inflates the EAS archive
+migration/
