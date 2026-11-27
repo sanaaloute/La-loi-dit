@@ -6,9 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "build:cloudflare": "opennextjs-cloudflare build",
-    "preview:cloudflare": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "deploy:cloudflare": "opennextjs-cloudflare build && opennextjs-cloudflare deploy"
+    "build:cloudflare": "API_PROXY_TARGET=${API_PROXY_TARGET:-https://api-yawoto.neobytech.net} opennextjs-cloudflare build",
+    "preview:cloudflare": "API_PROXY_TARGET=${API_PROXY_TARGET:-https://api-yawoto.neobytech.net} opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "deploy:cloudflare": "API_PROXY_TARGET=${API_PROXY_TARGET:-https://api-yawoto.neobytech.net} opennextjs-cloudflare build && opennextjs-cloudflare deploy"
   },
   "dependencies": {
     "lucide-react": "^1.27.0",

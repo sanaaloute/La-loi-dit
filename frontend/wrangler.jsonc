@@ -18,8 +18,9 @@
   "vars": {
     // Runtime proxy target for the /backend-api route handlers (chat SSE and
     // search). The generic rewrite destination is baked at BUILD time from
-    // the same variable — set API_PROXY_TARGET in the shell when running
-    // `npm run build:cloudflare` (see package.json).
+    // the same variable — the npm cloudflare scripts default it to this
+    // value (see package.json); a Cloudflare build without it proxies
+    // /backend-api to localhost and every API call fails with a CF 1003.
     "API_PROXY_TARGET": "https://api-yawoto.neobytech.net"
   }
 }
