@@ -20,6 +20,7 @@ import asyncio
 import hashlib
 import json
 import math
+import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -63,6 +64,7 @@ class MemoryStore:
         self._tables: Any = None
         self._db_ready = False
         self._db_attempted = False
+        self._last_attempt = 0.0
         self._init_lock = asyncio.Lock()
         # In-memory fallback / mirror (also the last-resort store).
         self._mem_messages: dict[str, list[ChatMessage]] = {}
@@ -110,31 +112,48 @@ class MemoryStore:
         )
         return metadata, {"messages": messages, "memories": memories, "preferences": preferences}
 
+    #: Minimum seconds between two database init attempts after a failure.
+    #: A transient outage (Postgres still booting after a stack restart) must
+    #: not pin the store to the in-memory fallback for the process lifetime —
+    #: chat written there vanishes on the next restart. The next call past
+    #: this delay retries, so the store self-heals onto durable storage.
+    _RETRY_AFTER_SECONDS = 30.0
+
     async def _ensure_db(self) -> bool:
         """Create the engine + tables on first use. Returns True when a
-        working database is available, False otherwise (in-memory mode)."""
+        working database is available, False otherwise (in-memory mode).
+
+        Failures are retried on demand (throttled to one attempt per
+        ``_RETRY_AFTER_SECONDS``), never sticky for the process lifetime.
+        """
         if self._db_ready:
             return True
-        if self._db_attempted:
+        if self._db_attempted and time.monotonic() - self._last_attempt < self._RETRY_AFTER_SECONDS:
             return False
         async with self._init_lock:
             if self._db_ready:
                 return True
-            if self._db_attempted:
+            if self._db_attempted and time.monotonic() - self._last_attempt < self._RETRY_AFTER_SECONDS:
                 return False
             self._db_attempted = True
+            self._last_attempt = time.monotonic()
             try:
                 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
                 metadata, tables = self._build_schema()
                 urls = [self.settings.database_url]
-                try:
-                    data_dir = self.settings.ensure_data_dir()
-                    fallback = f"sqlite+aiosqlite:///{(data_dir / 'memory_fallback.db').as_posix()}"
-                    if fallback not in urls:
-                        urls.append(fallback)
-                except Exception:
-                    pass
+                # Strict infra mode: silently falling back to a local SQLite
+                # file is forbidden — chat written there would be abandoned
+                # on the next boot ("my history disappeared"). The in-memory
+                # mode takes over and the outage is reported via /ready.
+                if not self.settings.strict_infra_enabled:
+                    try:
+                        data_dir = self.settings.ensure_data_dir()
+                        fallback = f"sqlite+aiosqlite:///{(data_dir / 'memory_fallback.db').as_posix()}"
+                        if fallback not in urls:
+                            urls.append(fallback)
+                    except Exception:
+                        pass
                 for url in urls:
                     engine = None
                     try:

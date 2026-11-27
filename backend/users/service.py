@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -124,12 +125,20 @@ class UserPromptRecord(BaseModel):
 class UserStore:
     """Account store backed by SQLAlchemy async; never breaks app boot."""
 
+    #: Minimum seconds between two database init attempts after a failure.
+    #: A transient outage (Postgres still booting after a stack restart) must
+    #: not disable the store for the process lifetime — the next request past
+    #: this delay retries, so the store self-heals instead of silently writing
+    #: user data to a fallback store (or refusing work) until the next restart.
+    _RETRY_AFTER_SECONDS = 30.0
+
     def __init__(self, settings: Settings):
         self.settings = settings
         self._engine: Any = None
         self._session_factory: Any = None
         self._db_ready = False
         self._db_attempted = False
+        self._last_attempt = 0.0
         self._init_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
@@ -137,13 +146,22 @@ class UserStore:
     # ------------------------------------------------------------------
 
     async def _ensure_db(self) -> bool:
-        """Create the engine + tables on first use. False => dev-user-only."""
-        if self._db_ready or self._db_attempted:
-            return self._db_ready
+        """Create the engine + tables on first use. False => dev-user-only.
+
+        Failures are retried on demand (throttled to one attempt per
+        ``_RETRY_AFTER_SECONDS``), never sticky for the process lifetime.
+        """
+        if self._db_ready:
+            return True
+        if self._db_attempted and time.monotonic() - self._last_attempt < self._RETRY_AFTER_SECONDS:
+            return False
         async with self._init_lock:
-            if self._db_ready or self._db_attempted:
-                return self._db_ready
+            if self._db_ready:
+                return True
+            if self._db_attempted and time.monotonic() - self._last_attempt < self._RETRY_AFTER_SECONDS:
+                return False
             self._db_attempted = True
+            self._last_attempt = time.monotonic()
             try:
                 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 

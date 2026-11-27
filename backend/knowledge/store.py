@@ -22,6 +22,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 import unicodedata
 from datetime import datetime, timezone
 from typing import Any, Optional, Sequence
@@ -77,6 +78,7 @@ class LegalGraphStore:
         self._tables: Any = None
         self._db_ready = False
         self._db_attempted = False
+        self._last_attempt = 0.0
         self._init_lock = asyncio.Lock()
         self.stats: dict[str, int] = {"db_failures": 0}
 
@@ -151,30 +153,43 @@ class LegalGraphStore:
             "legal_relationships": legal_relationships,
         }
 
+    #: Minimum seconds between two database init attempts after a failure —
+    #: a transient outage must not disable the legal graph for the process
+    #: lifetime; the next call past this delay retries (self-healing).
+    _RETRY_AFTER_SECONDS = 30.0
+
     async def _ensure_db(self) -> bool:
-        """Create the engine + tables on first use (False when unavailable)."""
+        """Create the engine + tables on first use (False when unavailable).
+
+        Failures are retried on demand (throttled to one attempt per
+        ``_RETRY_AFTER_SECONDS``), never sticky for the process lifetime.
+        """
         if self._db_ready:
             return True
-        if self._db_attempted:
+        if self._db_attempted and time.monotonic() - self._last_attempt < self._RETRY_AFTER_SECONDS:
             return False
         async with self._init_lock:
             if self._db_ready:
                 return True
-            if self._db_attempted:
+            if self._db_attempted and time.monotonic() - self._last_attempt < self._RETRY_AFTER_SECONDS:
                 return False
             self._db_attempted = True
+            self._last_attempt = time.monotonic()
             try:
                 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
                 metadata, tables = self._build_schema()
                 urls = [self._url_override or self.settings.database_url]
-                try:
-                    data_dir = self.settings.ensure_data_dir()
-                    fallback = f"sqlite+aiosqlite:///{(data_dir / 'legal_graph_fallback.db').as_posix()}"
-                    if fallback not in urls:
-                        urls.append(fallback)
-                except Exception:
-                    pass
+                # Strict infra mode: no silent SQLite fallback (see
+                # backend.users.service.UserStore for the contract).
+                if not self.settings.strict_infra_enabled:
+                    try:
+                        data_dir = self.settings.ensure_data_dir()
+                        fallback = f"sqlite+aiosqlite:///{(data_dir / 'legal_graph_fallback.db').as_posix()}"
+                        if fallback not in urls:
+                            urls.append(fallback)
+                    except Exception:
+                        pass
                 for url in urls:
                     engine = None
                     try:
