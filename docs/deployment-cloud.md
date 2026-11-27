@@ -231,8 +231,18 @@ traps:
 ## Notes / caveats
 
 - The VM footprint with the shipped caps is ≈ 3–4 GB plus Milvus (3 g cap is a
-  ceiling, not a reservation); the VM has no swap — watch `docker stats`
-  during the first days.
+  ceiling, not a reservation). A 16 GB swapfile (`/swapfile`, in fstab,
+  `vm.swappiness=10` via `/etc/sysctl.d/99-yawoto-swappiness.conf`) absorbs
+  the ingestion worker's memory creep — without swap a creeping container is
+  hard-killed at its `mem_limit`; with swap it merely slows. Recreate it on a
+  fresh VM with:
+  `fallocate -l 16G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile`
+  (+ the fstab and sysctl lines above).
+- Milvus sizing: its RAM stays bounded by the mmap config + 3 g cap; what the
+  corpus growth actually consumes is DISK (vectors + minio blobs), and the
+  290 GB disk has ample headroom. Raising the Milvus `mem_limit` would not
+  prevent ingestion OOMs — the ingestion worker (api image) is the container
+  that creeps.
 - GHCR image is private by default: the VM needs the `docker login ghcr.io`
   from step 2, or mark the package public under the repo's Packages settings.
 - The `cloudflared` image tag is pinned to one already cached on the VM
