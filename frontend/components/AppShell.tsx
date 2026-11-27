@@ -26,7 +26,7 @@ import { apiBase, listFreshnessEvents, me, type UserProfile } from "@/lib/api";
 import { useAuthToken } from "@/lib/useAuth";
 import { isLegalTextEvent } from "@/lib/veille";
 
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.2.0";
 
 const NAV_ITEMS = [
   { href: "/", label: "Accueil", icon: Home },

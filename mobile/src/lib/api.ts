@@ -1237,13 +1237,73 @@ export async function deleteDossier(id: string, token?: string | null): Promise<
   }
 }
 
+// --- Async analysis jobs ---------------------------------------------------
+// The blocking analyze endpoints held one request open for the whole
+// analysis (minutes) and hit the Cloudflare tunnel's 100 s first-byte limit
+// (524) — and a locked phone killed the answer with the socket. The job
+// variants return immediately and the result is polled: short requests,
+// and the job keeps running server-side while the app is suspended.
+
+/** Poll cadence, same as the web client. */
+const ANALYSIS_JOB_POLL_MS = 4_000;
+/** Overall cap; the backend job status lives ~1 h, the analysis itself is
+ * capped server-side well below this. */
+const ANALYSIS_JOB_CAP_MS = 12 * 60 * 1000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+interface AnalysisJobStatus {
+  status: "running" | "done" | "failed";
+  result?: unknown;
+  error?: string | null;
+}
+
+async function pollAnalysisJob<T>(url: string, token?: string | null): Promise<T> {
+  const start = Date.now();
+  for (;;) {
+    await sleep(ANALYSIS_JOB_POLL_MS);
+    let res: Response;
+    try {
+      res = await apiFetch(url, { token });
+    } catch (err) {
+      // Network drop or suspended app: the job keeps running server-side,
+      // the next tick picks the result up. Give up only past the cap.
+      if (Date.now() - start > ANALYSIS_JOB_CAP_MS) {
+        throw err instanceof Error ? err : new Error("L'analyse a été interrompue.");
+      }
+      continue;
+    }
+    if (res.status === 404) {
+      const detail = await safeDetail(res);
+      throw new ApiError(detail ?? "Analyse introuvable ou expirée.", 404);
+    }
+    if (!res.ok) {
+      if (Date.now() - start > ANALYSIS_JOB_CAP_MS) {
+        const detail = await safeDetail(res);
+        throw new ApiError(detail ?? `Échec de l'analyse (${res.status})`, res.status);
+      }
+      continue; // transient 5xx: keep polling
+    }
+    const body = (await res.json()) as AnalysisJobStatus;
+    if (body.status === "done") return body.result as T;
+    if (body.status === "failed") {
+      throw new ApiError(body.error ?? "Échec de l'analyse.", 500);
+    }
+    if (Date.now() - start > ANALYSIS_JOB_CAP_MS) {
+      throw new ApiError("L'analyse a dépassé le délai maximal. Réessayez.", 504);
+    }
+  }
+}
+
 /** Ask one question grounded exclusively on the dossier's text. */
 export async function analyzeDossier(
   id: string,
   question: string,
   token?: string | null,
 ): Promise<DossierAnalysis> {
-  const res = await apiFetch(`/dossiers/${encodeURIComponent(id)}/analyze`, {
+  const res = await apiFetch(`/dossiers/${encodeURIComponent(id)}/analyze/jobs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     token,
@@ -1253,7 +1313,11 @@ export async function analyzeDossier(
     const detail = await safeDetail(res);
     throw new ApiError(detail ?? `Échec de l'analyse (${res.status})`, res.status);
   }
-  return (await res.json()) as DossierAnalysis;
+  const { job_id } = (await res.json()) as { job_id: string };
+  return pollAnalysisJob<DossierAnalysis>(
+    `/dossiers/${encodeURIComponent(id)}/analyze/jobs/${encodeURIComponent(job_id)}`,
+    token,
+  );
 }
 
 // --- Case folders: group several documents into one case ---
@@ -1350,7 +1414,7 @@ export async function analyzeFolder(
   mode: "case" | "documents",
   token?: string | null,
 ): Promise<FolderAnalysis> {
-  const res = await apiFetch(`/dossiers/folders/${encodeURIComponent(id)}/analyze`, {
+  const res = await apiFetch(`/dossiers/folders/${encodeURIComponent(id)}/analyze/jobs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     token,
@@ -1360,7 +1424,11 @@ export async function analyzeFolder(
     const detail = await safeDetail(res);
     throw new ApiError(detail ?? `Échec de l'analyse (${res.status})`, res.status);
   }
-  return (await res.json()) as FolderAnalysis;
+  const { job_id } = (await res.json()) as { job_id: string };
+  return pollAnalysisJob<FolderAnalysis>(
+    `/dossiers/folders/${encodeURIComponent(id)}/analyze/jobs/${encodeURIComponent(job_id)}`,
+    token,
+  );
 }
 
 // ---------------------------------------------------------------------------
