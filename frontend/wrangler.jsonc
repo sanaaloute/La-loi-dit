@@ -11,6 +11,10 @@
   "observability": {
     "enabled": true
   },
+  // Custom domain: takes over the DNS record that used to point at the old
+  // Mac-side "yawoto" tunnel. Cloudflare replaces the tunnel CNAME when the
+  // workers domain is created (the tunnel route can then be deleted).
+  "routes": [{ "pattern": "yawoto.neobytech.net", "custom_domain": true }],
   "vars": {
     // Runtime proxy target for the /backend-api route handlers (chat SSE and
     // search). The generic rewrite destination is baked at BUILD time from
