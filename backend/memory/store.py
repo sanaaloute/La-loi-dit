@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import math
 import time
 from datetime import datetime, timezone
@@ -26,8 +27,18 @@ from typing import Any, Optional
 
 from backend.core.models import ChatMessage, MemoryRecord
 
+logger = logging.getLogger(__name__)
+
 _RECALL_CACHE_PREFIX = "mem:recall:"
 _PREFS_CACHE_PREFIX = "mem:prefs:"
+
+#: Bound a single database operation so a wedged connection (stale pooled
+#: socket, hung bootstrap) can never pin a caller forever — a chat drain
+#: persisting a turn simply times out and reports the failure instead.
+_DB_OP_TIMEOUT_SECONDS = 15.0
+_DB_BOOTSTRAP_TIMEOUT_SECONDS = 20.0
+#: Recycle pooled connections well below typical NAT/conntrack idle drops.
+_POOL_RECYCLE_SECONDS = 1800
 
 
 def _utcnow() -> datetime:
@@ -138,45 +149,59 @@ class MemoryStore:
             self._db_attempted = True
             self._last_attempt = time.monotonic()
             try:
-                from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+                ready = await asyncio.wait_for(self._bootstrap(), timeout=_DB_BOOTSTRAP_TIMEOUT_SECONDS)
+            except Exception:
+                # Wedged connect, SQLAlchemy/aiosqlite missing or broken.
+                self.stats["db_failures"] += 1
+                logger.warning("memory store database init failed", exc_info=True)
+                return False
+            if not ready:
+                self.stats["db_failures"] += 1
+            return ready
 
-                metadata, tables = self._build_schema()
-                urls = [self.settings.database_url]
-                # Strict infra mode: silently falling back to a local SQLite
-                # file is forbidden — chat written there would be abandoned
-                # on the next boot ("my history disappeared"). The in-memory
-                # mode takes over and the outage is reported via /ready.
-                if not self.settings.strict_infra_enabled:
+    async def _bootstrap(self) -> bool:
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        metadata, tables = self._build_schema()
+        urls = [self.settings.database_url]
+        # Strict infra mode: silently falling back to a local SQLite
+        # file is forbidden — chat written there would be abandoned
+        # on the next boot ("my history disappeared"). The in-memory
+        # mode takes over and the outage is reported via /ready.
+        if not self.settings.strict_infra_enabled:
+            try:
+                data_dir = self.settings.ensure_data_dir()
+                fallback = f"sqlite+aiosqlite:///{(data_dir / 'memory_fallback.db').as_posix()}"
+                if fallback not in urls:
+                    urls.append(fallback)
+            except Exception:
+                pass
+        for url in urls:
+            engine = None
+            try:
+                engine = create_async_engine(
+                    url,
+                    # Drop connections that went stale while idle (docker/NAT
+                    # conntrack drops them silently): without a pre-ping, the
+                    # first query on a dead socket hangs in TCP retransmission
+                    # for minutes — wedging whichever coroutine holds it.
+                    pool_pre_ping=True,
+                    pool_recycle=_POOL_RECYCLE_SECONDS,
+                )
+                async with engine.begin() as conn:
+                    await conn.run_sync(metadata.create_all)
+                self._engine = engine
+                self._session_factory = async_sessionmaker(engine, expire_on_commit=False)
+                self._tables = tables
+                self._db_ready = True
+                return True
+            except Exception:
+                if engine is not None:
                     try:
-                        data_dir = self.settings.ensure_data_dir()
-                        fallback = f"sqlite+aiosqlite:///{(data_dir / 'memory_fallback.db').as_posix()}"
-                        if fallback not in urls:
-                            urls.append(fallback)
+                        await engine.dispose()
                     except Exception:
                         pass
-                for url in urls:
-                    engine = None
-                    try:
-                        engine = create_async_engine(url)
-                        async with engine.begin() as conn:
-                            await conn.run_sync(metadata.create_all)
-                        self._engine = engine
-                        self._session_factory = async_sessionmaker(engine, expire_on_commit=False)
-                        self._tables = tables
-                        self._db_ready = True
-                        return True
-                    except Exception:
-                        if engine is not None:
-                            try:
-                                await engine.dispose()
-                            except Exception:
-                                pass
-                self.stats["db_failures"] += 1
-                return False
-            except Exception:
-                # SQLAlchemy/aiosqlite not installed or broken: in-memory only.
-                self.stats["db_failures"] += 1
-                return False
+        return False
 
     # ------------------------------------------------------------------
     # Buffer (short-term conversation window)
@@ -207,30 +232,51 @@ class MemoryStore:
             self.stats["db_failures"] += 1
         return list(self._mem_messages.get(session_id, []))[-limit:]
 
-    async def append_turn(self, session_id: str, user_id: str, messages: list[ChatMessage]) -> None:
-        """Append a conversation turn to the buffer (in-memory mirror + DB)."""
+    async def append_turn(self, session_id: str, user_id: str, messages: list[ChatMessage]) -> bool:
+        """Append a conversation turn to the buffer (in-memory mirror + DB).
+
+        Returns True when the turn landed in the database. On any DB failure
+        the turn survives in the in-memory mirror and False is returned so
+        the caller can retry — a silently lost turn made recovered chat runs
+        vanish without a trace. The mirror extend is idempotent: a retry with
+        the same message objects does not duplicate the mirrored turn.
+        """
         mirror = self._mem_messages.setdefault(session_id, [])
-        mirror.extend(messages)
+        if messages and mirror[-len(messages) :] != messages:
+            mirror.extend(messages)
         try:
-            if await self._ensure_db():
-                t = self._tables["messages"]
-                async with self._session_factory() as session:
-                    await session.execute(
-                        t.insert(),
-                        [
-                            {
-                                "session_id": session_id,
-                                "user_id": user_id,
-                                "role": m.role,
-                                "content": m.content,
-                                "created_at": _iso(m.created_at),
-                            }
-                            for m in messages
-                        ],
-                    )
-                    await session.commit()
+            return await asyncio.wait_for(
+                self._append_turn_db(session_id, user_id, messages),
+                timeout=_DB_OP_TIMEOUT_SECONDS,
+            )
         except Exception:
             self.stats["db_failures"] += 1
+            logger.warning(
+                "memory append_turn failed; turn kept in the in-memory mirror",
+                exc_info=True,
+            )
+            return False
+
+    async def _append_turn_db(self, session_id: str, user_id: str, messages: list[ChatMessage]) -> bool:
+        if not await self._ensure_db():
+            return False
+        t = self._tables["messages"]
+        async with self._session_factory() as session:
+            await session.execute(
+                t.insert(),
+                [
+                    {
+                        "session_id": session_id,
+                        "user_id": user_id,
+                        "role": m.role,
+                        "content": m.content,
+                        "created_at": _iso(m.created_at),
+                    }
+                    for m in messages
+                ],
+            )
+            await session.commit()
+        return True
 
     # ------------------------------------------------------------------
     # History (per-user session listing for the chat history API)
@@ -281,34 +327,51 @@ class MemoryStore:
     async def get_session_messages(self, user_id: str, session_id: str) -> list[ChatMessage]:
         """Return one session's messages, oldest first, scoped to `user_id`.
 
-        Empty list when the session doesn't exist, belongs to another user,
-        or the DB is unavailable (the API maps this to 404).
+        Empty list when the session doesn't exist or belongs to another user
+        (the API maps this to 404). When the database is unavailable — or
+        lacks a turn that only reached the in-memory mirror (a drained chat
+        run whose DB write failed) — falls back to the mirror, which is keyed
+        by session id only: same degraded-mode trade-off as delete_session,
+        and session ids are client-generated UUIDs.
         """
         try:
-            if await self._ensure_db():
-                from sqlalchemy import select
-
-                t = self._tables["messages"]
-                async with self._session_factory() as session:
-                    rows = (
-                        await session.execute(
-                            select(t)
-                            .where(t.c.user_id == user_id)
-                            .where(t.c.session_id == session_id)
-                            .order_by(t.c.id)
-                        )
-                    ).all()
-                return [
-                    ChatMessage(
-                        role=r.role,
-                        content=r.content,
-                        created_at=datetime.fromisoformat(r.created_at),
-                    )
-                    for r in rows
-                ]
+            messages = await asyncio.wait_for(
+                self._get_session_messages_db(user_id, session_id),
+                timeout=_DB_OP_TIMEOUT_SECONDS,
+            )
+            if messages:
+                return messages
         except Exception:
             self.stats["db_failures"] += 1
-        return []
+            logger.warning(
+                "memory get_session_messages failed; using the in-memory mirror",
+                exc_info=True,
+            )
+        return list(self._mem_messages.get(session_id, []))
+
+    async def _get_session_messages_db(self, user_id: str, session_id: str) -> list[ChatMessage]:
+        if not await self._ensure_db():
+            return []
+        from sqlalchemy import select
+
+        t = self._tables["messages"]
+        async with self._session_factory() as session:
+            rows = (
+                await session.execute(
+                    select(t)
+                    .where(t.c.user_id == user_id)
+                    .where(t.c.session_id == session_id)
+                    .order_by(t.c.id)
+                )
+            ).all()
+        return [
+            ChatMessage(
+                role=r.role,
+                content=r.content,
+                created_at=datetime.fromisoformat(r.created_at),
+            )
+            for r in rows
+        ]
 
     async def delete_session(self, user_id: str, session_id: str) -> int:
         """Delete one session's messages, scoped to its owner. Rows deleted.

@@ -193,7 +193,7 @@ class LegalGraphStore:
                 for url in urls:
                     engine = None
                     try:
-                        engine = create_async_engine(url)
+                        engine = create_async_engine(url, pool_pre_ping=True, pool_recycle=1800)
                         async with engine.begin() as conn:
                             await conn.run_sync(metadata.create_all)
                         self._engine = engine

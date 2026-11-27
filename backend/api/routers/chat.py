@@ -226,6 +226,53 @@ async def _push_answer_ready(ctx: Any, user_id: Optional[str], session_id: str) 
     )
 
 
+async def _persist_turn_with_retry(
+    memory: Any,
+    session_id: str,
+    user_id: str,
+    messages: list[ChatMessage],
+    *,
+    attempts: int = 3,
+    delay_seconds: float = 2.0,
+) -> bool:
+    """Persist a chat turn, retrying transient store failures.
+
+    A disconnected client recovers the answer ONLY from this write: a single
+    transient failure (stale pooled connection, Postgres blip) must not lose
+    the turn — the client would poll the history in vain and the question
+    would appear to vanish. ``append_turn`` reports DB success with its
+    return value; the in-memory mirror keeps the turn regardless, so even a
+    total failure stays recoverable via the mirror fallback while the
+    process lives.
+    """
+    for attempt in range(attempts):
+        try:
+            persisted = await memory.append_turn(session_id, user_id, messages)
+        except Exception:
+            persisted = False
+        if persisted is not False:
+            if attempt:
+                logger.info(
+                    "chat turn persisted on retry",
+                    extra={"session_id": session_id},
+                )
+            return True
+        logger.warning(
+            "chat turn persist failed (attempt %d/%d)",
+            attempt + 1,
+            attempts,
+            extra={"session_id": session_id},
+        )
+        if attempt + 1 < attempts:
+            await asyncio.sleep(delay_seconds)
+    logger.error(
+        "chat turn not persisted to the database after %d attempts (mirror only)",
+        attempts,
+        extra={"session_id": session_id},
+    )
+    return False
+
+
 async def _drain_run(
     session_id: str, task: "asyncio.Task[Any]", ctx: Any, user_id: Optional[str] = None
 ) -> None:
@@ -972,17 +1019,15 @@ async def _stream_events(
                         break
                 if drain_failed and not cancelled:
                     if memory is not None:
-                        try:
-                            await memory.append_turn(
-                                state.get("session_id", ""),
-                                state.get("user_id", "anonymous"),
-                                [
-                                    ChatMessage(role="user", content=payload.query, created_at=turn_started_at),
-                                    ChatMessage(role="assistant", content=RUN_FAILURE_NOTE),
-                                ],
-                            )
-                        except Exception:
-                            pass  # memory persistence must never break the stream
+                        await _persist_turn_with_retry(
+                            memory,
+                            state.get("session_id", ""),
+                            state.get("user_id", "anonymous"),
+                            [
+                                ChatMessage(role="user", content=payload.query, created_at=turn_started_at),
+                                ChatMessage(role="assistant", content=RUN_FAILURE_NOTE),
+                            ],
+                        )
                     return
             if cancelled:
                 return
@@ -994,7 +1039,8 @@ async def _stream_events(
             answer_persisted = False
             if memory is not None and merged.get("final_answer") is not None:
                 try:
-                    await memory.append_turn(
+                    answer_persisted = await _persist_turn_with_retry(
+                        memory,
                         state.get("session_id", ""),
                         state.get("user_id", "anonymous"),
                         [
@@ -1003,7 +1049,6 @@ async def _stream_events(
                             ChatMessage(role="assistant", content=response.answer.model_dump_json()),
                         ],
                     )
-                    answer_persisted = True
                     # Same long-term-memory hook as run_query (see graph.py).
                     from backend.memory.summarizer import maybe_summarize
 

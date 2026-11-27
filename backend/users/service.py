@@ -49,7 +49,7 @@ async def probe_database(settings: Settings, timeout: float = 3.0) -> bool:
         from sqlalchemy import text
         from sqlalchemy.ext.asyncio import create_async_engine
 
-        engine = create_async_engine(settings.database_url)
+        engine = create_async_engine(settings.database_url, pool_pre_ping=True)
         try:
             async with asyncio.timeout(timeout):
                 async with engine.connect() as conn:
@@ -180,7 +180,14 @@ class UserStore:
                 for url in urls:
                     engine = None
                     try:
-                        engine = create_async_engine(url)
+                        engine = create_async_engine(
+                            url,
+                            # Discard idle connections dropped by docker/NAT
+                            # conntrack: without a pre-ping the first query on
+                            # a dead socket hangs in TCP retransmission.
+                            pool_pre_ping=True,
+                            pool_recycle=1800,
+                        )
                         async with engine.begin() as conn:
                             await conn.run_sync(metadata.create_all)
                         # Best-effort column migrations, one transaction per

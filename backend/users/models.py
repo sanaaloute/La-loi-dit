@@ -62,16 +62,9 @@ USER_MIGRATIONS = [
     "device_id VARCHAR(128) DEFAULT '', "
     "created_at VARCHAR(64)"
     ")",
-    "CREATE TABLE IF NOT EXISTS user_prompts ("
-    "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-    "user_id VARCHAR(64), "
-    "email VARCHAR(320), "
-    "prompt TEXT, "
-    "source VARCHAR(32), "
-    "session_id VARCHAR(128) DEFAULT '', "
-    "created_at VARCHAR(64), "
-    "metadata TEXT DEFAULT ''"
-    ")",
+    # user_prompts is intentionally NOT created here: metadata.create_all
+    # already covers it, and the raw SQLite dialect ("AUTOINCREMENT") errors
+    # on Postgres at every bootstrap.
     "CREATE TABLE IF NOT EXISTS user_dossiers ("
     "id VARCHAR(64) PRIMARY KEY, "
     "user_id VARCHAR(64), "
