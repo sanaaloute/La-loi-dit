@@ -40,7 +40,7 @@ import {
   type ChatMessage,
 } from "../../src/lib/chat";
 import { formatMessageTime } from "../../src/lib/format";
-import { suggestionsForPersona } from "../../src/lib/persona";
+import { sampleSuggestions, suggestionsForPersona } from "../../src/lib/persona";
 import { serifFont, type ThemeColors } from "../../src/theme";
 import { useTheme } from "../../src/theme-context";
 
@@ -48,6 +48,15 @@ const SUGGESTIONS = [
   "Quels sont les droits d'un salarié licencié au Burkina Faso ?",
   "Quelle est la procédure de divorce selon le Code des personnes et de la famille ?",
   "Quelles sont les règles OHADA applicables à la création d'une SARL ?",
+  "Que prévoit le Code du travail burkinabè sur la durée du préavis ?",
+  "Quels recours contre une décision administrative au Burkina Faso ?",
+  "Quelles sont les règles sur l'héritage en droit burkinabè ?",
+  "Que dit la loi sur la protection des données personnelles au Burkina Faso ?",
+  "Quelles sont les conditions d'acquisition de la nationalité burkinabè ?",
+  "Quelles garanties l'OHADA offre-t-elle aux créanciers (sûretés) ?",
+  "Quels sont les droits d'un locataire face à une expulsion ?",
+  "Comment contester un permis de construire ?",
+  "Quelles sont les étapes pour créer une petite entreprise seul ?",
 ];
 
 /** Public web app origin — shared answer pages live under /partage/<token>. */
@@ -112,8 +121,11 @@ export default function ChatScreen() {
   const [bookmarkBusyId, setBookmarkBusyId] = useState<string | null>(null);
   const [sharingId, setSharingId] = useState<string | null>(null);
 
-  // Suggestion prompts follow the onboarding persona when one is chosen.
-  const [suggestions, setSuggestions] = useState<string[]>(SUGGESTIONS);
+  // Suggestion prompts follow the onboarding persona when one is chosen;
+  // three are sampled from the pool and re-sampled each time the chat
+  // returns to the empty state (new conversation), so they rotate.
+  const [suggestionPool, setSuggestionPool] = useState<string[]>(SUGGESTIONS);
+  const [suggestions, setSuggestions] = useState<string[]>(() => sampleSuggestions(SUGGESTIONS));
 
   // Restore the persisted conversation once the token is available.
   useEffect(() => {
@@ -128,7 +140,7 @@ export default function ChatScreen() {
       .then((prefs) => {
         if (cancelled) return;
         const persona = typeof prefs.persona === "string" ? prefs.persona : null;
-        setSuggestions(suggestionsForPersona(persona) ?? SUGGESTIONS);
+        setSuggestionPool(suggestionsForPersona(persona) ?? SUGGESTIONS);
       })
       .catch(() => {
         // Offline or unreadable: keep the default suggestions.
@@ -137,6 +149,13 @@ export default function ChatScreen() {
       cancelled = true;
     };
   }, [token]);
+
+  // Rotate the three suggestion cards each time the empty chat shows
+  // (first load, then every new conversation).
+  const chatEmpty = !historyLoading && messages.length === 0;
+  useEffect(() => {
+    if (chatEmpty) setSuggestions(sampleSuggestions(suggestionPool));
+  }, [chatEmpty, suggestionPool]);
 
   // Elapsed-time indicator while a run is in flight (helps spot a stuck node).
   const [elapsed, setElapsed] = useState(0);

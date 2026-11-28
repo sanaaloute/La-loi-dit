@@ -134,11 +134,22 @@ const STEP_LABELS: Record<string, string> = {
 };
 
 /** Starter questions on the empty chat screen; the persona (chosen at
- * onboarding) picks the set, "autre"/unknown falls back to the default. */
+ * onboarding) picks the pool, "autre"/unknown falls back to the default.
+ * Three are sampled at random each time the empty chat shows, so the
+ * suggestions rotate instead of always being the same ones. */
 const DEFAULT_SUGGESTIONS = [
   "Quels sont les droits d'un salarié licencié au Burkina Faso ?",
   "Quelle est la procédure de divorce selon le Code des personnes et de la famille ?",
   "Quelles sont les règles OHADA applicables à la création d'une SARL ?",
+  "Que prévoit le Code du travail burkinabè sur la durée du préavis ?",
+  "Quels recours contre une décision administrative au Burkina Faso ?",
+  "Quelles sont les règles sur l'héritage en droit burkinabè ?",
+  "Que dit la loi sur la protection des données personnelles au Burkina Faso ?",
+  "Quelles sont les conditions d'acquisition de la nationalité burkinabè ?",
+  "Quelles garanties l'OHADA offre-t-elle aux créanciers (sûretés) ?",
+  "Quels sont les droits d'un locataire face à une expulsion ?",
+  "Comment contester un permis de construire ?",
+  "Quelles sont les étapes pour créer une petite entreprise seul ?",
 ];
 
 const PERSONA_SUGGESTIONS: Record<Exclude<PersonaKey, "autre">, string[]> = {
@@ -146,18 +157,55 @@ const PERSONA_SUGGESTIONS: Record<Exclude<PersonaKey, "autre">, string[]> = {
     "Explique-moi la différence entre une loi et un décret au Burkina Faso.",
     "Quels sont les éléments constitutifs d'un contrat de travail valable ?",
     "Qu'est-ce que l'OHADA et quel est son rôle ?",
+    "Qu'est-ce que la hiérarchie des normes et comment s'applique-t-elle au Burkina Faso ?",
+    "Explique-moi la distinction entre adoption, promulgation et entrée en vigueur d'une loi.",
+    "Qu'est-ce qu'une ordonnance et en quoi diffère-t-elle d'une loi ?",
+    "Quels sont les organes de la justice au Burkina Faso ?",
+    "Qu'est-ce que la CCJA et quel est son rôle dans l'espace OHADA ?",
+    "Explique-moi le régime des collectivités locales au Burkina Faso.",
+    "Qu'est-ce que la présomption d'innocence et où est-elle garantie ?",
+    "Quelle différence entre le droit national et les actes uniformes de l'OHADA ?",
+    "Qu'est-ce que la force majeure en droit des contrats ?",
   ],
   juriste: [
     "Quel est le délai de recours contre un licenciement au Burkina Faso ?",
     "Quelle est la procédure de saisine de la CCJA en matière OHADA ?",
     "Quels sont les délais de prescription en matière civile ?",
+    "Quels sont les motifs légitimes de licenciement selon le Code du travail ?",
+    "Quelle est la compétence du tribunal du travail au Burkina Faso ?",
+    "Quel est le régime des sûretés mobilières selon l'AUS révisé ?",
+    "Quelles sont les conditions de recevabilité d'un recours en annulation administrative ?",
+    "Quels délais pour une action en responsabilité civile délictuelle ?",
+    "Quelles sont les règles de fixation et de révision des loyers ?",
+    "Comment sont organisées les procédures collectives en droit OHADA ?",
+    "Quelles sont les nouveautés du Code du travail de 2026 ?",
+    "Quelle est la procédure de licenciement pour motif économique ?",
   ],
   citoyen: [
     "Quels sont mes droits si mon employeur me licencie ?",
     "Comment contester un licenciement que je juge abusif ?",
     "Quels sont les droits des époux en cas de divorce ?",
+    "Comment faire reconnaître un enfant au Burkina Faso ?",
+    "Quelles sont les démarches pour obtenir un acte de naissance ?",
+    "Que faire en cas de non-paiement de mon salaire ?",
+    "Quels sont mes droits lors d'un contrôle d'identité ?",
+    "Comment régler un conflit de terrain avec mon voisin ?",
+    "Quelles protections légales pour les victimes de violences ?",
+    "Quels documents faut-il pour un mariage civil ?",
+    "Comment déposer une plainte à la police ou à la gendarmerie ?",
+    "Mon employeur peut-il me licencier sans préavis ?",
   ],
 };
+
+/** Fisher-Yates sample of n items from a pool (no replacement). */
+function sampleSuggestions(pool: string[], n: number): string[] {
+  const copy = [...pool];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy.slice(0, Math.min(n, copy.length));
+}
 
 /** Map the persisted session history to UI messages (shared by loadSession
  * and the dropped-connection recovery). The thinking persisted in the answer
@@ -861,8 +909,6 @@ export default function ChatWindow({
     }
   }
 
-  const suggestions = (persona && persona !== "autre" ? PERSONA_SUGGESTIONS[persona] : undefined) ?? DEFAULT_SUGGESTIONS;
-
   // Deep links from the dashboard/sidebar: consume them exactly once, after
   // the auth token resolves (send/loadSession both require it).
   const deepLinkHandledRef = useRef(false);
@@ -887,6 +933,14 @@ export default function ChatWindow({
   // On a fresh chat the input sits directly under the suggestion cards;
   // once the conversation starts it docks at the bottom.
   const showInlineInput = !historyLoading && messages.length === 0;
+
+  // Re-sampled every time the empty chat (re)appears — fresh conversation,
+  // persona change — so the three cards rotate through the pool.
+  const suggestions = useMemo(() => {
+    const pool = (persona && persona !== "autre" ? PERSONA_SUGGESTIONS[persona] : undefined) ?? DEFAULT_SUGGESTIONS;
+    return sampleSuggestions(pool, 3);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [persona, showInlineInput]);
 
   const inputForm = (
     <div className="mx-auto w-full max-w-3xl">
